@@ -22,6 +22,7 @@ bld/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
+publish/
 
 # .NET Core
 project.lock.json
@@ -36,13 +37,37 @@ ScaffoldingReadMe.txt
 # NuGet Symbol Packages
 *.snupkg
 
-# dotenv environment variables file
+# IDE and editor files
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+*.DotSettings.user
+
+# Local configuration and secrets
 .env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
+*.pfx
+*.p12
+*.pem
+*.key
 
 # Others
 ~$*
 *~
 CodeCoverage/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+lcov.info
 
 # MSBuild Binary and Structured Log
 *.binlog

@@ -1,0 +1,115 @@
+###############################################################################
+# Auto detect text files and perform LF normalization
+###############################################################################
+
+* text=auto
+
+###############################################################################
+# Source code files
+###############################################################################
+
+*.cs        text eol=lf diff=csharp
+*.csx       text eol=lf diff=csharp
+*.fs        text eol=lf
+*.fsx       text eol=lf
+*.vb        text eol=lf
+*.sln       text eol=lf
+*.csproj    text eol=lf
+*.fsproj    text eol=lf
+*.vbproj    text eol=lf
+*.props     text eol=lf
+*.targets   text eol=lf
+*.resx      text eol=lf
+*.razor     text eol=lf
+*.cshtml    text eol=lf
+
+###############################################################################
+# Config files
+###############################################################################
+
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.xml       text eol=lf
+*.config    text eol=lf
+*.editorconfig text eol=lf
+*.gitignore    text eol=lf
+*.gitattributes text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+
+###############################################################################
+# Scripts
+###############################################################################
+
+*.ps1       text eol=crlf
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.sh        text eol=lf
+
+###############################################################################
+# SQL
+###############################################################################
+
+*.sql       text eol=lf
+
+###############################################################################
+# Web files
+###############################################################################
+
+*.html      text eol=lf
+*.css       text eol=lf
+*.js        text eol=lf
+*.ts        text eol=lf
+*.jsx       text eol=lf
+*.tsx       text eol=lf
+*.scss      text eol=lf
+*.http      text eol=lf
+
+###############################################################################
+# Binary files
+###############################################################################
+
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.webp      binary
+*.avif      binary
+*.pdf       binary
+*.zip       binary
+*.7z        binary
+*.rar       binary
+*.gz        binary
+*.tar       binary
+*.dll       binary
+*.exe       binary
+*.pdb       binary
+*.so        binary
+*.dylib     binary
+*.nupkg     binary
+*.snupkg    binary
+*.pfx       binary
+*.p12       binary
+*.keystore  binary
+
+###############################################################################
+# Lock files
+###############################################################################
+
+packages.lock.json text eol=lf
+package-lock.json  text eol=lf
+yarn.lock          text eol=lf
+pnpm-lock.yaml     text eol=lf
+
+###############################################################################
+# Large files
+###############################################################################
+
+*.mp4       binary
+*.mov       binary
+*.avi       binary
+*.mkv       binary
+*.mp3       binary
+*.wav       binary
