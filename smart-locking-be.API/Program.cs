@@ -1,17 +1,53 @@
-var builder = WebApplication.CreateBuilder(args);
+using Serilog;
+using smart_locking_be.API.Extensions;
+using smart_locking_be.Application;
+using smart_locking_be.Infrastructure;
 
-// Add services to the container.
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
 
-builder.Services.AddControllers();
+try
+{
+    var builder = WebApplication.CreateBuilder(args);
 
-var app = builder.Build();
+    builder.Host.UseSerilog((context, services, configuration) => configuration
+        .ReadFrom.Configuration(context.Configuration)
+        .ReadFrom.Services(services)
+        .Enrich.FromLogContext());
 
-// Configure the HTTP request pipeline.
+    builder.Services.AddApplication();
+    builder.Services.AddInfrastructure(builder.Configuration);
+    builder.Services.AddControllers();
+    builder.Services.AddCorsPolicy(builder.Configuration, builder.Environment);
+    builder.Services.AddJwtAuthentication(builder.Configuration);
+    builder.Services.AddSwaggerDocumentation();
 
-app.UseHttpsRedirection();
+    var app = builder.Build();
 
-app.UseAuthorization();
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI();
+    }
 
-app.MapControllers();
+    app.UseSerilogRequestLogging();
+    app.UseHttpsRedirection();
 
-app.Run();
+    app.UseCors();
+
+    app.UseAuthentication();
+    app.UseAuthorization();
+
+    app.MapControllers();
+
+    app.Run();
+}
+catch (Exception exception)
+{
+    Log.Fatal(exception, "Application terminated unexpectedly.");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
