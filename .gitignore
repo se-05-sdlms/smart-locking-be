@@ -52,6 +52,7 @@ ScaffoldingReadMe.txt
 .env
 .env.*
 !.env.example
+**/appsettings.Development.json
 appsettings.Local.json
 appsettings.*.Local.json
 *.pfx
@@ -80,3 +81,5 @@ lcov.info
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+.codegraph/
