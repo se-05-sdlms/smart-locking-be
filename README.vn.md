@@ -84,10 +84,40 @@
 
 ### Yêu cầu
 
-* .NET SDK 8
-* PostgreSQL 15+ hoặc Supabase
-* EMQX 5.x
-* Docker: không bắt buộc
+Cài các công cụ sau trước khi chạy project:
+
+* .NET SDK 8.x. Solution đang target `net8.0`; thống nhất giữ package .NET/EF Core ở version 8.
+* PostgreSQL 15+ trên máy local, hoặc database PostgreSQL trên Supabase.
+* EF Core CLI 8.0.11 để tạo và apply migration.
+* Docker: không bắt buộc, chỉ cần nếu muốn chạy hạ tầng bằng container.
+
+```bash
+dotnet --version
+dotnet tool update --global dotnet-ef --version 8.0.11
+dotnet ef --version
+```
+
+Các version NuGet hiện đang dùng trong repository:
+
+| Project | Package | Version |
+| ------- | ------- | ------- |
+| `smart-locking-be.API` | `Microsoft.AspNetCore.Authentication.JwtBearer` | `8.0.28` |
+| `smart-locking-be.API` | `Serilog.AspNetCore` | `8.0.3` |
+| `smart-locking-be.API` | `Serilog.Settings.Configuration` | `8.0.4` |
+| `smart-locking-be.API` | `Serilog.Sinks.Console` | `5.0.1` |
+| `smart-locking-be.API` | `Serilog.Sinks.File` | `5.0.0` |
+| `smart-locking-be.API` | `Swashbuckle.AspNetCore` | `6.9.0` |
+| `smart-locking-be.Application` | `Microsoft.Extensions.DependencyInjection.Abstractions` | `8.0.2` |
+| `smart-locking-be.Infrastructure` | `Microsoft.EntityFrameworkCore.Design` | `8.0.11` |
+| `smart-locking-be.Infrastructure` | `Microsoft.Extensions.Configuration.Abstractions` | `8.0.0` |
+| `smart-locking-be.Infrastructure` | `Microsoft.Extensions.DependencyInjection.Abstractions` | `8.0.2` |
+| `smart-locking-be.Infrastructure` | `Npgsql.EntityFrameworkCore.PostgreSQL` | `8.0.11` |
+| `smart-locking-be.Tests` | `coverlet.collector` | `6.0.0` |
+| `smart-locking-be.Tests` | `Microsoft.NET.Test.Sdk` | `17.8.0` |
+| `smart-locking-be.Tests` | `xunit` | `2.5.3` |
+| `smart-locking-be.Tests` | `xunit.runner.visualstudio` | `2.5.3` |
+
+Các version này tương thích với project `net8.0` hiện tại. Không nâng EF Core packages hoặc `dotnet-ef` lên 9.x trừ khi cả solution được migrate có chủ đích lên .NET 9.
 
 ### Cài đặt
 
@@ -99,29 +129,70 @@ dotnet restore
 
 ### Cấu hình
 
-Cấu hình ứng dụng bằng `appsettings.Development.json`, biến môi trường hoặc .NET User Secrets.
+Tạo file cấu hình development trên máy local. File này đã được ignore bởi Git, nên mỗi thành viên trong team cần tự tạo ở máy mình.
+
+```bash
+# macOS/Linux/Git Bash
+cp smart-locking-be.API/appsettings.json smart-locking-be.API/appsettings.Development.json
+
+# Windows PowerShell
+Copy-Item smart-locking-be.API/appsettings.json smart-locking-be.API/appsettings.Development.json
+```
+
+Mở `smart-locking-be.API/appsettings.Development.json` và cập nhật tối thiểu các giá trị sau:
+
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Host=localhost;Port=5432;Database=smart_locking_dev;Username=postgres;Password=postgres"
+  },
+  "Jwt": {
+    "Key": "development-only-secret-key-please-change-32-bytes",
+    "Issuer": "smart-locking-be",
+    "Audience": "smart-locking-clients"
+  }
+}
+```
+
+Bạn cũng có thể override cấu hình bằng biến môi trường hoặc .NET User Secrets:
 
 ```env
 ConnectionStrings__DefaultConnection=
 Jwt__Key=
 Jwt__Issuer=
 Jwt__Audience=
-Mqtt__Host=
-Mqtt__Port=
-Mqtt__Username=
-Mqtt__Password=
-Mqtt__ClientId=
 ```
 
 ### Chạy môi trường phát triển
 
 ```bash
-# THAY bằng đường dẫn API project thực tế trong repository
-dotnet run --project <API_PROJECT_PATH>
+# Restore dependencies
+dotnet restore
+
+# Chạy API bằng http launch profile
+dotnet run --project smart-locking-be.API --launch-profile http
 ```
 
-* URL local: `http://localhost:<PORT>`
-* Swagger URL: `http://localhost:<PORT>/swagger`
+* URL API local: `http://localhost:5005`
+* Swagger URL: `http://localhost:5005/swagger`
+* Endpoint mẫu: `http://localhost:5005/weatherforecast`
+
+Chạy bằng HTTPS profile:
+
+```bash
+dotnet run --project smart-locking-be.API --launch-profile https
+```
+
+* HTTPS URL: `https://localhost:7001`
+* HTTP URL: `http://localhost:5005`
+
+Apply EF Core migrations sau khi đã có entity và migration:
+
+```bash
+dotnet ef database update \
+  --project smart-locking-be.Infrastructure \
+  --startup-project smart-locking-be.API
+```
 
 </details>
 
@@ -134,16 +205,14 @@ dotnet run --project <API_PROJECT_PATH>
 | ------------------- | ---------------------------------------- |
 | Framework           | ASP.NET Core Web API, .NET 8 LTS         |
 | Architecture        | Clean Architecture                       |
-| ORM                 | Entity Framework Core 8                  |
+| ORM                 | Entity Framework Core 8.0.11             |
 | Database            | PostgreSQL 15+, Supabase                 |
 | Authentication      | JWT Bearer Token                         |
-| Realtime            | SignalR                                  |
-| MQTT client         | MQTTnet 4.3+                             |
-| MQTT broker         | EMQX 5.x                                 |
-| Tài liệu API        | Swashbuckle.AspNetCore, Swagger UI       |
-| Testing             | xUnit, Moq                               |
-| Containerization    | Docker                                   |
-| Cloud & CI/CD       | Google Cloud Run, GitHub Actions, OIDC   |
+| Tài liệu API        | Swashbuckle.AspNetCore 6.9.0, Swagger UI |
+| Logging             | Serilog.AspNetCore 8.0.3                 |
+| Testing             | xUnit 2.5.3                              |
+| Code coverage       | coverlet.collector 6.0.0                 |
+| Containerization    | Docker: không bắt buộc                   |
 
 </details>
 
@@ -166,7 +235,7 @@ flowchart TD
         P["Presentation Layer<br/>REST API · Swagger · SignalR Hub"]
         AP["Application Layer<br/>Use Cases · Interfaces · Validation"]
         D["Domain Layer<br/>Entities · Value Objects · Business Rules"]
-        I["Infrastructure Layer<br/>EF Core · MQTTnet · External Services"]
+        I["Infrastructure Layer<br/>EF Core · External Services"]
     end
 
     DB[("🗄️ PostgreSQL Database<br/>Supabase · Audit Logs")]
@@ -209,19 +278,13 @@ Backend là tầng ứng dụng duy nhất giao tiếp trực tiếp với datab
 <details open>
 <summary><strong>🔐 Biến môi trường</strong></summary>
 
-Cấu hình các giá trị nhạy cảm bằng biến môi trường hoặc .NET User Secrets.
+Cấu hình các giá trị nhạy cảm bằng `smart-locking-be.API/appsettings.Development.json`, biến môi trường hoặc .NET User Secrets.
 
 ```env
-# THAY bằng đúng tên configuration key được sử dụng trong source code
 ConnectionStrings__DefaultConnection=
 Jwt__Key=
 Jwt__Issuer=
 Jwt__Audience=
-Mqtt__Host=
-Mqtt__Port=
-Mqtt__Username=
-Mqtt__Password=
-Mqtt__ClientId=
 ```
 
 Không lưu secret thật trong source code hoặc commit file cấu hình production lên Git.
@@ -235,19 +298,31 @@ Không lưu secret thật trong source code hoặc commit file cấu hình produ
 # Restore dependency
 dotnet restore
 
-# Build solution
-dotnet build --configuration Release
+# Build solution ở Debug
+dotnet build smart-locking-be.sln
+
+# Build solution ở Release
+dotnet build smart-locking-be.sln --configuration Release
 
 # Chạy toàn bộ test
-dotnet test --configuration Release
+dotnet test smart-locking-be.sln
 
 # Kiểm tra format
 dotnet format --verify-no-changes
 
+# Xem version package đang dùng
+dotnet list smart-locking-be.sln package
+
+# Tạo database migration sau khi thêm hoặc sửa entity
+dotnet ef migrations add InitialCreate \
+  --project smart-locking-be.Infrastructure \
+  --startup-project smart-locking-be.API \
+  --output-dir Persistence/Migrations
+
 # Áp dụng database migration
 dotnet ef database update \
-  --project <INFRASTRUCTURE_PROJECT_PATH> \
-  --startup-project <API_PROJECT_PATH>
+  --project smart-locking-be.Infrastructure \
+  --startup-project smart-locking-be.API
 ```
 
 </details>
@@ -259,18 +334,28 @@ dotnet ef database update \
 smart-locking-be/
 ├── docs/
 │   └── images/
-│       └── readme-header.png
-├── src/
-│   ├── Domain/
-│   ├── Application/
-│   ├── Infrastructure/
-│   └── Presentation/
-├── tests/
-├── appsettings.json
-├── Dockerfile
-├── README.vn.md
+├── smart-locking-be.API/
+│   ├── Constants/
+│   ├── Controllers/
+│   ├── Extensions/
+│   ├── Options/
+│   ├── Properties/
+│   │   └── launchSettings.json
+│   ├── appsettings.json
+│   └── Program.cs
+├── smart-locking-be.Application/
+│   └── DependencyInjection.cs
+├── smart-locking-be.Domain/
+│   └── smart-locking-be.Domain.csproj
+├── smart-locking-be.Infrastructure/
+│   ├── Persistence/
+│   │   └── ApplicationDbContext.cs
+│   └── DependencyInjection.cs
+├── smart-locking-be.Tests/
+│   └── Test.cs
 ├── README.md
-└── <SOLUTION_NAME>.sln
+├── README.vn.md
+└── smart-locking-be.sln
 ```
 
 </details>
