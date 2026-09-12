@@ -21,4 +21,8 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\smart-locking-be.Infrastructure\smart-locking-be.Infrastructure.csproj" />
+  </ItemGroup>
+
 </Project>
