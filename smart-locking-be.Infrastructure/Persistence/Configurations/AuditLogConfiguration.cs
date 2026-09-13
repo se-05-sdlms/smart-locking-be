@@ -8,10 +8,10 @@ public sealed class AuditLogConfiguration() : BaseConfiguration<AuditLog>(entity
 {
     protected override void ConfigureEntity(EntityTypeBuilder<AuditLog> builder)
     {
-        Varchar(builder.Property(entity => entity.Action)).IsRequired();
-        Varchar(builder.Property(entity => entity.EntityType));
+        Varchar(builder.Property(entity => entity.Action)).IsRequired().HasMaxLength(150);
+        Varchar(builder.Property(entity => entity.EntityType)).HasMaxLength(150);
         EnumAsString(builder.Property(entity => entity.Result)).IsRequired();
-        Varchar(builder.Property(entity => entity.IpAddress));
+        Varchar(builder.Property(entity => entity.IpAddress)).HasMaxLength(45);
         Text(builder.Property(entity => entity.Details));
 
         builder.HasOne(entity => entity.ActorUser)

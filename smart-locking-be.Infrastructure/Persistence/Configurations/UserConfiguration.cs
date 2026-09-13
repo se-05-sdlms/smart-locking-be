@@ -8,10 +8,11 @@ public sealed class UserConfiguration() : BaseConfiguration<User>(entity => enti
 {
     protected override void ConfigureEntity(EntityTypeBuilder<User> builder)
     {
-        Varchar(builder.Property(entity => entity.PhoneNumber));
-        Varchar(builder.Property(entity => entity.Email));
-        Varchar(builder.Property(entity => entity.PasswordHash)).IsRequired();
+        Varchar(builder.Property(entity => entity.PhoneNumber)).HasMaxLength(20);
+        Varchar(builder.Property(entity => entity.Email)).HasMaxLength(254);
+        Varchar(builder.Property(entity => entity.PasswordHash)).IsRequired().HasMaxLength(512);
         EnumAsString(builder.Property(entity => entity.Status)).IsRequired();
+        EnumAsString(builder.Property(entity => entity.Role)).IsRequired();
 
         builder.HasIndex(entity => entity.PhoneNumber)
             .HasDatabaseName("UX_User_PhoneNumber")
@@ -23,6 +24,8 @@ public sealed class UserConfiguration() : BaseConfiguration<User>(entity => enti
             .IsUnique();
         builder.HasIndex(entity => entity.Status)
             .HasDatabaseName("IX_User_Status");
+        builder.HasIndex(entity => entity.Role)
+            .HasDatabaseName("IX_User_Role");
 
         builder.ToTable("User", table => table.HasCheckConstraint(
             "CK_User_LoginIdentifier",

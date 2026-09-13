@@ -8,8 +8,8 @@ public sealed class LockerConfiguration() : BaseConfiguration<Locker>(entity => 
 {
     protected override void ConfigureEntity(EntityTypeBuilder<Locker> builder)
     {
-        Varchar(builder.Property(entity => entity.Code)).IsRequired();
-        Varchar(builder.Property(entity => entity.DeviceIdentifier)).IsRequired();
+        Varchar(builder.Property(entity => entity.Code)).IsRequired().HasMaxLength(50);
+        Varchar(builder.Property(entity => entity.DeviceIdentifier)).IsRequired().HasMaxLength(100);
         EnumAsString(builder.Property(entity => entity.OperationalStatus)).IsRequired();
         EnumAsString(builder.Property(entity => entity.ConnectionStatus)).IsRequired();
 

@@ -8,9 +8,9 @@ public sealed class OtpChallengeConfiguration() : BaseConfiguration<OtpChallenge
 {
     protected override void ConfigureEntity(EntityTypeBuilder<OtpChallenge> builder)
     {
-        Varchar(builder.Property(entity => entity.DestinationPhone)).IsRequired();
+        Varchar(builder.Property(entity => entity.DestinationPhone)).IsRequired().HasMaxLength(20);
         EnumAsString(builder.Property(entity => entity.Purpose)).IsRequired();
-        Varchar(builder.Property(entity => entity.CodeHash)).IsRequired();
+        Varchar(builder.Property(entity => entity.CodeHash)).IsRequired().HasMaxLength(256);
 
         builder.HasOne(entity => entity.User)
             .WithMany(user => user.OtpChallenges)

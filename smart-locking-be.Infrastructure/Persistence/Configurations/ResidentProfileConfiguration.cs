@@ -8,10 +8,10 @@ public sealed class ResidentProfileConfiguration() : BaseConfiguration<ResidentP
 {
     protected override void ConfigureEntity(EntityTypeBuilder<ResidentProfile> builder)
     {
-        Varchar(builder.Property(entity => entity.FullName)).IsRequired();
-        Varchar(builder.Property(entity => entity.AvatarUrl));
+        Varchar(builder.Property(entity => entity.FullName)).IsRequired().HasMaxLength(150);
+        Varchar(builder.Property(entity => entity.AvatarUrl)).HasMaxLength(2048);
         EnumAsString(builder.Property(entity => entity.DeliveryApprovalMode)).IsRequired();
-        Varchar(builder.Property(entity => entity.PersonalQrTokenHash)).IsRequired();
+        Varchar(builder.Property(entity => entity.PersonalQrTokenHash)).IsRequired().HasMaxLength(256);
 
         builder.HasOne(entity => entity.User)
             .WithOne(user => user.ResidentProfile)

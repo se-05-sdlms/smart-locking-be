@@ -8,10 +8,10 @@ public sealed class PaymentTransactionConfiguration() : BaseConfiguration<Paymen
 {
     protected override void ConfigureEntity(EntityTypeBuilder<PaymentTransaction> builder)
     {
-        Varchar(builder.Property(entity => entity.Provider)).IsRequired();
-        Varchar(builder.Property(entity => entity.ProviderTransactionId));
+        Varchar(builder.Property(entity => entity.ExternalOrderCode)).HasMaxLength(150);
+        Varchar(builder.Property(entity => entity.ExternalTransactionId)).HasMaxLength(150);
         builder.Property(entity => entity.Amount).HasPrecision(18, 2);
-        Varchar(builder.Property(entity => entity.Currency)).IsRequired();
+        Varchar(builder.Property(entity => entity.Currency)).IsRequired().HasMaxLength(3);
         EnumAsString(builder.Property(entity => entity.Status)).IsRequired();
         Text(builder.Property(entity => entity.FailureReason));
 
@@ -20,9 +20,13 @@ public sealed class PaymentTransactionConfiguration() : BaseConfiguration<Paymen
             .HasForeignKey(entity => entity.OverdueChargeId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        builder.HasIndex(entity => new { entity.Provider, entity.ProviderTransactionId })
-            .HasDatabaseName("UX_PaymentTransaction_Provider_TransactionId")
-            .HasFilter("\"ProviderTransactionId\" IS NOT NULL")
+        builder.HasIndex(entity => entity.ExternalOrderCode)
+            .HasDatabaseName("UX_PaymentTransaction_ExternalOrderCode")
+            .HasFilter("\"ExternalOrderCode\" IS NOT NULL")
+            .IsUnique();
+        builder.HasIndex(entity => entity.ExternalTransactionId)
+            .HasDatabaseName("UX_PaymentTransaction_ExternalTransactionId")
+            .HasFilter("\"ExternalTransactionId\" IS NOT NULL")
             .IsUnique();
         builder.HasIndex(entity => new { entity.OverdueChargeId, entity.Status })
             .HasDatabaseName("IX_PaymentTransaction_Charge_Status");

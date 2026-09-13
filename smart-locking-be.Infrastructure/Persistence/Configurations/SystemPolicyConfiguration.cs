@@ -10,7 +10,7 @@ public sealed class SystemPolicyConfiguration() : BaseConfiguration<SystemPolicy
     {
         EnumAsString(builder.Property(entity => entity.DefaultApprovalMode)).IsRequired();
         builder.Property(entity => entity.OverdueFeePerHour).HasPrecision(18, 2);
-        Varchar(builder.Property(entity => entity.Currency)).IsRequired();
+        Varchar(builder.Property(entity => entity.Currency)).IsRequired().HasMaxLength(3);
 
         builder.HasOne(entity => entity.CreatedByUser)
             .WithMany(user => user.CreatedSystemPolicies)
@@ -29,7 +29,11 @@ public sealed class SystemPolicyConfiguration() : BaseConfiguration<SystemPolicy
 
         builder.ToTable("SystemPolicy", table => table.HasCheckConstraint(
             "CK_SystemPolicy_DurationsAndRates",
-            "\"DeliveryRequestExpiryMinutes\" > 0 AND " +
+            "\"GuestSessionTimeoutMinutes\" > 0 AND " +
+            "\"ManualApprovalTimeoutMinutes\" > 0 AND " +
+            "\"CompartmentReservationMinutes\" > 0 AND " +
+            "\"OtpMaxAttempts\" > 0 AND " +
+            "\"OtpLockoutMinutes\" > 0 AND " +
             "\"OverdueStartAfterHours\" >= 0 AND " +
             "\"OverdueFeePerHour\" >= 0 AND " +
             "\"MaxStorageHours\" > 0 AND " +

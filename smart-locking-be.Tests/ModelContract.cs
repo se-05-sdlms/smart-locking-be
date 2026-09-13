@@ -4,12 +4,12 @@ internal static class ModelContract
 {
     internal static readonly string[] EntityNames =
     [
-        "AuditLog", "Building", "DeliveryRequest", "EmergencyUnlock", "Incident",
-        "IncidentAction", "Locker", "LockerCluster", "LockerCompartment", "LockerEvent",
-        "MaintenanceActivity", "MaintenanceRequest", "Notification", "NotificationRule",
-        "OperatorAssignment", "OtpChallenge", "OverdueCharge", "Parcel", "ParcelAccessEvent",
-        "ParcelStatusHistory", "PaymentTransaction", "Permission", "ResidentBiometric",
-        "ResidentProfile", "Role", "RolePermission", "SystemPolicy", "User", "UserRole"
+        "AuditLog", "Building", "CompartmentReservation", "DeliveryRequest", "EmergencyUnlock",
+        "Incident", "IncidentAction", "Locker", "LockerAccessEvent", "LockerCluster",
+        "LockerCompartment", "LockerEvent", "MaintenanceActivity", "MaintenanceRequest", "Notification",
+        "NotificationRule", "OperatorAssignment", "OtpChallenge", "OverdueCharge", "Parcel",
+        "ParcelStatusHistory", "PaymentTransaction", "RefreshToken", "ResidentBiometric", "ResidentProfile",
+        "ReturnRequest", "SystemPolicy", "User"
     ];
 
     internal static readonly IReadOnlyDictionary<string, PropertyExpectation[]> Properties =
@@ -18,30 +18,10 @@ internal static class ModelContract
             ["User"] =
             [
                 P("Id", "Guid"), P("PhoneNumber", "String", true), P("Email", "String", true),
-                P("PasswordHash", "String"), P("Status", "UserStatus"), P("PhoneVerifiedAt", "DateTimeOffset", true),
-                P("MustChangePassword", "Boolean"), P("LastLoginAt", "DateTimeOffset", true),
-                P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
-            ],
-            ["Role"] =
-            [
-                P("Id", "Guid"), P("Name", "String"), P("Description", "String", true),
-                P("IsSystemRole", "Boolean"), P("IsActive", "Boolean"), P("CreatedAt", "DateTimeOffset"),
+                P("PasswordHash", "String"), P("Status", "UserStatus"), P("Role", "UserRole"),
+                P("PhoneVerifiedAt", "DateTimeOffset", true), P("MustChangePassword", "Boolean"),
+                P("LastLoginAt", "DateTimeOffset", true), P("CreatedAt", "DateTimeOffset"),
                 P("UpdatedAt", "DateTimeOffset")
-            ],
-            ["Permission"] =
-            [
-                P("Id", "Guid"), P("Code", "String"), P("Name", "String"),
-                P("Description", "String", true), P("CreatedAt", "DateTimeOffset")
-            ],
-            ["UserRole"] =
-            [
-                P("Id", "Guid"), P("UserId", "Guid"), P("RoleId", "Guid"),
-                P("AssignedByUserId", "Guid", true), P("AssignedAt", "DateTimeOffset")
-            ],
-            ["RolePermission"] =
-            [
-                P("Id", "Guid"), P("RoleId", "Guid"), P("PermissionId", "Guid"),
-                P("CreatedAt", "DateTimeOffset")
             ],
             ["ResidentProfile"] =
             [
@@ -60,7 +40,15 @@ internal static class ModelContract
                 P("Id", "Guid"), P("UserId", "Guid", true), P("ParcelId", "Guid", true),
                 P("DestinationPhone", "String"), P("Purpose", "OtpPurpose"), P("CodeHash", "String"),
                 P("ExpiresAt", "DateTimeOffset"), P("UsedAt", "DateTimeOffset", true),
-                P("RevokedAt", "DateTimeOffset", true), P("AttemptCount", "Int32"), P("CreatedAt", "DateTimeOffset")
+                P("RevokedAt", "DateTimeOffset", true), P("AttemptCount", "Int32"),
+                P("LockedUntil", "DateTimeOffset", true), P("CreatedAt", "DateTimeOffset")
+            ],
+            ["RefreshToken"] =
+            [
+                P("Id", "Guid"), P("UserId", "Guid"), P("TokenHash", "String"),
+                P("ExpiresAt", "DateTimeOffset"), P("CreatedAt", "DateTimeOffset"),
+                P("RevokedAt", "DateTimeOffset", true), P("CreatedByIp", "String", true),
+                P("RevokedByIp", "String", true), P("ReplacedByTokenId", "Guid", true)
             ],
             ["Building"] =
             [
@@ -81,9 +69,9 @@ internal static class ModelContract
             ],
             ["LockerCompartment"] =
             [
-                P("Id", "Guid"), P("LockerId", "Guid"), P("Code", "String"), P("SizeCategory", "String"),
+                P("Id", "Guid"), P("LockerId", "Guid"), P("Code", "String"),
                 P("OperationalStatus", "LockerCompartmentOperationalStatus"), P("DoorStatus", "DoorStatus"),
-                P("UpdatedAt", "DateTimeOffset"), P("CreatedAt", "DateTimeOffset")
+                P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
             ],
             ["OperatorAssignment"] =
             [
@@ -94,9 +82,11 @@ internal static class ModelContract
             ["SystemPolicy"] =
             [
                 P("Id", "Guid"), P("Version", "Int32"), P("DefaultApprovalMode", "DeliveryApprovalMode"),
-                P("DeliveryRequestExpiryMinutes", "Int32"), P("OverdueStartAfterHours", "Int32"),
+                P("GuestSessionTimeoutMinutes", "Int32"), P("ManualApprovalTimeoutMinutes", "Int32"),
+                P("CompartmentReservationMinutes", "Int32"), P("OverdueStartAfterHours", "Int32"),
                 P("OverdueFeePerHour", "Decimal"), P("Currency", "String"), P("MaxStorageHours", "Int32"),
                 P("ClearanceEligibilityAfterHours", "Int32"), P("ClearanceNoticeBeforeHours", "Int32"),
+                P("OtpMaxAttempts", "Int32"), P("OtpLockoutMinutes", "Int32"),
                 P("EnablePersonalQr", "Boolean"), P("EnableOtp", "Boolean"), P("EnableRemoteUnlock", "Boolean"),
                 P("EnableFaceRecognition", "Boolean"), P("EffectiveFrom", "DateTimeOffset"),
                 P("EffectiveTo", "DateTimeOffset", true), P("IsActive", "Boolean"), P("CreatedByUserId", "Guid"),
@@ -109,16 +99,38 @@ internal static class ModelContract
             ],
             ["DeliveryRequest"] =
             [
-                P("Id", "Guid"), P("ResidentProfileId", "Guid"), P("LockerClusterId", "Guid"),
+                P("Id", "Guid"), P("ResidentProfileId", "Guid", true), P("LockerClusterId", "Guid"),
                 P("SystemPolicyId", "Guid"), P("AllocatedCompartmentId", "Guid", true),
                 P("GuestSessionTokenHash", "String"), P("ShipperName", "String", true), P("ShipperPhone", "String", true),
-                P("RecipientPhoneSnapshot", "String"), P("WaybillImageUrl", "String", true),
-                P("OcrExtractedPhone", "String", true), P("OcrStatus", "OcrStatus", true), P("SizeCategory", "String"),
-                P("ParcelDescription", "String", true), P("ApprovalModeSnapshot", "DeliveryApprovalMode"),
-                P("Status", "DeliveryRequestStatus"), P("ExpiresAt", "DateTimeOffset"), P("DecisionAt", "DateTimeOffset", true),
-                P("AllocatedAt", "DateTimeOffset", true), P("CompartmentReleasedAt", "DateTimeOffset", true),
+                P("RecipientPhoneSnapshot", "String", true), P("ParcelImageUrl", "String", true),
+                P("OcrExtractedPhone", "String", true), P("OcrStatus", "OcrStatus", true),
+                P("ApprovalModeSnapshot", "DeliveryApprovalMode", true),
+                P("Status", "DeliveryRequestStatus"), P("LastActivityAt", "DateTimeOffset"),
+                P("SessionExpiresAt", "DateTimeOffset"), P("ApprovalExpiresAt", "DateTimeOffset", true),
+                P("ReservationExpiresAt", "DateTimeOffset", true), P("DecisionAt", "DateTimeOffset", true),
+                P("AllocatedAt", "DateTimeOffset", true), P("DepositedAt", "DateTimeOffset", true),
+                P("CompartmentReleasedAt", "DateTimeOffset", true),
                 P("FailureCode", "DeliveryRequestFailureCode", true), P("FailureDetail", "String", true),
                 P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
+            ],
+            ["ReturnRequest"] =
+            [
+                P("Id", "Guid"), P("ResidentProfileId", "Guid"), P("OriginalParcelId", "Guid", true),
+                P("LockerClusterId", "Guid"), P("AllocatedCompartmentId", "Guid", true),
+                P("ReturnCode", "String"), P("ReturnReason", "String", true),
+                P("ReturnImageUrl", "String", true), P("ShipperPhone", "String", true),
+                P("ShipperSessionTokenHash", "String", true), P("Status", "ReturnRequestStatus"),
+                P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset"),
+                P("AllocatedAt", "DateTimeOffset", true), P("ReservationExpiresAt", "DateTimeOffset", true),
+                P("ResidentDepositedAt", "DateTimeOffset", true), P("ShipperPickedUpAt", "DateTimeOffset", true),
+                P("CompartmentReleasedAt", "DateTimeOffset", true), P("FailureReason", "String", true)
+            ],
+            ["CompartmentReservation"] =
+            [
+                P("Id", "Guid"), P("LockerCompartmentId", "Guid"), P("DeliveryRequestId", "Guid", true),
+                P("ReturnRequestId", "Guid", true), P("ReservedAt", "DateTimeOffset"),
+                P("ExpiresAt", "DateTimeOffset"), P("ReleasedAt", "DateTimeOffset", true),
+                P("CreatedAt", "DateTimeOffset")
             ],
             ["Parcel"] =
             [
@@ -134,12 +146,15 @@ internal static class ModelContract
                 P("ToStatus", "ParcelStatus"), P("Reason", "String", true), P("ChangedByUserId", "Guid", true),
                 P("ChangedAt", "DateTimeOffset")
             ],
-            ["ParcelAccessEvent"] =
+            ["LockerAccessEvent"] =
             [
-                P("Id", "Guid"), P("ParcelId", "Guid"), P("UserId", "Guid", true),
-                P("Method", "ParcelAccessMethod"), P("Result", "ParcelAccessResult"),
-                P("FailureReason", "String", true), P("IpAddress", "String", true),
-                P("DeviceContext", "String", true), P("OccurredAt", "DateTimeOffset")
+                P("Id", "Guid"), P("LockerId", "Guid"), P("LockerCompartmentId", "Guid"),
+                P("UserId", "Guid", true), P("DeliveryRequestId", "Guid", true),
+                P("ParcelId", "Guid", true), P("ReturnRequestId", "Guid", true),
+                P("AccessType", "LockerAccessType"), P("AccessMethod", "LockerAccessMethod"),
+                P("Result", "LockerAccessResult"), P("FailureReason", "String", true),
+                P("IpAddress", "String", true), P("DeviceContext", "String", true),
+                P("OccurredAt", "DateTimeOffset")
             ],
             ["OverdueCharge"] =
             [
@@ -150,8 +165,8 @@ internal static class ModelContract
             ],
             ["PaymentTransaction"] =
             [
-                P("Id", "Guid"), P("OverdueChargeId", "Guid"), P("Provider", "String"),
-                P("ProviderTransactionId", "String", true), P("Amount", "Decimal"), P("Currency", "String"),
+                P("Id", "Guid"), P("OverdueChargeId", "Guid"), P("ExternalOrderCode", "String", true),
+                P("ExternalTransactionId", "String", true), P("Amount", "Decimal"), P("Currency", "String"),
                 P("Status", "PaymentTransactionStatus"), P("FailureReason", "String", true),
                 P("RequestedAt", "DateTimeOffset"), P("CompletedAt", "DateTimeOffset", true)
             ],

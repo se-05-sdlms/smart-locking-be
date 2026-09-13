@@ -8,7 +8,7 @@ public sealed class MaintenanceActivityConfiguration() : BaseConfiguration<Maint
 {
     protected override void ConfigureEntity(EntityTypeBuilder<MaintenanceActivity> builder)
     {
-        Varchar(builder.Property(entity => entity.ActionType)).IsRequired();
+        Varchar(builder.Property(entity => entity.ActionType)).IsRequired().HasMaxLength(100);
         NullableEnumAsString(builder.Property(entity => entity.FromStatus));
         NullableEnumAsString(builder.Property(entity => entity.ToStatus));
         Text(builder.Property(entity => entity.Notes));

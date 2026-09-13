@@ -8,8 +8,8 @@ public sealed class LockerClusterConfiguration() : BaseConfiguration<LockerClust
 {
     protected override void ConfigureEntity(EntityTypeBuilder<LockerCluster> builder)
     {
-        Varchar(builder.Property(entity => entity.Code)).IsRequired();
-        Varchar(builder.Property(entity => entity.Name)).IsRequired();
+        Varchar(builder.Property(entity => entity.Code)).IsRequired().HasMaxLength(50);
+        Varchar(builder.Property(entity => entity.Name)).IsRequired().HasMaxLength(200);
         Text(builder.Property(entity => entity.LocationDescription));
         EnumAsString(builder.Property(entity => entity.Status)).IsRequired();
 

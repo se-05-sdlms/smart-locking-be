@@ -8,12 +8,12 @@ public sealed class IncidentConfiguration() : BaseConfiguration<Incident>(entity
 {
     protected override void ConfigureEntity(EntityTypeBuilder<Incident> builder)
     {
-        Varchar(builder.Property(entity => entity.ReporterName));
-        Varchar(builder.Property(entity => entity.ReporterPhone));
-        Varchar(builder.Property(entity => entity.Type)).IsRequired();
+        Varchar(builder.Property(entity => entity.ReporterName)).HasMaxLength(150);
+        Varchar(builder.Property(entity => entity.ReporterPhone)).HasMaxLength(20);
+        Varchar(builder.Property(entity => entity.Type)).IsRequired().HasMaxLength(100);
         EnumAsString(builder.Property(entity => entity.Source)).IsRequired();
         EnumAsString(builder.Property(entity => entity.Status)).IsRequired();
-        Varchar(builder.Property(entity => entity.Title)).IsRequired();
+        Varchar(builder.Property(entity => entity.Title)).IsRequired().HasMaxLength(200);
         Text(builder.Property(entity => entity.Description)).IsRequired();
         Text(builder.Property(entity => entity.ResolutionSummary));
 

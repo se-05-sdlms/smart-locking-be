@@ -10,7 +10,7 @@ public sealed class OverdueChargeConfiguration() : BaseConfiguration<OverdueChar
     {
         builder.Property(entity => entity.Amount).HasPrecision(18, 2);
         builder.Property(entity => entity.RatePerHourSnapshot).HasPrecision(18, 2);
-        Varchar(builder.Property(entity => entity.Currency)).IsRequired();
+        Varchar(builder.Property(entity => entity.Currency)).IsRequired().HasMaxLength(3);
         EnumAsString(builder.Property(entity => entity.Status)).IsRequired();
 
         builder.HasOne(entity => entity.Parcel)

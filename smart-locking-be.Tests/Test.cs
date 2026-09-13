@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using smart_locking_be.Domain.Entities;
+using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Tests;
@@ -49,10 +51,10 @@ public sealed class PersistenceModelTests
         using var context = CreateContext();
         var textProperties = new HashSet<string>
         {
-            "Role.Description", "Permission.Description", "Building.Address",
-            "LockerCluster.LocationDescription", "OperatorAssignment.Reason",
-            "DeliveryRequest.ParcelDescription", "DeliveryRequest.FailureDetail", "Parcel.RemovalReason",
-            "ParcelStatusHistory.Reason", "ParcelAccessEvent.FailureReason", "PaymentTransaction.FailureReason",
+            "Building.Address", "LockerCluster.LocationDescription", "OperatorAssignment.Reason",
+            "DeliveryRequest.FailureDetail", "ReturnRequest.ReturnReason", "ReturnRequest.FailureReason",
+            "Parcel.RemovalReason", "ParcelStatusHistory.Reason", "LockerAccessEvent.FailureReason",
+            "LockerAccessEvent.DeviceContext", "PaymentTransaction.FailureReason",
             "Notification.Message", "Incident.Description", "Incident.ResolutionSummary", "IncidentAction.Notes",
             "LockerEvent.Reason", "LockerEvent.Details", "EmergencyUnlock.Reason",
             "MaintenanceRequest.Description", "MaintenanceRequest.ResolutionSummary",
@@ -146,6 +148,62 @@ public sealed class PersistenceModelTests
 
             Assert.Equal(expectedNames.Order(), actualNames);
         }
+    }
+
+    [Fact]
+    public void NotificationChannel_supports_Email()
+    {
+        Assert.True(Enum.IsDefined(typeof(NotificationChannel), NotificationChannel.Email));
+    }
+
+    [Fact]
+    public void UserRole_contains_exact_roles()
+    {
+        string[] expectedRoles = ["Administrator", "Resident", "LockerOperator"];
+        string[] actualRoles = Enum.GetNames(typeof(UserRole));
+
+        Assert.Equal(expectedRoles, actualRoles);
+    }
+
+    [Fact]
+    public void ReturnRequestStatus_contains_exact_statuses()
+    {
+        string[] expectedStatuses = ["Created", "Allocated", "Deposited", "Completed", "Cancelled", "Expired", "Failed"];
+        string[] actualStatuses = Enum.GetNames(typeof(ReturnRequestStatus));
+
+        Assert.Equal(expectedStatuses, actualStatuses);
+    }
+
+    [Fact]
+    public void LockerAccessEnums_contain_exact_values()
+    {
+        string[] expectedTypes = ["ShipperDropOff", "ResidentPickup", "ResidentReturnDropOff", "ShipperReturnPickup", "OperatorEmergency", "Maintenance"];
+        Assert.Equal(expectedTypes, Enum.GetNames(typeof(LockerAccessType)));
+
+        string[] expectedMethods = ["GuestSession", "Otp", "PersonalQr", "RemoteApp", "FaceRecognition", "OperatorAuthorization", "SystemAuthorization"];
+        Assert.Equal(expectedMethods, Enum.GetNames(typeof(LockerAccessMethod)));
+
+        string[] expectedResults = ["Succeeded", "Failed", "Blocked"];
+        Assert.Equal(expectedResults, Enum.GetNames(typeof(LockerAccessResult)));
+    }
+
+    [Fact]
+    public void AuditLog_prevents_modification_and_deletion()
+    {
+        using var context = CreateContext();
+        var log = new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            Action = "Test",
+            Result = AuditLogResult.Succeeded,
+            OccurredAt = DateTimeOffset.UtcNow
+        };
+
+        context.AuditLogs.Add(log);
+        context.Entry(log).State = EntityState.Unchanged;
+
+        log.Action = "ModifiedAction";
+        Assert.Throws<InvalidOperationException>(() => context.SaveChanges());
     }
 
     private static ApplicationDbContext CreateContext()

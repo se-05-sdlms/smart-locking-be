@@ -8,7 +8,7 @@ public sealed class NotificationRuleConfiguration() : BaseConfiguration<Notifica
 {
     protected override void ConfigureEntity(EntityTypeBuilder<NotificationRule> builder)
     {
-        Varchar(builder.Property(entity => entity.EventType)).IsRequired();
+        Varchar(builder.Property(entity => entity.EventType)).IsRequired().HasMaxLength(100);
         EnumAsString(builder.Property(entity => entity.Channel)).IsRequired();
 
         builder.HasOne(entity => entity.SystemPolicy)

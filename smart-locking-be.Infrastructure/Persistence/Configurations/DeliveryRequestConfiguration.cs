@@ -8,16 +8,14 @@ public sealed class DeliveryRequestConfiguration() : BaseConfiguration<DeliveryR
 {
     protected override void ConfigureEntity(EntityTypeBuilder<DeliveryRequest> builder)
     {
-        Varchar(builder.Property(entity => entity.GuestSessionTokenHash)).IsRequired();
-        Varchar(builder.Property(entity => entity.ShipperName));
-        Varchar(builder.Property(entity => entity.ShipperPhone));
-        Varchar(builder.Property(entity => entity.RecipientPhoneSnapshot)).IsRequired();
-        Varchar(builder.Property(entity => entity.WaybillImageUrl));
-        Varchar(builder.Property(entity => entity.OcrExtractedPhone));
+        Varchar(builder.Property(entity => entity.GuestSessionTokenHash)).IsRequired().HasMaxLength(256);
+        Varchar(builder.Property(entity => entity.ShipperName)).HasMaxLength(150);
+        Varchar(builder.Property(entity => entity.ShipperPhone)).HasMaxLength(20);
+        Varchar(builder.Property(entity => entity.RecipientPhoneSnapshot)).HasMaxLength(20);
+        Varchar(builder.Property(entity => entity.ParcelImageUrl)).HasMaxLength(2048);
+        Varchar(builder.Property(entity => entity.OcrExtractedPhone)).HasMaxLength(20);
         NullableEnumAsString(builder.Property(entity => entity.OcrStatus));
-        Varchar(builder.Property(entity => entity.SizeCategory)).IsRequired();
-        Text(builder.Property(entity => entity.ParcelDescription));
-        EnumAsString(builder.Property(entity => entity.ApprovalModeSnapshot)).IsRequired();
+        NullableEnumAsString(builder.Property(entity => entity.ApprovalModeSnapshot));
         EnumAsString(builder.Property(entity => entity.Status)).IsRequired();
         NullableEnumAsString(builder.Property(entity => entity.FailureCode));
         Text(builder.Property(entity => entity.FailureDetail));
@@ -44,14 +42,10 @@ public sealed class DeliveryRequestConfiguration() : BaseConfiguration<DeliveryR
             .IsUnique();
         builder.HasIndex(entity => new { entity.ResidentProfileId, entity.Status })
             .HasDatabaseName("IX_DeliveryRequest_Resident_Status");
-        builder.HasIndex(entity => new { entity.ExpiresAt, entity.Status })
-            .HasDatabaseName("IX_DeliveryRequest_ExpiresAt_Status");
+        builder.HasIndex(entity => new { entity.SessionExpiresAt, entity.Status })
+            .HasDatabaseName("IX_DeliveryRequest_SessionExpiresAt_Status");
         builder.HasIndex(entity => new { entity.LockerClusterId, entity.Status })
             .HasDatabaseName("IX_DeliveryRequest_Cluster_Status");
-        builder.HasIndex(entity => entity.AllocatedCompartmentId)
-            .HasDatabaseName("UX_DeliveryRequest_ActiveCompartment")
-            .HasFilter("\"CompartmentReleasedAt\" IS NULL AND \"AllocatedCompartmentId\" IS NOT NULL")
-            .IsUnique();
 
         builder.ToTable("DeliveryRequest", table => table.HasCheckConstraint(
             "CK_DeliveryRequest_AllocatedStatusRequiresCompartment",

@@ -8,9 +8,9 @@ public sealed class NotificationConfiguration() : BaseConfiguration<Notification
 {
     protected override void ConfigureEntity(EntityTypeBuilder<Notification> builder)
     {
-        Varchar(builder.Property(entity => entity.Type)).IsRequired();
+        Varchar(builder.Property(entity => entity.Type)).IsRequired().HasMaxLength(100);
         EnumAsString(builder.Property(entity => entity.Channel)).IsRequired();
-        Varchar(builder.Property(entity => entity.Title)).IsRequired();
+        Varchar(builder.Property(entity => entity.Title)).IsRequired().HasMaxLength(200);
         Text(builder.Property(entity => entity.Message)).IsRequired();
         EnumAsString(builder.Property(entity => entity.DeliveryStatus)).IsRequired();
 

@@ -8,7 +8,7 @@ public sealed class ResidentBiometricConfiguration() : BaseConfiguration<Residen
 {
     protected override void ConfigureEntity(EntityTypeBuilder<ResidentBiometric> builder)
     {
-        Varchar(builder.Property(entity => entity.TemplateReference)).IsRequired();
+        Varchar(builder.Property(entity => entity.TemplateReference)).IsRequired().HasMaxLength(500);
 
         builder.HasOne(entity => entity.ResidentProfile)
             .WithMany(profile => profile.Biometrics)
@@ -21,5 +21,9 @@ public sealed class ResidentBiometricConfiguration() : BaseConfiguration<Residen
             .IsUnique();
         builder.HasIndex(entity => entity.TemplateReference)
             .HasDatabaseName("IX_ResidentBiometric_TemplateReference");
+
+        builder.ToTable("ResidentBiometric", table => table.HasCheckConstraint(
+            "CK_ResidentBiometric_RevokedAt",
+            "\"RevokedAt\" IS NULL OR \"RevokedAt\" >= \"EnrolledAt\""));
     }
 }

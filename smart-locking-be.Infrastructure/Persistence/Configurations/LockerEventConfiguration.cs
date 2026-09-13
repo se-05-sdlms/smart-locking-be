@@ -9,8 +9,8 @@ public sealed class LockerEventConfiguration() : BaseConfiguration<LockerEvent>(
     protected override void ConfigureEntity(EntityTypeBuilder<LockerEvent> builder)
     {
         EnumAsString(builder.Property(entity => entity.EventType)).IsRequired();
-        Varchar(builder.Property(entity => entity.PreviousValue));
-        Varchar(builder.Property(entity => entity.NewValue));
+        Varchar(builder.Property(entity => entity.PreviousValue)).HasMaxLength(200);
+        Varchar(builder.Property(entity => entity.NewValue)).HasMaxLength(200);
         EnumAsString(builder.Property(entity => entity.Severity)).IsRequired();
         Text(builder.Property(entity => entity.Reason));
         Text(builder.Property(entity => entity.Details));

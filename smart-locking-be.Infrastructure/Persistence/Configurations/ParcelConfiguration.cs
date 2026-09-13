@@ -8,7 +8,7 @@ public sealed class ParcelConfiguration() : BaseConfiguration<Parcel>(entity => 
 {
     protected override void ConfigureEntity(EntityTypeBuilder<Parcel> builder)
     {
-        Varchar(builder.Property(entity => entity.ParcelCode)).IsRequired();
+        Varchar(builder.Property(entity => entity.ParcelCode)).IsRequired().HasMaxLength(100);
         EnumAsString(builder.Property(entity => entity.Status)).IsRequired();
         Text(builder.Property(entity => entity.RemovalReason));
 

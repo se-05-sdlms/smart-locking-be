@@ -8,8 +8,8 @@ public sealed class BuildingConfiguration() : BaseConfiguration<Building>(entity
 {
     protected override void ConfigureEntity(EntityTypeBuilder<Building> builder)
     {
-        Varchar(builder.Property(entity => entity.Code)).IsRequired();
-        Varchar(builder.Property(entity => entity.Name)).IsRequired();
+        Varchar(builder.Property(entity => entity.Code)).IsRequired().HasMaxLength(50);
+        Varchar(builder.Property(entity => entity.Name)).IsRequired().HasMaxLength(200);
         Text(builder.Property(entity => entity.Address)).IsRequired();
         EnumAsString(builder.Property(entity => entity.Status)).IsRequired();
 
