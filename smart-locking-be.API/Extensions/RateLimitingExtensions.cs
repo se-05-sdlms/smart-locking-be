@@ -1,10 +1,9 @@
+using smart_locking_be.API.Constants;
+using smart_locking_be.API.Options;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.RateLimiting;
-using Microsoft.AspNetCore.RateLimiting;
-using smart_locking_be.API.Constants;
-using smart_locking_be.API.Options;
 
 namespace smart_locking_be.API.Extensions;
 
