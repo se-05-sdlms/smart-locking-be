@@ -1,8 +1,8 @@
-using System.Security.Claims;
-using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using smart_locking_be.API.Authorization;
+using System.Security.Claims;
+using System.Text;
 
 namespace smart_locking_be.API.Extensions;
 
