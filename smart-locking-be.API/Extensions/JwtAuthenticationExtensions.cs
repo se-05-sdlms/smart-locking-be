@@ -1,6 +1,8 @@
+using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using smart_locking_be.API.Authorization;
 
 namespace smart_locking_be.API.Extensions;
 
@@ -21,6 +23,7 @@ public static class JwtAuthenticationExtensions
             throw new InvalidOperationException("Jwt:Key must be at least 32 bytes for HMAC SHA-256.");
         }
 
+        // 1. Đăng ký Authentication với JWT Bearer Schema
         services
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
@@ -34,11 +37,28 @@ public static class JwtAuthenticationExtensions
                     ValidIssuer = issuer,
                     ValidAudience = audience,
                     IssuerSigningKey = new SymmetricSecurityKey(signingKey),
-                    ClockSkew = TimeSpan.Zero
+                    ClockSkew = TimeSpan.Zero,
+                    // Ánh ánh claim chứa vai trò trong token với System.Security.Claims.ClaimTypes.Role
+                    RoleClaimType = ClaimTypes.Role
                 };
             });
 
-        services.AddAuthorization();
+        // 2. Đăng ký Authorization Policies theo vai trò (Role-based policies)
+        // Dùng ApiPolicies hằng số để áp dụng [Authorize(Policy = ApiPolicies.Administrator)] trên Controller/Endpoint
+        services.AddAuthorization(options =>
+        {
+            // Policy dành cho Quản trị viên
+            options.AddPolicy(ApiPolicies.Administrator, policy =>
+                policy.RequireRole(ApiPolicies.Administrator));
+
+            // Policy dành cho Cư dân
+            options.AddPolicy(ApiPolicies.Resident, policy =>
+                policy.RequireRole(ApiPolicies.Resident));
+
+            // Policy dành cho Nhân viên vận hành
+            options.AddPolicy(ApiPolicies.LockerOperator, policy =>
+                policy.RequireRole(ApiPolicies.LockerOperator));
+        });
 
         return services;
     }

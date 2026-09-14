@@ -1,5 +1,5 @@
 using Serilog;
-using smart_locking_be.API.Extensions;
+using smart_locking_be.API;
 using smart_locking_be.Application;
 using smart_locking_be.Infrastructure;
 
@@ -16,36 +16,16 @@ try
         .ReadFrom.Services(services)
         .Enrich.FromLogContext());
 
-    builder.Services.AddApplication();
-    builder.Services.AddInfrastructure(builder.Configuration);
-    builder.Services.AddControllers();
-    builder.Services.AddCorsPolicy(builder.Configuration, builder.Environment);
-    builder.Services.AddFileUploadLimits(builder.Configuration);
-    builder.Services.AddJwtAuthentication(builder.Configuration);
-    builder.Services.AddApiRateLimiting(builder.Configuration);
-    builder.Services.AddApiRequestTimeouts(builder.Configuration);
-    builder.Services.AddSwaggerDocumentation();
+    // 1. Gom đăng ký Service Dependency Injection theo từng tầng kiến trúc
+    builder.Services
+        .AddApiServices(builder.Configuration, builder.Environment)
+        .AddApplication()
+        .AddInfrastructure(builder.Configuration);
 
     var app = builder.Build();
 
-    if (app.Environment.IsDevelopment())
-    {
-        app.UseSwagger();
-        app.UseSwaggerUI();
-    }
-
-    app.UseSerilogRequestLogging();
-    app.UseHttpsRedirection();
-
-    app.UseRouting();
-    app.UseCors();
-
-    app.UseAuthentication();
-    app.UseApiRateLimiting();
-    app.UseApiRequestTimeouts();
-    app.UseAuthorization();
-
-    app.MapControllers();
+    // 2. Gom cấu hình HTTP Request Pipeline trong DependencyInjection.cs của tầng API
+    app.UseApiPipeline();
 
     app.Run();
 }
@@ -57,3 +37,4 @@ finally
 {
     Log.CloseAndFlush();
 }
+
