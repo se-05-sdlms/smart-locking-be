@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using smart_locking_be.Application.Auth;
 using smart_locking_be.Application.Interfaces;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Infrastructure.Auth;
 using smart_locking_be.Infrastructure.Persistence;
 using smart_locking_be.Infrastructure.Services;
@@ -30,6 +31,7 @@ public static class DependencyInjection
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IPasswordHashService, Pbkdf2PasswordHashService>();
         services.AddScoped<ITokenHashService, Sha256TokenHashService>();
+        services.AddScoped<IResidentService, ResidentService>();
 
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE TRONG TƯƠNG LAI:
         // Các Service thực thi nghiệp vụ tiêm trực tiếp ApplicationDbContext được ghép cặp như sau:
