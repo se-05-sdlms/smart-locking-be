@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.Auth;
-using smart_locking_be.Application.DTOs.Admin;
 using smart_locking_be.Application.DTOs.Common;
+using smart_locking_be.Application.DTOs.Users;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -10,12 +10,12 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class AdminUserService(
+public sealed class UserService(
     ApplicationDbContext dbContext,
     IPasswordHashService passwordHashService,
-    ITokenHashService tokenHashService) : IAdminUserService
+    ITokenHashService tokenHashService) : IUserService
 {
-    public async Task<PagedResult<AdminResidentListItemResponse>> GetResidentsAsync(
+    public async Task<PagedResult<ResidentListItemResponse>> GetResidentsAsync(
         GetUsersFilterRequest filter,
         CancellationToken cancellationToken = default)
     {
@@ -49,7 +49,7 @@ public sealed class AdminUserService(
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        var items = users.Select(u => new AdminResidentListItemResponse(
+        var items = users.Select(u => new ResidentListItemResponse(
             u.Id,
             u.ResidentProfile?.FullName ?? u.PhoneNumber ?? u.Email ?? "Cư dân",
             u.PhoneNumber,
@@ -60,10 +60,10 @@ public sealed class AdminUserService(
             u.CreatedAt
         )).ToList();
 
-        return new PagedResult<AdminResidentListItemResponse>(items, totalCount, pageNumber, pageSize);
+        return new PagedResult<ResidentListItemResponse>(items, totalCount, pageNumber, pageSize);
     }
 
-    public async Task<AdminResidentDetailResponse> GetResidentByIdAsync(
+    public async Task<ResidentDetailResponse> GetResidentByIdAsync(
         Guid userId,
         CancellationToken cancellationToken = default)
     {
@@ -77,7 +77,7 @@ public sealed class AdminUserService(
             throw new KeyNotFoundException("Không tìm thấy cư dân.");
         }
 
-        return new AdminResidentDetailResponse(
+        return new ResidentDetailResponse(
             user.Id,
             user.ResidentProfile?.FullName ?? user.PhoneNumber ?? user.Email ?? "Cư dân",
             user.PhoneNumber,
@@ -154,7 +154,7 @@ public sealed class AdminUserService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<PagedResult<AdminOperatorListItemResponse>> GetOperatorsAsync(
+    public async Task<PagedResult<OperatorListItemResponse>> GetOperatorsAsync(
         GetUsersFilterRequest filter,
         CancellationToken cancellationToken = default)
     {
@@ -189,7 +189,7 @@ public sealed class AdminUserService(
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        var items = users.Select(u => new AdminOperatorListItemResponse(
+        var items = users.Select(u => new OperatorListItemResponse(
             u.Id,
             u.ResidentProfile?.FullName ?? u.Email ?? u.PhoneNumber ?? "Operator",
             u.Email,
@@ -199,10 +199,10 @@ public sealed class AdminUserService(
             u.CreatedAt
         )).ToList();
 
-        return new PagedResult<AdminOperatorListItemResponse>(items, totalCount, pageNumber, pageSize);
+        return new PagedResult<OperatorListItemResponse>(items, totalCount, pageNumber, pageSize);
     }
 
-    public async Task<AdminOperatorDetailResponse> GetOperatorByIdAsync(
+    public async Task<OperatorDetailResponse> GetOperatorByIdAsync(
         Guid userId,
         CancellationToken cancellationToken = default)
     {
@@ -237,7 +237,7 @@ public sealed class AdminUserService(
                 a.Reason
             )).ToList();
 
-        return new AdminOperatorDetailResponse(
+        return new OperatorDetailResponse(
             user.Id,
             user.ResidentProfile?.FullName ?? user.Email ?? user.PhoneNumber ?? "Operator",
             user.Email,

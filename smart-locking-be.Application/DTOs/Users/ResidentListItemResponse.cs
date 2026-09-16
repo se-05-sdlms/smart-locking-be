@@ -1,8 +1,8 @@
 using smart_locking_be.Domain.Enums;
 
-namespace smart_locking_be.Application.DTOs.Admin;
+namespace smart_locking_be.Application.DTOs.Users;
 
-public sealed record AdminResidentListItemResponse(
+public sealed record ResidentListItemResponse(
     Guid UserId,
     string FullName,
     string? PhoneNumber,

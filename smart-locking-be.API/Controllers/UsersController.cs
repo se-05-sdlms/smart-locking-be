@@ -2,16 +2,16 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.API.Authorization;
-using smart_locking_be.Application.DTOs.Admin;
 using smart_locking_be.Application.DTOs.Common;
+using smart_locking_be.Application.DTOs.Users;
 using smart_locking_be.Application.Interfaces.Services;
 
 namespace smart_locking_be.API.Controllers;
 
 [ApiController]
-[Route("api/admin/users")]
+[Route("api/[controller]")]
 [Authorize(Policy = ApiPolicies.Administrator)]
-public sealed class AdminUsersController(IAdminUserService adminUserService) : ControllerBase
+public sealed class UsersController(IUserService userService) : ControllerBase
 {
     private Guid? GetCurrentUserId()
     {
@@ -23,19 +23,19 @@ public sealed class AdminUsersController(IAdminUserService adminUserService) : C
         HttpContext.Connection.RemoteIpAddress?.ToString();
 
     [HttpGet("residents")]
-    [ProducesResponseType(typeof(PagedResult<AdminResidentListItemResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResult<ResidentListItemResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetResidents(
         [FromQuery] GetUsersFilterRequest filter,
         CancellationToken cancellationToken)
     {
-        var result = await adminUserService.GetResidentsAsync(filter, cancellationToken);
+        var result = await userService.GetResidentsAsync(filter, cancellationToken);
         return Ok(result);
     }
 
     [HttpGet("residents/{id:guid}")]
-    [ProducesResponseType(typeof(AdminResidentDetailResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResidentDetailResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -45,7 +45,7 @@ public sealed class AdminUsersController(IAdminUserService adminUserService) : C
     {
         try
         {
-            var result = await adminUserService.GetResidentByIdAsync(id, cancellationToken);
+            var result = await userService.GetResidentByIdAsync(id, cancellationToken);
             return Ok(result);
         }
         catch (KeyNotFoundException ex)
@@ -73,7 +73,7 @@ public sealed class AdminUsersController(IAdminUserService adminUserService) : C
 
         try
         {
-            await adminUserService.UpdateResidentStatusAsync(adminId.Value, id, request, GetIpAddress(), cancellationToken);
+            await userService.UpdateResidentStatusAsync(adminId.Value, id, request, GetIpAddress(), cancellationToken);
             return NoContent();
         }
         catch (KeyNotFoundException ex)
@@ -87,19 +87,19 @@ public sealed class AdminUsersController(IAdminUserService adminUserService) : C
     }
 
     [HttpGet("operators")]
-    [ProducesResponseType(typeof(PagedResult<AdminOperatorListItemResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResult<OperatorListItemResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetOperators(
         [FromQuery] GetUsersFilterRequest filter,
         CancellationToken cancellationToken)
     {
-        var result = await adminUserService.GetOperatorsAsync(filter, cancellationToken);
+        var result = await userService.GetOperatorsAsync(filter, cancellationToken);
         return Ok(result);
     }
 
     [HttpGet("operators/{id:guid}")]
-    [ProducesResponseType(typeof(AdminOperatorDetailResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(OperatorDetailResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -109,7 +109,7 @@ public sealed class AdminUsersController(IAdminUserService adminUserService) : C
     {
         try
         {
-            var result = await adminUserService.GetOperatorByIdAsync(id, cancellationToken);
+            var result = await userService.GetOperatorByIdAsync(id, cancellationToken);
             return Ok(result);
         }
         catch (KeyNotFoundException ex)
@@ -136,7 +136,7 @@ public sealed class AdminUsersController(IAdminUserService adminUserService) : C
 
         try
         {
-            var result = await adminUserService.CreateOperatorAsync(adminId.Value, request, GetIpAddress(), cancellationToken);
+            var result = await userService.CreateOperatorAsync(adminId.Value, request, GetIpAddress(), cancellationToken);
             return CreatedAtAction(nameof(GetOperatorById), new { id = result.UserId }, result);
         }
         catch (ArgumentException ex)
@@ -168,7 +168,7 @@ public sealed class AdminUsersController(IAdminUserService adminUserService) : C
 
         try
         {
-            await adminUserService.UpdateOperatorStatusAsync(adminId.Value, id, request, GetIpAddress(), cancellationToken);
+            await userService.UpdateOperatorStatusAsync(adminId.Value, id, request, GetIpAddress(), cancellationToken);
             return NoContent();
         }
         catch (KeyNotFoundException ex)
@@ -200,7 +200,7 @@ public sealed class AdminUsersController(IAdminUserService adminUserService) : C
 
         try
         {
-            var result = await adminUserService.AssignOperatorScopeAsync(adminId.Value, id, request, GetIpAddress(), cancellationToken);
+            var result = await userService.AssignOperatorScopeAsync(adminId.Value, id, request, GetIpAddress(), cancellationToken);
             return Ok(result);
         }
         catch (KeyNotFoundException ex)
@@ -237,7 +237,7 @@ public sealed class AdminUsersController(IAdminUserService adminUserService) : C
 
         try
         {
-            await adminUserService.RevokeOperatorScopeAsync(adminId.Value, id, assignmentId, reason, GetIpAddress(), cancellationToken);
+            await userService.RevokeOperatorScopeAsync(adminId.Value, id, assignmentId, reason, GetIpAddress(), cancellationToken);
             return NoContent();
         }
         catch (KeyNotFoundException ex)

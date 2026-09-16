@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using smart_locking_be.Application.DTOs.Admin;
+using smart_locking_be.Application.DTOs.Users;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Auth;
@@ -7,9 +7,9 @@ using smart_locking_be.Infrastructure.Persistence;
 using smart_locking_be.Infrastructure.Services;
 using Xunit;
 
-namespace smart_locking_be.Tests.Admin;
+namespace smart_locking_be.Tests.Users;
 
-public sealed class AdminUserServiceTests
+public sealed class UserServiceTests
 {
     private static ApplicationDbContext CreateInMemoryDbContext()
     {
@@ -20,12 +20,12 @@ public sealed class AdminUserServiceTests
         return new ApplicationDbContext(options);
     }
 
-    private static (AdminUserService Service, ApplicationDbContext DbContext) CreateTestService()
+    private static (UserService Service, ApplicationDbContext DbContext) CreateTestService()
     {
         var dbContext = CreateInMemoryDbContext();
         var passwordHashService = new Pbkdf2PasswordHashService();
         var tokenHashService = new Sha256TokenHashService();
-        var service = new AdminUserService(dbContext, passwordHashService, tokenHashService);
+        var service = new UserService(dbContext, passwordHashService, tokenHashService);
         return (service, dbContext);
     }
 

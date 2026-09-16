@@ -1,15 +1,15 @@
-using smart_locking_be.Application.DTOs.Admin;
 using smart_locking_be.Application.DTOs.Common;
+using smart_locking_be.Application.DTOs.Users;
 
 namespace smart_locking_be.Application.Interfaces.Services;
 
-public interface IAdminUserService
+public interface IUserService
 {
-    Task<PagedResult<AdminResidentListItemResponse>> GetResidentsAsync(
+    Task<PagedResult<ResidentListItemResponse>> GetResidentsAsync(
         GetUsersFilterRequest filter,
         CancellationToken cancellationToken = default);
 
-    Task<AdminResidentDetailResponse> GetResidentByIdAsync(
+    Task<ResidentDetailResponse> GetResidentByIdAsync(
         Guid userId,
         CancellationToken cancellationToken = default);
 
@@ -20,11 +20,11 @@ public interface IAdminUserService
         string? ipAddress = null,
         CancellationToken cancellationToken = default);
 
-    Task<PagedResult<AdminOperatorListItemResponse>> GetOperatorsAsync(
+    Task<PagedResult<OperatorListItemResponse>> GetOperatorsAsync(
         GetUsersFilterRequest filter,
         CancellationToken cancellationToken = default);
 
-    Task<AdminOperatorDetailResponse> GetOperatorByIdAsync(
+    Task<OperatorDetailResponse> GetOperatorByIdAsync(
         Guid userId,
         CancellationToken cancellationToken = default);
 
