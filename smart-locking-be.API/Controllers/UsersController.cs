@@ -2,7 +2,6 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.API.Authorization;
-using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Users;
 using smart_locking_be.Application.Interfaces.Services;
 
@@ -11,242 +10,138 @@ namespace smart_locking_be.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize(Policy = ApiPolicies.Administrator)]
-public sealed class UsersController(IUserService userService) : ControllerBase
+public class UsersController(IUserService userService) : ControllerBase
 {
-    private Guid? GetCurrentUserId()
-    {
-        string? idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(idClaim, out var id) ? id : null;
-    }
-
-    private string? GetIpAddress() =>
-        HttpContext.Connection.RemoteIpAddress?.ToString();
-
-    [HttpGet("residents")]
-    [ProducesResponseType(typeof(PagedResult<ResidentListItemResponse>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<IActionResult> GetResidents(
+    [HttpGet]
+    public async Task<IActionResult> GetUsers(
         [FromQuery] GetUsersFilterRequest filter,
         CancellationToken cancellationToken)
     {
-        var result = await userService.GetResidentsAsync(filter, cancellationToken);
-        return Ok(result);
+        return await ExecuteAsync(() => userService.GetUsersAsync(filter, cancellationToken));
     }
 
-    [HttpGet("residents/{id:guid}")]
-    [ProducesResponseType(typeof(ResidentDetailResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<IActionResult> GetResidentById(
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetUserById(
         Guid id,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            var result = await userService.GetResidentByIdAsync(id, cancellationToken);
-            return Ok(result);
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
+        return await ExecuteAsync(() => userService.GetUserByIdAsync(id, cancellationToken));
     }
 
-    [HttpPut("residents/{id:guid}/status")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<IActionResult> UpdateResidentStatus(
+    [HttpPost]
+    public async Task<IActionResult> CreateUser(
+        [FromBody] CreateUserRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out Guid adminId))
+        {
+            return Unauthorized(new { message = "Không xác định được danh tính quản trị viên." });
+        }
+
+        return await ExecuteAsync(() => userService.CreateUserAsync(adminId, request, GetIpAddress(), cancellationToken));
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> UpdateUser(
+        Guid id,
+        [FromBody] UpdateUserRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out Guid adminId))
+        {
+            return Unauthorized(new { message = "Không xác định được danh tính quản trị viên." });
+        }
+
+        return await ExecuteAsync(() => userService.UpdateUserAsync(adminId, id, request, GetIpAddress(), cancellationToken));
+    }
+
+    [HttpPut("{id:guid}/status")]
+    public async Task<IActionResult> UpdateUserStatus(
         Guid id,
         [FromBody] UpdateUserStatusRequest request,
         CancellationToken cancellationToken)
     {
-        var adminId = GetCurrentUserId();
-        if (adminId is null)
+        if (!TryGetUserId(out Guid adminId))
         {
             return Unauthorized(new { message = "Không xác định được danh tính quản trị viên." });
         }
 
-        try
-        {
-            await userService.UpdateResidentStatusAsync(adminId.Value, id, request, GetIpAddress(), cancellationToken);
-            return NoContent();
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        return await ExecuteAsync(() => userService.UpdateUserStatusAsync(adminId, id, request, GetIpAddress(), cancellationToken));
     }
 
-    [HttpGet("operators")]
-    [ProducesResponseType(typeof(PagedResult<OperatorListItemResponse>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<IActionResult> GetOperators(
-        [FromQuery] GetUsersFilterRequest filter,
-        CancellationToken cancellationToken)
-    {
-        var result = await userService.GetOperatorsAsync(filter, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpGet("operators/{id:guid}")]
-    [ProducesResponseType(typeof(OperatorDetailResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<IActionResult> GetOperatorById(
-        Guid id,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var result = await userService.GetOperatorByIdAsync(id, cancellationToken);
-            return Ok(result);
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-    }
-
-    [HttpPost("operators")]
-    [ProducesResponseType(typeof(CreateOperatorResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<IActionResult> CreateOperator(
-        [FromBody] CreateOperatorRequest request,
-        CancellationToken cancellationToken)
-    {
-        var adminId = GetCurrentUserId();
-        if (adminId is null)
-        {
-            return Unauthorized(new { message = "Không xác định được danh tính quản trị viên." });
-        }
-
-        try
-        {
-            var result = await userService.CreateOperatorAsync(adminId.Value, request, GetIpAddress(), cancellationToken);
-            return CreatedAtAction(nameof(GetOperatorById), new { id = result.UserId }, result);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
-    }
-
-    [HttpPut("operators/{id:guid}/status")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<IActionResult> UpdateOperatorStatus(
-        Guid id,
-        [FromBody] UpdateUserStatusRequest request,
-        CancellationToken cancellationToken)
-    {
-        var adminId = GetCurrentUserId();
-        if (adminId is null)
-        {
-            return Unauthorized(new { message = "Không xác định được danh tính quản trị viên." });
-        }
-
-        try
-        {
-            await userService.UpdateOperatorStatusAsync(adminId.Value, id, request, GetIpAddress(), cancellationToken);
-            return NoContent();
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
-
-    [HttpPost("operators/{id:guid}/assignments")]
-    [ProducesResponseType(typeof(OperatorAssignmentResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [HttpPost("{id:guid}/assignments")]
     public async Task<IActionResult> AssignOperatorScope(
         Guid id,
         [FromBody] AssignOperatorScopeRequest request,
         CancellationToken cancellationToken)
     {
-        var adminId = GetCurrentUserId();
-        if (adminId is null)
+        if (!TryGetUserId(out Guid adminId))
         {
             return Unauthorized(new { message = "Không xác định được danh tính quản trị viên." });
         }
 
-        try
-        {
-            var result = await userService.AssignOperatorScopeAsync(adminId.Value, id, request, GetIpAddress(), cancellationToken);
-            return Ok(result);
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        return await ExecuteAsync(() => userService.AssignOperatorScopeAsync(adminId, id, request, GetIpAddress(), cancellationToken));
     }
 
-    [HttpDelete("operators/{id:guid}/assignments/{assignmentId:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [HttpDelete("{id:guid}/assignments/{assignmentId:guid}")]
     public async Task<IActionResult> RevokeOperatorScope(
         Guid id,
         Guid assignmentId,
         [FromQuery] string? reason,
         CancellationToken cancellationToken)
     {
-        var adminId = GetCurrentUserId();
-        if (adminId is null)
+        if (!TryGetUserId(out Guid adminId))
         {
             return Unauthorized(new { message = "Không xác định được danh tính quản trị viên." });
         }
 
         try
         {
-            await userService.RevokeOperatorScopeAsync(adminId.Value, id, assignmentId, reason, GetIpAddress(), cancellationToken);
+            await userService.RevokeOperatorScopeAsync(adminId, id, assignmentId, reason, GetIpAddress(), cancellationToken);
             return NoContent();
         }
-        catch (KeyNotFoundException ex)
+        catch (KeyNotFoundException exception)
         {
-            return NotFound(new { message = ex.Message });
+            return NotFound(new { message = exception.Message });
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException exception)
         {
-            return BadRequest(new { message = ex.Message });
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
+    private bool TryGetUserId(out Guid userId)
+    {
+        string? claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(claimValue, out userId);
+    }
+
+    private string? GetIpAddress() =>
+        HttpContext.Connection.RemoteIpAddress?.ToString();
+
+    private async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
+    {
+        try
+        {
+            TResponse result = await action();
+            return Ok(result);
+        }
+        catch (KeyNotFoundException exception)
+        {
+            return NotFound(new { message = exception.Message });
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            if (exception.Message.Contains("đã được sử dụng", StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict(new { message = exception.Message });
+            }
+
+            return BadRequest(new { message = exception.Message });
         }
     }
 }

@@ -5,51 +5,43 @@ namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface IUserService
 {
-    Task<PagedResult<ResidentListItemResponse>> GetResidentsAsync(
+    Task<PagedResult<UserListItemResponse>> GetUsersAsync(
         GetUsersFilterRequest filter,
         CancellationToken cancellationToken = default);
 
-    Task<ResidentDetailResponse> GetResidentByIdAsync(
-        Guid userId,
+    Task<UserDetailResponse> GetUserByIdAsync(
+        Guid id,
         CancellationToken cancellationToken = default);
 
-    Task UpdateResidentStatusAsync(
-        Guid adminUserId,
-        Guid userId,
-        UpdateUserStatusRequest request,
+    Task<CreateUserResponse> CreateUserAsync(
+        Guid actorAdminId,
+        CreateUserRequest request,
         string? ipAddress = null,
         CancellationToken cancellationToken = default);
 
-    Task<PagedResult<OperatorListItemResponse>> GetOperatorsAsync(
-        GetUsersFilterRequest filter,
-        CancellationToken cancellationToken = default);
-
-    Task<OperatorDetailResponse> GetOperatorByIdAsync(
-        Guid userId,
-        CancellationToken cancellationToken = default);
-
-    Task<CreateOperatorResponse> CreateOperatorAsync(
-        Guid adminUserId,
-        CreateOperatorRequest request,
+    Task<UserDetailResponse> UpdateUserAsync(
+        Guid actorAdminId,
+        Guid id,
+        UpdateUserRequest request,
         string? ipAddress = null,
         CancellationToken cancellationToken = default);
 
-    Task UpdateOperatorStatusAsync(
-        Guid adminUserId,
-        Guid userId,
+    Task<UserDetailResponse> UpdateUserStatusAsync(
+        Guid actorAdminId,
+        Guid id,
         UpdateUserStatusRequest request,
         string? ipAddress = null,
         CancellationToken cancellationToken = default);
 
     Task<OperatorAssignmentResponse> AssignOperatorScopeAsync(
-        Guid adminUserId,
+        Guid actorAdminId,
         Guid operatorId,
         AssignOperatorScopeRequest request,
         string? ipAddress = null,
         CancellationToken cancellationToken = default);
 
     Task RevokeOperatorScopeAsync(
-        Guid adminUserId,
+        Guid actorAdminId,
         Guid operatorId,
         Guid assignmentId,
         string? reason = null,

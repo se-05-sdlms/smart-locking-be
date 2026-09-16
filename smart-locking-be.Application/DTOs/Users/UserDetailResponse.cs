@@ -2,17 +2,21 @@ using smart_locking_be.Domain.Enums;
 
 namespace smart_locking_be.Application.DTOs.Users;
 
-public sealed record ResidentDetailResponse(
-    Guid UserId,
+public sealed record UserDetailResponse(
+    Guid Id,
     string FullName,
     string? PhoneNumber,
     string? Email,
+    UserRole Role,
+    UserStatus Status,
+    bool MustChangePassword,
     DateOnly? DateOfBirth,
     string? AvatarUrl,
-    DeliveryApprovalMode DeliveryApprovalMode,
+    DeliveryApprovalMode? DeliveryApprovalMode,
     bool FaceRecognitionEnabled,
     DateTimeOffset? PersonalQrIssuedAt,
-    UserStatus Status,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? LastLoginAt
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? LastLoginAt,
+    IReadOnlyList<OperatorAssignmentResponse> Assignments
 );

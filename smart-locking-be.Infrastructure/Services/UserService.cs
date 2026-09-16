@@ -15,146 +15,7 @@ public sealed class UserService(
     IPasswordHashService passwordHashService,
     ITokenHashService tokenHashService) : IUserService
 {
-    public async Task<PagedResult<ResidentListItemResponse>> GetResidentsAsync(
-        GetUsersFilterRequest filter,
-        CancellationToken cancellationToken = default)
-    {
-        var query = dbContext.Users
-            .AsNoTracking()
-            .Include(u => u.ResidentProfile)
-            .Where(u => u.Role == UserRole.Resident);
-
-        if (filter.Status.HasValue)
-        {
-            query = query.Where(u => u.Status == filter.Status.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(filter.Search))
-        {
-            string search = filter.Search.Trim().ToLower();
-            query = query.Where(u =>
-                (u.PhoneNumber != null && u.PhoneNumber.Contains(search)) ||
-                (u.Email != null && u.Email.ToLower().Contains(search)) ||
-                (u.ResidentProfile != null && u.ResidentProfile.FullName.ToLower().Contains(search)));
-        }
-
-        int totalCount = await query.CountAsync(cancellationToken);
-
-        int pageNumber = filter.PageNumber < 1 ? 1 : filter.PageNumber;
-        int pageSize = filter.PageSize < 1 ? 10 : (filter.PageSize > 100 ? 100 : filter.PageSize);
-
-        var users = await query
-            .OrderByDescending(u => u.CreatedAt)
-            .Skip((pageNumber - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
-
-        var items = users.Select(u => new ResidentListItemResponse(
-            u.Id,
-            u.ResidentProfile?.FullName ?? u.PhoneNumber ?? u.Email ?? "Cư dân",
-            u.PhoneNumber,
-            u.Email,
-            u.ResidentProfile?.AvatarUrl,
-            u.ResidentProfile?.DeliveryApprovalMode ?? DeliveryApprovalMode.Auto,
-            u.Status,
-            u.CreatedAt
-        )).ToList();
-
-        return new PagedResult<ResidentListItemResponse>(items, totalCount, pageNumber, pageSize);
-    }
-
-    public async Task<ResidentDetailResponse> GetResidentByIdAsync(
-        Guid userId,
-        CancellationToken cancellationToken = default)
-    {
-        var user = await dbContext.Users
-            .AsNoTracking()
-            .Include(u => u.ResidentProfile)
-            .FirstOrDefaultAsync(u => u.Id == userId && u.Role == UserRole.Resident, cancellationToken);
-
-        if (user is null)
-        {
-            throw new KeyNotFoundException("Không tìm thấy cư dân.");
-        }
-
-        return new ResidentDetailResponse(
-            user.Id,
-            user.ResidentProfile?.FullName ?? user.PhoneNumber ?? user.Email ?? "Cư dân",
-            user.PhoneNumber,
-            user.Email,
-            user.ResidentProfile?.DateOfBirth,
-            user.ResidentProfile?.AvatarUrl,
-            user.ResidentProfile?.DeliveryApprovalMode ?? DeliveryApprovalMode.Auto,
-            user.ResidentProfile?.FaceRecognitionEnabled ?? false,
-            user.ResidentProfile?.PersonalQrIssuedAt,
-            user.Status,
-            user.CreatedAt,
-            user.LastLoginAt
-        );
-    }
-
-    public async Task UpdateResidentStatusAsync(
-        Guid adminUserId,
-        Guid userId,
-        UpdateUserStatusRequest request,
-        string? ipAddress = null,
-        CancellationToken cancellationToken = default)
-    {
-        var user = await dbContext.Users
-            .FirstOrDefaultAsync(u => u.Id == userId && u.Role == UserRole.Resident, cancellationToken);
-
-        if (user is null)
-        {
-            throw new KeyNotFoundException("Không tìm thấy cư dân.");
-        }
-
-        if (user.Status == request.NewStatus)
-        {
-            return;
-        }
-
-        var oldStatus = user.Status;
-        user.Status = request.NewStatus;
-        user.UpdatedAt = DateTimeOffset.UtcNow;
-
-        if (request.NewStatus is UserStatus.Locked or UserStatus.Disabled)
-        {
-            var activeTokens = await dbContext.RefreshTokens
-                .Where(t => t.UserId == userId && t.RevokedAt == null && t.ExpiresAt > DateTimeOffset.UtcNow)
-                .ToListAsync(cancellationToken);
-
-            foreach (var token in activeTokens)
-            {
-                token.RevokedAt = DateTimeOffset.UtcNow;
-                token.RevokedByIp = ipAddress;
-            }
-        }
-
-        string actionName = request.NewStatus switch
-        {
-            UserStatus.Locked => "LockResident",
-            UserStatus.Disabled => "DisableResident",
-            _ => "UnlockResident"
-        };
-
-        var auditLog = new AuditLog
-        {
-            Id = Guid.NewGuid(),
-            ActorUserId = adminUserId,
-            Action = actionName,
-            EntityType = "User",
-            EntityId = user.Id,
-            Result = AuditLogResult.Succeeded,
-            IpAddress = ipAddress,
-            Details = $"Đổi trạng thái tài khoản cư dân từ {oldStatus} sang {request.NewStatus}. Lý do: {request.Reason}",
-            OccurredAt = DateTimeOffset.UtcNow
-        };
-
-        dbContext.AuditLogs.Add(auditLog);
-        await dbContext.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task<PagedResult<OperatorListItemResponse>> GetOperatorsAsync(
+    public async Task<PagedResult<UserListItemResponse>> GetUsersAsync(
         GetUsersFilterRequest filter,
         CancellationToken cancellationToken = default)
     {
@@ -162,7 +23,12 @@ public sealed class UserService(
             .AsNoTracking()
             .Include(u => u.ResidentProfile)
             .Include(u => u.OperatorAssignments)
-            .Where(u => u.Role == UserRole.LockerOperator);
+            .AsQueryable();
+
+        if (filter.Role.HasValue)
+        {
+            query = query.Where(u => u.Role == filter.Role.Value);
+        }
 
         if (filter.Status.HasValue)
         {
@@ -189,21 +55,23 @@ public sealed class UserService(
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        var items = users.Select(u => new OperatorListItemResponse(
+        var items = users.Select(u => new UserListItemResponse(
             u.Id,
-            u.ResidentProfile?.FullName ?? u.Email ?? u.PhoneNumber ?? "Operator",
-            u.Email,
+            u.ResidentProfile?.FullName ?? u.PhoneNumber ?? u.Email ?? "Người dùng",
             u.PhoneNumber,
+            u.Email,
+            u.Role,
             u.Status,
             u.OperatorAssignments.Count(a => a.RevokedAt == null),
-            u.CreatedAt
+            u.CreatedAt,
+            u.LastLoginAt
         )).ToList();
 
-        return new PagedResult<OperatorListItemResponse>(items, totalCount, pageNumber, pageSize);
+        return new PagedResult<UserListItemResponse>(items, totalCount, pageNumber, pageSize);
     }
 
-    public async Task<OperatorDetailResponse> GetOperatorByIdAsync(
-        Guid userId,
+    public async Task<UserDetailResponse> GetUserByIdAsync(
+        Guid id,
         CancellationToken cancellationToken = default)
     {
         var user = await dbContext.Users
@@ -215,44 +83,19 @@ public sealed class UserService(
                 .ThenInclude(a => a.LockerCluster)
             .Include(u => u.OperatorAssignments)
                 .ThenInclude(a => a.Locker)
-            .FirstOrDefaultAsync(u => u.Id == userId && u.Role == UserRole.LockerOperator, cancellationToken);
+            .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
 
         if (user is null)
         {
-            throw new KeyNotFoundException("Không tìm thấy nhân viên vận hành.");
+            throw new KeyNotFoundException("Không tìm thấy người dùng.");
         }
 
-        var assignments = user.OperatorAssignments
-            .OrderByDescending(a => a.AssignedAt)
-            .Select(a => new OperatorAssignmentResponse(
-                a.Id,
-                a.BuildingId,
-                a.Building?.Name,
-                a.LockerClusterId,
-                a.LockerCluster?.Name,
-                a.LockerId,
-                a.Locker?.Code,
-                a.AssignedAt,
-                a.RevokedAt,
-                a.Reason
-            )).ToList();
-
-        return new OperatorDetailResponse(
-            user.Id,
-            user.ResidentProfile?.FullName ?? user.Email ?? user.PhoneNumber ?? "Operator",
-            user.Email,
-            user.PhoneNumber,
-            user.Status,
-            user.MustChangePassword,
-            user.LastLoginAt,
-            user.CreatedAt,
-            assignments
-        );
+        return MapToDetail(user);
     }
 
-    public async Task<CreateOperatorResponse> CreateOperatorAsync(
-        Guid adminUserId,
-        CreateOperatorRequest request,
+    public async Task<CreateUserResponse> CreateUserAsync(
+        Guid actorAdminId,
+        CreateUserRequest request,
         string? ipAddress = null,
         CancellationToken cancellationToken = default)
     {
@@ -297,7 +140,7 @@ public sealed class UserService(
             Email = email,
             PhoneNumber = phone,
             PasswordHash = passwordHashService.HashPassword(temporaryPassword),
-            Role = UserRole.LockerOperator,
+            Role = request.Role,
             Status = UserStatus.Active,
             MustChangePassword = true,
             CreatedAt = now,
@@ -320,7 +163,7 @@ public sealed class UserService(
 
         dbContext.ResidentProfiles.Add(profile);
 
-        if (scopeCount == 1)
+        if (scopeCount == 1 && request.Role == UserRole.LockerOperator)
         {
             var assignment = new OperatorAssignment
             {
@@ -329,9 +172,9 @@ public sealed class UserService(
                 BuildingId = request.BuildingId,
                 LockerClusterId = request.LockerClusterId,
                 LockerId = request.LockerId,
-                AssignedByUserId = adminUserId,
+                AssignedByUserId = actorAdminId,
                 AssignedAt = now,
-                Reason = request.AssignmentReason ?? "Phân công ban đầu khi tạo tài khoản Operator"
+                Reason = request.AssignmentReason ?? "Phân công ban đầu khi tạo tài khoản"
             };
 
             dbContext.OperatorAssignments.Add(assignment);
@@ -340,93 +183,182 @@ public sealed class UserService(
         var auditLog = new AuditLog
         {
             Id = Guid.NewGuid(),
-            ActorUserId = adminUserId,
-            Action = "CreateOperator",
+            ActorUserId = actorAdminId,
+            Action = "CreateUser",
             EntityType = "User",
             EntityId = user.Id,
             Result = AuditLogResult.Succeeded,
             IpAddress = ipAddress,
-            Details = $"Tạo tài khoản Operator: {email}, Họ tên: {profile.FullName}",
+            Details = $"Tạo tài khoản {user.Role}: {email}, Họ tên: {profile.FullName}",
             OccurredAt = now
         };
 
         dbContext.AuditLogs.Add(auditLog);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return new CreateOperatorResponse(
+        return new CreateUserResponse(
             user.Id,
             profile.FullName,
             user.Email,
             user.PhoneNumber,
-            temporaryPassword,
+            user.Role,
             user.Status,
+            temporaryPassword,
             user.CreatedAt
         );
     }
 
-    public async Task UpdateOperatorStatusAsync(
-        Guid adminUserId,
-        Guid userId,
+    public async Task<UserDetailResponse> UpdateUserAsync(
+        Guid actorAdminId,
+        Guid id,
+        UpdateUserRequest request,
+        string? ipAddress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await dbContext.Users
+            .Include(u => u.ResidentProfile)
+            .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+
+        if (user is null)
+        {
+            throw new KeyNotFoundException("Không tìm thấy người dùng.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.FullName))
+        {
+            throw new ArgumentException("Họ và tên không được để trống.", nameof(request.FullName));
+        }
+
+        string? email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToLowerInvariant();
+        string? phone = string.IsNullOrWhiteSpace(request.PhoneNumber) ? null : request.PhoneNumber.Trim();
+
+        if (email != null && email != user.Email)
+        {
+            bool emailExists = await dbContext.Users.AnyAsync(u => u.Id != id && u.Email == email, cancellationToken);
+            if (emailExists)
+            {
+                throw new InvalidOperationException("Email đã được sử dụng bởi tài khoản khác.");
+            }
+            user.Email = email;
+        }
+
+        if (phone != null && phone != user.PhoneNumber)
+        {
+            bool phoneExists = await dbContext.Users.AnyAsync(u => u.Id != id && u.PhoneNumber == phone, cancellationToken);
+            if (phoneExists)
+            {
+                throw new InvalidOperationException("Số điện thoại đã được sử dụng bởi tài khoản khác.");
+            }
+            user.PhoneNumber = phone;
+        }
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (user.ResidentProfile is null)
+        {
+            user.ResidentProfile = new ResidentProfile
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                FullName = request.FullName.Trim(),
+                DeliveryApprovalMode = DeliveryApprovalMode.Manual,
+                PersonalQrTokenHash = tokenHashService.HashToken(tokenHashService.CreateSecureToken()),
+                PersonalQrIssuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            dbContext.ResidentProfiles.Add(user.ResidentProfile);
+        }
+        else
+        {
+            user.ResidentProfile.FullName = request.FullName.Trim();
+            user.ResidentProfile.UpdatedAt = now;
+        }
+
+        user.UpdatedAt = now;
+
+        var auditLog = new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = actorAdminId,
+            Action = "UpdateUser",
+            EntityType = "User",
+            EntityId = user.Id,
+            Result = AuditLogResult.Succeeded,
+            IpAddress = ipAddress,
+            Details = $"Cập nhật thông tin người dùng {id}: Họ tên: {request.FullName}, Email: {user.Email}, SĐT: {user.PhoneNumber}",
+            OccurredAt = now
+        };
+
+        dbContext.AuditLogs.Add(auditLog);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return await GetUserByIdAsync(id, cancellationToken);
+    }
+
+    public async Task<UserDetailResponse> UpdateUserStatusAsync(
+        Guid actorAdminId,
+        Guid id,
         UpdateUserStatusRequest request,
         string? ipAddress = null,
         CancellationToken cancellationToken = default)
     {
         var user = await dbContext.Users
-            .FirstOrDefaultAsync(u => u.Id == userId && u.Role == UserRole.LockerOperator, cancellationToken);
+            .Include(u => u.ResidentProfile)
+            .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
 
         if (user is null)
         {
-            throw new KeyNotFoundException("Không tìm thấy nhân viên vận hành.");
+            throw new KeyNotFoundException("Không tìm thấy người dùng.");
         }
 
-        if (user.Status == request.NewStatus)
+        if (user.Status != request.Status)
         {
-            return;
-        }
+            var oldStatus = user.Status;
+            user.Status = request.Status;
+            user.UpdatedAt = DateTimeOffset.UtcNow;
 
-        var oldStatus = user.Status;
-        user.Status = request.NewStatus;
-        user.UpdatedAt = DateTimeOffset.UtcNow;
-
-        if (request.NewStatus is UserStatus.Locked or UserStatus.Disabled)
-        {
-            var activeTokens = await dbContext.RefreshTokens
-                .Where(t => t.UserId == userId && t.RevokedAt == null && t.ExpiresAt > DateTimeOffset.UtcNow)
-                .ToListAsync(cancellationToken);
-
-            foreach (var token in activeTokens)
+            if (request.Status is UserStatus.Locked or UserStatus.Disabled)
             {
-                token.RevokedAt = DateTimeOffset.UtcNow;
-                token.RevokedByIp = ipAddress;
+                var activeTokens = await dbContext.RefreshTokens
+                    .Where(t => t.UserId == id && t.RevokedAt == null && t.ExpiresAt > DateTimeOffset.UtcNow)
+                    .ToListAsync(cancellationToken);
+
+                foreach (var token in activeTokens)
+                {
+                    token.RevokedAt = DateTimeOffset.UtcNow;
+                    token.RevokedByIp = ipAddress;
+                }
             }
+
+            string actionName = request.Status switch
+            {
+                UserStatus.Locked => "LockUser",
+                UserStatus.Disabled => "DisableUser",
+                _ => "UnlockUser"
+            };
+
+            var auditLog = new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                ActorUserId = actorAdminId,
+                Action = actionName,
+                EntityType = "User",
+                EntityId = user.Id,
+                Result = AuditLogResult.Succeeded,
+                IpAddress = ipAddress,
+                Details = $"Đổi trạng thái tài khoản người dùng từ {oldStatus} sang {request.Status}. Lý do: {request.Reason}",
+                OccurredAt = DateTimeOffset.UtcNow
+            };
+
+            dbContext.AuditLogs.Add(auditLog);
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        string actionName = request.NewStatus switch
-        {
-            UserStatus.Locked => "LockOperator",
-            UserStatus.Disabled => "DisableOperator",
-            _ => "UnlockOperator"
-        };
-
-        var auditLog = new AuditLog
-        {
-            Id = Guid.NewGuid(),
-            ActorUserId = adminUserId,
-            Action = actionName,
-            EntityType = "User",
-            EntityId = user.Id,
-            Result = AuditLogResult.Succeeded,
-            IpAddress = ipAddress,
-            Details = $"Đổi trạng thái tài khoản Operator từ {oldStatus} sang {request.NewStatus}. Lý do: {request.Reason}",
-            OccurredAt = DateTimeOffset.UtcNow
-        };
-
-        dbContext.AuditLogs.Add(auditLog);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        return await GetUserByIdAsync(id, cancellationToken);
     }
 
     public async Task<OperatorAssignmentResponse> AssignOperatorScopeAsync(
-        Guid adminUserId,
+        Guid actorAdminId,
         Guid operatorId,
         AssignOperatorScopeRequest request,
         string? ipAddress = null,
@@ -469,7 +401,7 @@ public sealed class UserService(
             BuildingId = request.BuildingId,
             LockerClusterId = request.LockerClusterId,
             LockerId = request.LockerId,
-            AssignedByUserId = adminUserId,
+            AssignedByUserId = actorAdminId,
             AssignedAt = now,
             Reason = request.Reason
         };
@@ -479,7 +411,7 @@ public sealed class UserService(
         var auditLog = new AuditLog
         {
             Id = Guid.NewGuid(),
-            ActorUserId = adminUserId,
+            ActorUserId = actorAdminId,
             Action = "AssignOperatorScope",
             EntityType = "OperatorAssignment",
             EntityId = assignment.Id,
@@ -534,7 +466,7 @@ public sealed class UserService(
     }
 
     public async Task RevokeOperatorScopeAsync(
-        Guid adminUserId,
+        Guid actorAdminId,
         Guid operatorId,
         Guid assignmentId,
         string? reason = null,
@@ -561,7 +493,7 @@ public sealed class UserService(
         var auditLog = new AuditLog
         {
             Id = Guid.NewGuid(),
-            ActorUserId = adminUserId,
+            ActorUserId = actorAdminId,
             Action = "RevokeOperatorScope",
             EntityType = "OperatorAssignment",
             EntityId = assignment.Id,
@@ -573,6 +505,43 @@ public sealed class UserService(
 
         dbContext.AuditLogs.Add(auditLog);
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static UserDetailResponse MapToDetail(User user)
+    {
+        var assignments = user.OperatorAssignments
+            .OrderByDescending(a => a.AssignedAt)
+            .Select(a => new OperatorAssignmentResponse(
+                a.Id,
+                a.BuildingId,
+                a.Building?.Name,
+                a.LockerClusterId,
+                a.LockerCluster?.Name,
+                a.LockerId,
+                a.Locker?.Code,
+                a.AssignedAt,
+                a.RevokedAt,
+                a.Reason
+            )).ToList();
+
+        return new UserDetailResponse(
+            user.Id,
+            user.ResidentProfile?.FullName ?? user.PhoneNumber ?? user.Email ?? "Người dùng",
+            user.PhoneNumber,
+            user.Email,
+            user.Role,
+            user.Status,
+            user.MustChangePassword,
+            user.ResidentProfile?.DateOfBirth,
+            user.ResidentProfile?.AvatarUrl,
+            user.ResidentProfile?.DeliveryApprovalMode,
+            user.ResidentProfile?.FaceRecognitionEnabled ?? false,
+            user.ResidentProfile?.PersonalQrIssuedAt,
+            user.CreatedAt,
+            user.UpdatedAt,
+            user.LastLoginAt,
+            assignments
+        );
     }
 
     private static string GenerateTemporaryPassword()

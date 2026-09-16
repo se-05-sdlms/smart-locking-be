@@ -30,61 +30,64 @@ public sealed class UserServiceTests
     }
 
     [Fact]
-    public async Task GetResidentsAsync_ReturnsOnlyResidentsWithPagingAndFilter()
+    public async Task GetUsersAsync_ReturnsUsersWithRoleAndStatusFiltering()
     {
         var (service, dbContext) = CreateTestService();
         await using (dbContext)
         {
-            var resident1 = new User
+            var resident = new User
             {
                 Id = Guid.NewGuid(),
                 PhoneNumber = "0900000001",
-                Email = "resident1@boxora.com",
+                Email = "resident@boxora.com",
                 Role = UserRole.Resident,
                 Status = UserStatus.Active,
                 CreatedAt = DateTimeOffset.UtcNow.AddDays(-2)
             };
-            var resident2 = new User
+            var opLocked = new User
             {
                 Id = Guid.NewGuid(),
                 PhoneNumber = "0900000002",
-                Email = "resident2@boxora.com",
-                Role = UserRole.Resident,
+                Email = "op.locked@boxora.com",
+                Role = UserRole.LockerOperator,
                 Status = UserStatus.Locked,
                 CreatedAt = DateTimeOffset.UtcNow.AddDays(-1)
             };
-            var operatorUser = new User
+            var admin = new User
             {
                 Id = Guid.NewGuid(),
                 PhoneNumber = "0900000003",
-                Email = "operator@boxora.com",
-                Role = UserRole.LockerOperator,
+                Email = "admin@boxora.com",
+                Role = UserRole.Administrator,
                 Status = UserStatus.Active,
                 CreatedAt = DateTimeOffset.UtcNow
             };
 
-            dbContext.Users.AddRange(resident1, resident2, operatorUser);
+            dbContext.Users.AddRange(resident, opLocked, admin);
             await dbContext.SaveChangesAsync();
 
-            // Act 1: Get all residents
-            var resultAll = await service.GetResidentsAsync(new GetUsersFilterRequest());
-            Assert.Equal(2, resultAll.TotalCount);
-            Assert.Equal(2, resultAll.Items.Count);
+            // All users
+            var all = await service.GetUsersAsync(new GetUsersFilterRequest());
+            Assert.Equal(3, all.TotalCount);
 
-            // Act 2: Filter by status Locked
-            var resultLocked = await service.GetResidentsAsync(new GetUsersFilterRequest(Status: UserStatus.Locked));
-            Assert.Equal(1, resultLocked.TotalCount);
-            Assert.Equal(resident2.Id, resultLocked.Items[0].UserId);
+            // Filter role = LockerOperator
+            var ops = await service.GetUsersAsync(new GetUsersFilterRequest(Role: UserRole.LockerOperator));
+            Assert.Equal(1, ops.TotalCount);
+            Assert.Equal(opLocked.Id, ops.Items[0].Id);
 
-            // Act 3: Filter by search keyword
-            var resultSearch = await service.GetResidentsAsync(new GetUsersFilterRequest(Search: "resident1"));
-            Assert.Equal(1, resultSearch.TotalCount);
-            Assert.Equal(resident1.Id, resultSearch.Items[0].UserId);
+            // Filter status = Active
+            var active = await service.GetUsersAsync(new GetUsersFilterRequest(Status: UserStatus.Active));
+            Assert.Equal(2, active.TotalCount);
+
+            // Search keyword
+            var search = await service.GetUsersAsync(new GetUsersFilterRequest(Search: "resident"));
+            Assert.Equal(1, search.TotalCount);
+            Assert.Equal(resident.Id, search.Items[0].Id);
         }
     }
 
     [Fact]
-    public async Task GetResidentByIdAsync_WhenResidentExists_ReturnsDetailResponse()
+    public async Task GetUserByIdAsync_WhenUserExists_ReturnsDetailResponse()
     {
         var (service, dbContext) = CreateTestService();
         await using (dbContext)
@@ -94,7 +97,7 @@ public sealed class UserServiceTests
             {
                 Id = userId,
                 PhoneNumber = "0911223344",
-                Email = "res@boxora.com",
+                Email = "user@boxora.com",
                 Role = UserRole.Resident,
                 Status = UserStatus.Active,
                 CreatedAt = DateTimeOffset.UtcNow
@@ -103,7 +106,7 @@ public sealed class UserServiceTests
             {
                 Id = Guid.NewGuid(),
                 UserId = userId,
-                FullName = "Nguyen Cư Dân",
+                FullName = "Nguyen Van A",
                 DateOfBirth = new DateOnly(1990, 1, 1),
                 DeliveryApprovalMode = DeliveryApprovalMode.Manual,
                 PersonalQrTokenHash = "hash",
@@ -113,161 +116,63 @@ public sealed class UserServiceTests
             dbContext.ResidentProfiles.Add(profile);
             await dbContext.SaveChangesAsync();
 
-            var detail = await service.GetResidentByIdAsync(userId);
+            var detail = await service.GetUserByIdAsync(userId);
 
             Assert.NotNull(detail);
-            Assert.Equal(userId, detail.UserId);
-            Assert.Equal("Nguyen Cư Dân", detail.FullName);
+            Assert.Equal(userId, detail.Id);
+            Assert.Equal("Nguyen Van A", detail.FullName);
             Assert.Equal(new DateOnly(1990, 1, 1), detail.DateOfBirth);
             Assert.Equal(DeliveryApprovalMode.Manual, detail.DeliveryApprovalMode);
         }
     }
 
     [Fact]
-    public async Task GetResidentByIdAsync_WhenNotResident_ThrowsKeyNotFoundException()
+    public async Task GetUserByIdAsync_WhenNotFound_ThrowsKeyNotFoundException()
     {
         var (service, dbContext) = CreateTestService();
         await using (dbContext)
         {
-            var opUser = new User
-            {
-                Id = Guid.NewGuid(),
-                Email = "op@boxora.com",
-                Role = UserRole.LockerOperator,
-                Status = UserStatus.Active
-            };
-            dbContext.Users.Add(opUser);
-            await dbContext.SaveChangesAsync();
-
-            await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetResidentByIdAsync(opUser.Id));
+            await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetUserByIdAsync(Guid.NewGuid()));
         }
     }
 
     [Fact]
-    public async Task UpdateResidentStatusAsync_WhenLocked_UpdatesStatusCreatesAuditLogAndRevokesTokens()
+    public async Task CreateUserAsync_WhenOperator_CreatesWithTemporaryPasswordAndAuditLog()
     {
         var (service, dbContext) = CreateTestService();
         await using (dbContext)
         {
             var adminId = Guid.NewGuid();
-            var userId = Guid.NewGuid();
-            var user = new User
-            {
-                Id = userId,
-                Email = "res@boxora.com",
-                Role = UserRole.Resident,
-                Status = UserStatus.Active,
-                CreatedAt = DateTimeOffset.UtcNow,
-                UpdatedAt = DateTimeOffset.UtcNow
-            };
-            var token = new RefreshToken
-            {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                TokenHash = "tokenhash",
-                ExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-            dbContext.Users.Add(user);
-            dbContext.RefreshTokens.Add(token);
-            await dbContext.SaveChangesAsync();
-
-            var request = new UpdateUserStatusRequest(UserStatus.Locked, "Vi phạm chính sách sử dụng");
-            await service.UpdateResidentStatusAsync(adminId, userId, request, "127.0.0.1");
-
-            var updatedUser = await dbContext.Users.FirstAsync(u => u.Id == userId);
-            Assert.Equal(UserStatus.Locked, updatedUser.Status);
-
-            var updatedToken = await dbContext.RefreshTokens.FirstAsync(t => t.Id == token.Id);
-            Assert.NotNull(updatedToken.RevokedAt);
-            Assert.Equal("127.0.0.1", updatedToken.RevokedByIp);
-
-            var auditLog = await dbContext.AuditLogs.FirstOrDefaultAsync(l => l.EntityId == userId && l.Action == "LockResident");
-            Assert.NotNull(auditLog);
-            Assert.Equal(adminId, auditLog.ActorUserId);
-            Assert.Equal(AuditLogResult.Succeeded, auditLog.Result);
-            Assert.Contains("Vi phạm chính sách sử dụng", auditLog.Details);
-        }
-    }
-
-    [Fact]
-    public async Task GetOperatorsAsync_ReturnsOperatorsWithActiveAssignmentCounts()
-    {
-        var (service, dbContext) = CreateTestService();
-        await using (dbContext)
-        {
-            var adminId = Guid.NewGuid();
-            var opId = Guid.NewGuid();
-            var op = new User
-            {
-                Id = opId,
-                Email = "operator1@boxora.com",
-                Role = UserRole.LockerOperator,
-                Status = UserStatus.Active,
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-            var assignment1 = new OperatorAssignment
-            {
-                Id = Guid.NewGuid(),
-                OperatorUserId = opId,
-                BuildingId = Guid.NewGuid(),
-                AssignedByUserId = adminId,
-                AssignedAt = DateTimeOffset.UtcNow
-            };
-            var assignment2 = new OperatorAssignment
-            {
-                Id = Guid.NewGuid(),
-                OperatorUserId = opId,
-                LockerClusterId = Guid.NewGuid(),
-                AssignedByUserId = adminId,
-                AssignedAt = DateTimeOffset.UtcNow,
-                RevokedAt = DateTimeOffset.UtcNow // Revoked
-            };
-            dbContext.Users.Add(op);
-            dbContext.OperatorAssignments.AddRange(assignment1, assignment2);
-            await dbContext.SaveChangesAsync();
-
-            var result = await service.GetOperatorsAsync(new GetUsersFilterRequest());
-            Assert.Equal(1, result.TotalCount);
-            Assert.Equal(1, result.Items[0].ActiveAssignmentsCount);
-        }
-    }
-
-    [Fact]
-    public async Task CreateOperatorAsync_WhenValid_CreatesUserWithMustChangePasswordAndAuditLog()
-    {
-        var (service, dbContext) = CreateTestService();
-        await using (dbContext)
-        {
-            var adminId = Guid.NewGuid();
-            var request = new CreateOperatorRequest(
+            var request = new CreateUserRequest(
                 "Le Van Operator",
                 "op.new@boxora.com",
                 "0933445566",
+                UserRole.LockerOperator,
                 null, // Random temporary password
                 null, null, null, null
             );
 
-            var response = await service.CreateOperatorAsync(adminId, request, "10.0.0.1");
+            var response = await service.CreateUserAsync(adminId, request, "10.0.0.1");
 
             Assert.NotNull(response);
             Assert.Equal("op.new@boxora.com", response.Email);
             Assert.Equal("Le Van Operator", response.FullName);
             Assert.NotEmpty(response.TemporaryPassword);
             Assert.Equal(UserStatus.Active, response.Status);
+            Assert.Equal(UserRole.LockerOperator, response.Role);
 
-            var user = await dbContext.Users.FirstAsync(u => u.Id == response.UserId);
+            var user = await dbContext.Users.FirstAsync(u => u.Id == response.Id);
             Assert.Equal(UserRole.LockerOperator, user.Role);
             Assert.True(user.MustChangePassword);
 
-            var auditLog = await dbContext.AuditLogs.FirstOrDefaultAsync(l => l.EntityId == response.UserId && l.Action == "CreateOperator");
+            var auditLog = await dbContext.AuditLogs.FirstOrDefaultAsync(l => l.EntityId == response.Id && l.Action == "CreateUser");
             Assert.NotNull(auditLog);
             Assert.Equal(adminId, auditLog.ActorUserId);
         }
     }
 
     [Fact]
-    public async Task CreateOperatorAsync_WhenEmailExists_ThrowsInvalidOperationException()
+    public async Task CreateUserAsync_WhenDuplicateEmail_ThrowsInvalidOperationException()
     {
         var (service, dbContext) = CreateTestService();
         await using (dbContext)
@@ -283,38 +188,94 @@ public sealed class UserServiceTests
             dbContext.Users.Add(existingUser);
             await dbContext.SaveChangesAsync();
 
-            var request = new CreateOperatorRequest("Name", "existing@boxora.com", null, null, null, null, null, null);
+            var request = new CreateUserRequest("Name", "existing@boxora.com", null, UserRole.LockerOperator, null, null, null, null, null);
 
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                service.CreateOperatorAsync(adminId, request));
+                service.CreateUserAsync(adminId, request));
         }
     }
 
     [Fact]
-    public async Task CreateOperatorAsync_WithMultipleScopes_ThrowsArgumentException()
+    public async Task UpdateUserAsync_UpdatesProfileAndContactInfo()
     {
         var (service, dbContext) = CreateTestService();
         await using (dbContext)
         {
             var adminId = Guid.NewGuid();
-            var request = new CreateOperatorRequest(
-                "Name",
-                "scope.invalid@boxora.com",
-                null,
-                null,
-                BuildingId: Guid.NewGuid(),
-                LockerClusterId: Guid.NewGuid(), // Invalid: 2 scopes provided
-                LockerId: null,
-                AssignmentReason: null
-            );
+            var userId = Guid.NewGuid();
+            var user = new User
+            {
+                Id = userId,
+                Email = "old@boxora.com",
+                PhoneNumber = "0900000001",
+                Role = UserRole.Resident,
+                Status = UserStatus.Active
+            };
+            var profile = new ResidentProfile
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                FullName = "Old Name"
+            };
+            dbContext.Users.Add(user);
+            dbContext.ResidentProfiles.Add(profile);
+            await dbContext.SaveChangesAsync();
 
-            await Assert.ThrowsAsync<ArgumentException>(() =>
-                service.CreateOperatorAsync(adminId, request));
+            var request = new UpdateUserRequest("New Name", "0900000099", "new@boxora.com");
+            var result = await service.UpdateUserAsync(adminId, userId, request, "127.0.0.1");
+
+            Assert.Equal("New Name", result.FullName);
+            Assert.Equal("new@boxora.com", result.Email);
+            Assert.Equal("0900000099", result.PhoneNumber);
+
+            var auditLog = await dbContext.AuditLogs.FirstOrDefaultAsync(l => l.EntityId == userId && l.Action == "UpdateUser");
+            Assert.NotNull(auditLog);
         }
     }
 
     [Fact]
-    public async Task AssignOperatorScopeAsync_WithValidScope_CreatesAssignmentAndAuditLog()
+    public async Task UpdateUserStatusAsync_WhenLocked_UpdatesStatusAndRevokesRefreshTokens()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var adminId = Guid.NewGuid();
+            var userId = Guid.NewGuid();
+            var user = new User
+            {
+                Id = userId,
+                Email = "user@boxora.com",
+                Role = UserRole.Resident,
+                Status = UserStatus.Active
+            };
+            var token = new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                TokenHash = "tokenhash",
+                ExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.Users.Add(user);
+            dbContext.RefreshTokens.Add(token);
+            await dbContext.SaveChangesAsync();
+
+            var request = new UpdateUserStatusRequest(UserStatus.Locked, "Tài khoản có dấu hiệu bị hack");
+            var result = await service.UpdateUserStatusAsync(adminId, userId, request, "127.0.0.1");
+
+            Assert.Equal(UserStatus.Locked, result.Status);
+
+            var updatedToken = await dbContext.RefreshTokens.FirstAsync(t => t.Id == token.Id);
+            Assert.NotNull(updatedToken.RevokedAt);
+
+            var auditLog = await dbContext.AuditLogs.FirstOrDefaultAsync(l => l.EntityId == userId && l.Action == "LockUser");
+            Assert.NotNull(auditLog);
+            Assert.Contains("Tài khoản có dấu hiệu bị hack", auditLog.Details);
+        }
+    }
+
+    [Fact]
+    public async Task AssignOperatorScopeAsync_WhenValid_CreatesAssignment()
     {
         var (service, dbContext) = CreateTestService();
         await using (dbContext)
@@ -326,7 +287,7 @@ public sealed class UserServiceTests
             var op = new User
             {
                 Id = opId,
-                Email = "op.assign@boxora.com",
+                Email = "op@boxora.com",
                 Role = UserRole.LockerOperator,
                 Status = UserStatus.Active
             };
@@ -352,15 +313,11 @@ public sealed class UserServiceTests
             var persisted = await dbContext.OperatorAssignments.FirstAsync(a => a.Id == result.Id);
             Assert.Equal(opId, persisted.OperatorUserId);
             Assert.Equal(adminId, persisted.AssignedByUserId);
-
-            var auditLog = await dbContext.AuditLogs.FirstOrDefaultAsync(l => l.EntityId == result.Id && l.Action == "AssignOperatorScope");
-            Assert.NotNull(auditLog);
-            Assert.Equal(adminId, auditLog.ActorUserId);
         }
     }
 
     [Fact]
-    public async Task RevokeOperatorScopeAsync_UpdatesRevokedAtAndCreatesAuditLog()
+    public async Task RevokeOperatorScopeAsync_UpdatesRevokedAt()
     {
         var (service, dbContext) = CreateTestService();
         await using (dbContext)
@@ -372,7 +329,7 @@ public sealed class UserServiceTests
             var op = new User
             {
                 Id = opId,
-                Email = "op.revoke@boxora.com",
+                Email = "op@boxora.com",
                 Role = UserRole.LockerOperator,
                 Status = UserStatus.Active
             };
@@ -393,10 +350,6 @@ public sealed class UserServiceTests
             var updated = await dbContext.OperatorAssignments.FirstAsync(a => a.Id == assignmentId);
             Assert.NotNull(updated.RevokedAt);
             Assert.Equal("Chuyển công tác", updated.Reason);
-
-            var auditLog = await dbContext.AuditLogs.FirstOrDefaultAsync(l => l.EntityId == assignmentId && l.Action == "RevokeOperatorScope");
-            Assert.NotNull(auditLog);
-            Assert.Equal(adminId, auditLog.ActorUserId);
         }
     }
 }

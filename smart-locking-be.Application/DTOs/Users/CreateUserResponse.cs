@@ -2,12 +2,13 @@ using smart_locking_be.Domain.Enums;
 
 namespace smart_locking_be.Application.DTOs.Users;
 
-public sealed record CreateOperatorResponse(
-    Guid UserId,
+public sealed record CreateUserResponse(
+    Guid Id,
     string FullName,
     string Email,
     string? PhoneNumber,
-    string TemporaryPassword,
+    UserRole Role,
     UserStatus Status,
+    string TemporaryPassword,
     DateTimeOffset CreatedAt
 );
