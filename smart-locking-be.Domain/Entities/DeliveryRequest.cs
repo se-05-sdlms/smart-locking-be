@@ -18,9 +18,9 @@ public sealed class DeliveryRequest
     public Guid? ResidentProfileId { get; set; }
 
     /// <summary>
-    /// Mã định danh cụm locker nơi Shipper đang thực hiện gửi hàng.
+    /// Mã định danh tủ locker nơi Shipper đang thực hiện gửi hàng.
     /// </summary>
-    public Guid LockerClusterId { get; set; }
+    public Guid LockerId { get; set; }
 
     /// <summary>
     /// Mã định danh phiên bản chính sách được snapshot cho yêu cầu giao hàng.
@@ -143,9 +143,9 @@ public sealed class DeliveryRequest
     public ResidentProfile? ResidentProfile { get; set; }
 
     /// <summary>
-    /// Cụm locker nơi diễn ra quá trình gửi hàng.
+    /// Tủ locker nơi diễn ra quá trình gửi hàng.
     /// </summary>
-    public LockerCluster LockerCluster { get; set; } = null!;
+    public Locker Locker { get; set; } = null!;
 
     /// <summary>
     /// Phiên bản chính sách áp dụng cho yêu cầu giao hàng.

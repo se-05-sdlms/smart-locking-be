@@ -4,8 +4,8 @@ internal static class ModelContract
 {
     internal static readonly string[] EntityNames =
     [
-        "AuditLog", "Building", "CompartmentReservation", "DeliveryRequest", "EmergencyUnlock",
-        "Incident", "IncidentAction", "Locker", "LockerAccessEvent", "LockerCluster",
+        "AuditLog", "CompartmentReservation", "DeliveryRequest", "EmergencyUnlock",
+        "Incident", "IncidentAction", "Locker", "LockerAccessEvent",
         "LockerCompartment", "LockerEvent", "MaintenanceActivity", "MaintenanceRequest", "Notification",
         "NotificationRule", "OperatorAssignment", "OtpChallenge", "OverdueCharge", "Parcel",
         "ParcelStatusHistory", "PaymentTransaction", "RefreshToken", "ResidentBiometric", "ResidentProfile",
@@ -50,33 +50,22 @@ internal static class ModelContract
                 P("RevokedAt", "DateTimeOffset", true), P("CreatedByIp", "String", true),
                 P("RevokedByIp", "String", true), P("ReplacedByTokenId", "Guid", true)
             ],
-            ["Building"] =
-            [
-                P("Id", "Guid"), P("Code", "String"), P("Name", "String"), P("Address", "String"),
-                P("Status", "BuildingStatus"), P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
-            ],
-            ["LockerCluster"] =
-            [
-                P("Id", "Guid"), P("BuildingId", "Guid"), P("Code", "String"), P("Name", "String"),
-                P("LocationDescription", "String", true), P("Status", "LockerClusterStatus"),
-                P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
-            ],
             ["Locker"] =
             [
-                P("Id", "Guid"), P("LockerClusterId", "Guid"), P("Code", "String"), P("DeviceIdentifier", "String"),
+                P("Id", "Guid"), P("Code", "String"), P("Address", "String"),
+                P("RecoveryAddress", "String"), P("DeviceIdentifier", "String"),
                 P("OperationalStatus", "LockerOperationalStatus"), P("ConnectionStatus", "LockerConnectionStatus"),
                 P("LastSeenAt", "DateTimeOffset", true), P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
             ],
             ["LockerCompartment"] =
             [
-                P("Id", "Guid"), P("LockerId", "Guid"), P("Code", "String"),
-                P("OperationalStatus", "LockerCompartmentOperationalStatus"), P("DoorStatus", "DoorStatus"),
-                P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
+                P("Id", "Guid"), P("LockerId", "Guid"), P("Code", "String"), P("HardwareCode", "String"),
+                P("HardwareChannel", "Int32"), P("OperationalStatus", "LockerCompartmentOperationalStatus"),
+                P("DoorStatus", "DoorStatus"), P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
             ],
             ["OperatorAssignment"] =
             [
-                P("Id", "Guid"), P("OperatorUserId", "Guid"), P("BuildingId", "Guid", true),
-                P("LockerClusterId", "Guid", true), P("LockerId", "Guid", true), P("AssignedByUserId", "Guid"),
+                P("Id", "Guid"), P("OperatorUserId", "Guid"), P("LockerId", "Guid"), P("AssignedByUserId", "Guid"),
                 P("AssignedAt", "DateTimeOffset"), P("RevokedAt", "DateTimeOffset", true), P("Reason", "String", true)
             ],
             ["SystemPolicy"] =
@@ -99,7 +88,7 @@ internal static class ModelContract
             ],
             ["DeliveryRequest"] =
             [
-                P("Id", "Guid"), P("ResidentProfileId", "Guid", true), P("LockerClusterId", "Guid"),
+                P("Id", "Guid"), P("ResidentProfileId", "Guid", true), P("LockerId", "Guid"),
                 P("SystemPolicyId", "Guid"), P("AllocatedCompartmentId", "Guid", true),
                 P("GuestSessionTokenHash", "String"), P("ShipperName", "String", true), P("ShipperPhone", "String", true),
                 P("RecipientPhoneSnapshot", "String", true), P("ParcelImageUrl", "String", true),
@@ -116,7 +105,7 @@ internal static class ModelContract
             ["ReturnRequest"] =
             [
                 P("Id", "Guid"), P("ResidentProfileId", "Guid"), P("OriginalParcelId", "Guid", true),
-                P("LockerClusterId", "Guid"), P("AllocatedCompartmentId", "Guid", true),
+                P("LockerId", "Guid"), P("AllocatedCompartmentId", "Guid", true),
                 P("ReturnCode", "String"), P("ReturnReason", "String", true),
                 P("ReturnImageUrl", "String", true), P("ShipperPhone", "String", true),
                 P("ShipperSessionTokenHash", "String", true), P("Status", "ReturnRequestStatus"),

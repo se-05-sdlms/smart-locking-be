@@ -12,7 +12,7 @@ using smart_locking_be.Infrastructure.Persistence;
 namespace smart_locking_be.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260913132124_InitialCreate")]
+    [Migration("20260917055707_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -72,48 +72,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_AuditLog_Actor_Action_OccurredAt");
 
                     b.ToTable("AuditLog", (string)null);
-                });
-
-            modelBuilder.Entity("smart_locking_be.Domain.Entities.Building", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Address")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("character varying");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique()
-                        .HasDatabaseName("UX_Building_Code");
-
-                    b.HasIndex("Status")
-                        .HasDatabaseName("IX_Building_Status");
-
-                    b.ToTable("Building", (string)null);
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.CompartmentReservation", b =>
@@ -210,7 +168,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("LastActivityAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid>("LockerClusterId")
+                    b.Property<Guid>("LockerId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("OcrExtractedPhone")
@@ -261,8 +219,8 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("UX_DeliveryRequest_GuestSessionTokenHash");
 
-                    b.HasIndex("LockerClusterId", "Status")
-                        .HasDatabaseName("IX_DeliveryRequest_Cluster_Status");
+                    b.HasIndex("LockerId", "Status")
+                        .HasDatabaseName("IX_DeliveryRequest_Locker_Status");
 
                     b.HasIndex("ResidentProfileId", "Status")
                         .HasDatabaseName("IX_DeliveryRequest_Resident_Status");
@@ -460,6 +418,11 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -480,17 +443,23 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid>("LockerClusterId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("OperationalStatus")
                         .IsRequired()
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("RecoveryAddress")
+                        .IsRequired()
+                        .HasMaxLength(500)
                         .HasColumnType("character varying");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Locker_Code");
 
                     b.HasIndex("DeviceIdentifier")
                         .IsUnique()
@@ -501,10 +470,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ConnectionStatus", "LastSeenAt")
                         .HasDatabaseName("IX_Locker_ConnectionStatus_LastSeenAt");
-
-                    b.HasIndex("LockerClusterId", "Code")
-                        .IsUnique()
-                        .HasDatabaseName("UX_Locker_ClusterId_Code");
 
                     b.ToTable("Locker", (string)null);
                 });
@@ -581,50 +546,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.ToTable("LockerAccessEvent", (string)null);
                 });
 
-            modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerCluster", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("BuildingId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("LocationDescription")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("character varying");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Status")
-                        .HasDatabaseName("IX_LockerCluster_Status");
-
-                    b.HasIndex("BuildingId", "Code")
-                        .IsUnique()
-                        .HasDatabaseName("UX_LockerCluster_BuildingId_Code");
-
-                    b.ToTable("LockerCluster", (string)null);
-                });
-
             modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerCompartment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -641,6 +562,14 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("DoorStatus")
                         .IsRequired()
+                        .HasColumnType("character varying");
+
+                    b.Property<int>("HardwareChannel")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("HardwareCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
                         .HasColumnType("character varying");
 
                     b.Property<Guid>("LockerId")
@@ -664,6 +593,10 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.HasIndex("LockerId", "Code")
                         .IsUnique()
                         .HasDatabaseName("UX_LockerCompartment_LockerId_Code");
+
+                    b.HasIndex("LockerId", "HardwareCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_LockerCompartment_LockerId_HardwareCode");
 
                     b.ToTable("LockerCompartment", (string)null);
                 });
@@ -941,13 +874,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("AssignedByUserId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("BuildingId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("LockerClusterId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("LockerId")
+                    b.Property<Guid>("LockerId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("OperatorUserId")
@@ -961,28 +888,15 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("OperatorUserId", "BuildingId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_OperatorAssignment_ActiveBuilding")
-                        .HasFilter("\"RevokedAt\" IS NULL AND \"BuildingId\" IS NOT NULL");
-
-                    b.HasIndex("OperatorUserId", "LockerClusterId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_OperatorAssignment_ActiveCluster")
-                        .HasFilter("\"RevokedAt\" IS NULL AND \"LockerClusterId\" IS NOT NULL");
-
                     b.HasIndex("OperatorUserId", "LockerId")
                         .IsUnique()
                         .HasDatabaseName("UX_OperatorAssignment_ActiveLocker")
-                        .HasFilter("\"RevokedAt\" IS NULL AND \"LockerId\" IS NOT NULL");
+                        .HasFilter("\"RevokedAt\" IS NULL");
 
                     b.HasIndex("OperatorUserId", "RevokedAt")
                         .HasDatabaseName("IX_OperatorAssignment_Operator_RevokedAt");
 
-                    b.ToTable("OperatorAssignment", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_OperatorAssignment_ExactlyOneScope", "(CASE WHEN \"BuildingId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"LockerClusterId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"LockerId\" IS NOT NULL THEN 1 ELSE 0 END) = 1");
-                        });
+                    b.ToTable("OperatorAssignment", (string)null);
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.OtpChallenge", b =>
@@ -1434,7 +1348,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<string>("FailureReason")
                         .HasColumnType("text");
 
-                    b.Property<Guid>("LockerClusterId")
+                    b.Property<Guid>("LockerId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("OriginalParcelId")
@@ -1485,8 +1399,8 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("UX_ReturnRequest_ReturnCode");
 
-                    b.HasIndex("LockerClusterId", "Status")
-                        .HasDatabaseName("IX_ReturnRequest_Cluster_Status");
+                    b.HasIndex("LockerId", "Status")
+                        .HasDatabaseName("IX_ReturnRequest_Locker_Status");
 
                     b.HasIndex("ResidentProfileId", "Status")
                         .HasDatabaseName("IX_ReturnRequest_Resident_Status");
@@ -1707,9 +1621,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .HasForeignKey("AllocatedCompartmentId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("smart_locking_be.Domain.Entities.LockerCluster", "LockerCluster")
+                    b.HasOne("smart_locking_be.Domain.Entities.Locker", "Locker")
                         .WithMany("DeliveryRequests")
-                        .HasForeignKey("LockerClusterId")
+                        .HasForeignKey("LockerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -1726,7 +1640,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.Navigation("AllocatedCompartment");
 
-                    b.Navigation("LockerCluster");
+                    b.Navigation("Locker");
 
                     b.Navigation("ResidentProfile");
 
@@ -1837,17 +1751,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("Incident");
                 });
 
-            modelBuilder.Entity("smart_locking_be.Domain.Entities.Locker", b =>
-                {
-                    b.HasOne("smart_locking_be.Domain.Entities.LockerCluster", "LockerCluster")
-                        .WithMany("Lockers")
-                        .HasForeignKey("LockerClusterId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("LockerCluster");
-                });
-
             modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerAccessEvent", b =>
                 {
                     b.HasOne("smart_locking_be.Domain.Entities.DeliveryRequest", "DeliveryRequest")
@@ -1893,17 +1796,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("ReturnRequest");
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerCluster", b =>
-                {
-                    b.HasOne("smart_locking_be.Domain.Entities.Building", "Building")
-                        .WithMany("LockerClusters")
-                        .HasForeignKey("BuildingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Building");
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerCompartment", b =>
@@ -2045,20 +1937,11 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("smart_locking_be.Domain.Entities.Building", "Building")
-                        .WithMany("OperatorAssignments")
-                        .HasForeignKey("BuildingId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("smart_locking_be.Domain.Entities.LockerCluster", "LockerCluster")
-                        .WithMany("OperatorAssignments")
-                        .HasForeignKey("LockerClusterId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("smart_locking_be.Domain.Entities.Locker", "Locker")
                         .WithMany("OperatorAssignments")
                         .HasForeignKey("LockerId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.HasOne("smart_locking_be.Domain.Entities.User", "OperatorUser")
                         .WithMany("OperatorAssignments")
@@ -2068,11 +1951,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.Navigation("AssignedByUser");
 
-                    b.Navigation("Building");
-
                     b.Navigation("Locker");
-
-                    b.Navigation("LockerCluster");
 
                     b.Navigation("OperatorUser");
                 });
@@ -2199,9 +2078,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .HasForeignKey("AllocatedCompartmentId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("smart_locking_be.Domain.Entities.LockerCluster", "LockerCluster")
+                    b.HasOne("smart_locking_be.Domain.Entities.Locker", "Locker")
                         .WithMany("ReturnRequests")
-                        .HasForeignKey("LockerClusterId")
+                        .HasForeignKey("LockerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -2218,7 +2097,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.Navigation("AllocatedCompartment");
 
-                    b.Navigation("LockerCluster");
+                    b.Navigation("Locker");
 
                     b.Navigation("OriginalParcel");
 
@@ -2234,13 +2113,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("CreatedByUser");
-                });
-
-            modelBuilder.Entity("smart_locking_be.Domain.Entities.Building", b =>
-                {
-                    b.Navigation("LockerClusters");
-
-                    b.Navigation("OperatorAssignments");
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.DeliveryRequest", b =>
@@ -2271,6 +2143,8 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.Navigation("Compartments");
 
+                    b.Navigation("DeliveryRequests");
+
                     b.Navigation("EmergencyUnlocks");
 
                     b.Navigation("Events");
@@ -2278,15 +2152,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("Incidents");
 
                     b.Navigation("MaintenanceRequests");
-
-                    b.Navigation("OperatorAssignments");
-                });
-
-            modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerCluster", b =>
-                {
-                    b.Navigation("DeliveryRequests");
-
-                    b.Navigation("Lockers");
 
                     b.Navigation("OperatorAssignments");
 

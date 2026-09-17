@@ -24,9 +24,9 @@ public sealed class DeliveryRequestConfiguration() : BaseConfiguration<DeliveryR
             .WithMany(profile => profile.DeliveryRequests)
             .HasForeignKey(entity => entity.ResidentProfileId)
             .OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne(entity => entity.LockerCluster)
-            .WithMany(cluster => cluster.DeliveryRequests)
-            .HasForeignKey(entity => entity.LockerClusterId)
+        builder.HasOne(entity => entity.Locker)
+            .WithMany(locker => locker.DeliveryRequests)
+            .HasForeignKey(entity => entity.LockerId)
             .OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(entity => entity.SystemPolicy)
             .WithMany(policy => policy.DeliveryRequests)
@@ -44,8 +44,8 @@ public sealed class DeliveryRequestConfiguration() : BaseConfiguration<DeliveryR
             .HasDatabaseName("IX_DeliveryRequest_Resident_Status");
         builder.HasIndex(entity => new { entity.SessionExpiresAt, entity.Status })
             .HasDatabaseName("IX_DeliveryRequest_SessionExpiresAt_Status");
-        builder.HasIndex(entity => new { entity.LockerClusterId, entity.Status })
-            .HasDatabaseName("IX_DeliveryRequest_Cluster_Status");
+        builder.HasIndex(entity => new { entity.LockerId, entity.Status })
+            .HasDatabaseName("IX_DeliveryRequest_Locker_Status");
 
         builder.ToTable("DeliveryRequest", table => table.HasCheckConstraint(
             "CK_DeliveryRequest_AllocatedStatusRequiresCompartment",

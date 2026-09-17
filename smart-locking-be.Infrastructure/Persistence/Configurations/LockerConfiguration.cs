@@ -9,20 +9,17 @@ public sealed class LockerConfiguration() : BaseConfiguration<Locker>(entity => 
     protected override void ConfigureEntity(EntityTypeBuilder<Locker> builder)
     {
         Varchar(builder.Property(entity => entity.Code)).IsRequired().HasMaxLength(50);
+        Varchar(builder.Property(entity => entity.Address)).IsRequired().HasMaxLength(500);
+        Varchar(builder.Property(entity => entity.RecoveryAddress)).IsRequired().HasMaxLength(500);
         Varchar(builder.Property(entity => entity.DeviceIdentifier)).IsRequired().HasMaxLength(100);
         EnumAsString(builder.Property(entity => entity.OperationalStatus)).IsRequired();
         EnumAsString(builder.Property(entity => entity.ConnectionStatus)).IsRequired();
 
-        builder.HasOne(entity => entity.LockerCluster)
-            .WithMany(cluster => cluster.Lockers)
-            .HasForeignKey(entity => entity.LockerClusterId)
-            .OnDelete(DeleteBehavior.Restrict);
-
+        builder.HasIndex(entity => entity.Code)
+            .HasDatabaseName("UX_Locker_Code")
+            .IsUnique();
         builder.HasIndex(entity => entity.DeviceIdentifier)
             .HasDatabaseName("UX_Locker_DeviceIdentifier")
-            .IsUnique();
-        builder.HasIndex(entity => new { entity.LockerClusterId, entity.Code })
-            .HasDatabaseName("UX_Locker_ClusterId_Code")
             .IsUnique();
         builder.HasIndex(entity => new { entity.ConnectionStatus, entity.LastSeenAt })
             .HasDatabaseName("IX_Locker_ConnectionStatus_LastSeenAt");

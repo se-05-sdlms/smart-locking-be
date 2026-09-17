@@ -24,9 +24,9 @@ public sealed class ReturnRequestConfiguration() : BaseConfiguration<ReturnReque
             .WithMany(parcel => parcel.ReturnRequests)
             .HasForeignKey(entity => entity.OriginalParcelId)
             .OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne(entity => entity.LockerCluster)
-            .WithMany(cluster => cluster.ReturnRequests)
-            .HasForeignKey(entity => entity.LockerClusterId)
+        builder.HasOne(entity => entity.Locker)
+            .WithMany(locker => locker.ReturnRequests)
+            .HasForeignKey(entity => entity.LockerId)
             .OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(entity => entity.AllocatedCompartment)
             .WithMany(compartment => compartment.ReturnRequests)
@@ -38,8 +38,8 @@ public sealed class ReturnRequestConfiguration() : BaseConfiguration<ReturnReque
             .IsUnique();
         builder.HasIndex(entity => new { entity.ResidentProfileId, entity.Status })
             .HasDatabaseName("IX_ReturnRequest_Resident_Status");
-        builder.HasIndex(entity => new { entity.LockerClusterId, entity.Status })
-            .HasDatabaseName("IX_ReturnRequest_Cluster_Status");
+        builder.HasIndex(entity => new { entity.LockerId, entity.Status })
+            .HasDatabaseName("IX_ReturnRequest_Locker_Status");
 
         builder.ToTable("ReturnRequest", table =>
         {
