@@ -149,7 +149,7 @@ public sealed class UserServiceTests
                 "0933445566",
                 UserRole.LockerOperator,
                 null, // Random temporary password
-                null, null, null, null
+                null, null
             );
 
             var response = await service.CreateUserAsync(adminId, request, "10.0.0.1");
@@ -188,7 +188,7 @@ public sealed class UserServiceTests
             dbContext.Users.Add(existingUser);
             await dbContext.SaveChangesAsync();
 
-            var request = new CreateUserRequest("Name", "existing@boxora.com", null, UserRole.LockerOperator, null, null, null, null, null);
+            var request = new CreateUserRequest("Name", "existing@boxora.com", null, UserRole.LockerOperator, null, null, null);
 
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.CreateUserAsync(adminId, request));
@@ -282,7 +282,7 @@ public sealed class UserServiceTests
         {
             var adminId = Guid.NewGuid();
             var opId = Guid.NewGuid();
-            var buildingId = Guid.NewGuid();
+            var lockerId = Guid.NewGuid();
 
             var op = new User
             {
@@ -291,24 +291,24 @@ public sealed class UserServiceTests
                 Role = UserRole.LockerOperator,
                 Status = UserStatus.Active
             };
-            var building = new Building
+            var locker = new Locker
             {
-                Id = buildingId,
-                Code = "B01",
-                Name = "Tòa Landmark",
+                Id = lockerId,
+                Code = "L01",
                 Address = "Khu Công Nghệ Cao",
-                Status = BuildingStatus.Active
+                RecoveryAddress = "Khu Công Nghệ Cao",
+                DeviceIdentifier = "DEVICE-01"
             };
             dbContext.Users.Add(op);
-            dbContext.Buildings.Add(building);
+            dbContext.Lockers.Add(locker);
             await dbContext.SaveChangesAsync();
 
-            var request = new AssignOperatorScopeRequest(BuildingId: buildingId, LockerClusterId: null, LockerId: null, Reason: "Phụ trách tòa Landmark");
+            var request = new AssignOperatorScopeRequest(lockerId, "Phụ trách locker L01");
             var result = await service.AssignOperatorScopeAsync(adminId, opId, request, "127.0.0.1");
 
             Assert.NotNull(result);
-            Assert.Equal(buildingId, result.BuildingId);
-            Assert.Equal("Tòa Landmark", result.BuildingName);
+            Assert.Equal(lockerId, result.LockerId);
+            Assert.Equal("L01", result.LockerCode);
 
             var persisted = await dbContext.OperatorAssignments.FirstAsync(a => a.Id == result.Id);
             Assert.Equal(opId, persisted.OperatorUserId);
@@ -337,7 +337,7 @@ public sealed class UserServiceTests
             {
                 Id = assignmentId,
                 OperatorUserId = opId,
-                BuildingId = Guid.NewGuid(),
+                LockerId = Guid.NewGuid(),
                 AssignedByUserId = adminId,
                 AssignedAt = DateTimeOffset.UtcNow.AddDays(-5)
             };

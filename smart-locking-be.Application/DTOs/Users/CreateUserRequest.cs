@@ -8,8 +8,6 @@ public sealed record CreateUserRequest(
     string? PhoneNumber,
     UserRole Role,
     string? Password,
-    Guid? BuildingId,
-    Guid? LockerClusterId,
     Guid? LockerId,
     string? AssignmentReason
 );
