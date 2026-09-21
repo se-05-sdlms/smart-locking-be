@@ -16,11 +16,19 @@ public sealed class DeliveryRequestExpirationWorker(
             {
                 await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
                 IDeliveryRequestService service = scope.ServiceProvider.GetRequiredService<IDeliveryRequestService>();
-                int expiredCount = await service.ExpireStartedSessionsAsync(stoppingToken);
 
-                if (expiredCount > 0)
+                int expiredSessionsCount = await service.ExpireStartedSessionsAsync(stoppingToken);
+                int expiredApprovalsCount = await service.ExpirePendingApprovalsAsync(stoppingToken);
+                int expiredReservationsCount = await service.ExpireReservationsAsync(stoppingToken);
+
+                int totalExpired = expiredSessionsCount + expiredApprovalsCount + expiredReservationsCount;
+                if (totalExpired > 0)
                 {
-                    logger.LogInformation("Expired {DeliveryRequestCount} inactive delivery requests.", expiredCount);
+                    logger.LogInformation(
+                        "Expired delivery requests summary: {Sessions} sessions, {Approvals} approvals, {Reservations} reservations.",
+                        expiredSessionsCount,
+                        expiredApprovalsCount,
+                        expiredReservationsCount);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -29,7 +37,7 @@ public sealed class DeliveryRequestExpirationWorker(
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, "Failed to expire inactive delivery requests.");
+                logger.LogError(exception, "Failed to expire inactive delivery requests/approvals/reservations.");
             }
         }
     }
