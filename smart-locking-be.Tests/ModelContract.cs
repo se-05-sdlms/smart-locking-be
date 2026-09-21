@@ -4,7 +4,7 @@ internal static class ModelContract
 {
     internal static readonly string[] EntityNames =
     [
-        "AuditLog", "CompartmentReservation", "DeliveryRequest", "EmergencyUnlock",
+        "AuditLog", "CompartmentReservation", "DeliveryRequest", "DeviceInstallation", "EmergencyUnlock",
         "Incident", "IncidentAction", "Locker", "LockerAccessEvent",
         "LockerCompartment", "LockerEvent", "MaintenanceActivity", "MaintenanceRequest", "Notification",
         "NotificationRule", "OperatorAssignment", "OtpChallenge", "OverdueCharge", "Parcel",
@@ -100,6 +100,12 @@ internal static class ModelContract
                 P("AllocatedAt", "DateTimeOffset", true), P("DepositedAt", "DateTimeOffset", true),
                 P("CompartmentReleasedAt", "DateTimeOffset", true),
                 P("FailureCode", "DeliveryRequestFailureCode", true), P("FailureDetail", "String", true),
+                P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
+            ],
+            ["DeviceInstallation"] =
+            [
+                P("Id", "Guid"), P("UserId", "Guid"), P("InstallationId", "String"),
+                P("ExpoPushToken", "String"), P("Platform", "String"), P("IsActive", "Boolean"),
                 P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
             ],
             ["ReturnRequest"] =

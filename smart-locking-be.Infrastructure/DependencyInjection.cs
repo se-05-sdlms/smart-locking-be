@@ -34,6 +34,8 @@ public static class DependencyInjection
         services.AddScoped<IResidentService, ResidentService>();
         services.AddScoped<ILockerService, LockerService>();
         services.AddScoped<IDeliveryRequestService, DeliveryRequestService>();
+        services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();
+        services.AddScoped<IPushNotificationService, ExpoPushNotificationService>();
         services.AddScoped<IUserService, UserService>();
 
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE TRONG TƯƠNG LAI:

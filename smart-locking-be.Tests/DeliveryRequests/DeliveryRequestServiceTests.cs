@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Auth;
@@ -16,7 +17,7 @@ public sealed class DeliveryRequestServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
         var tokenService = new Sha256TokenHashService();
-        var service = new DeliveryRequestService(dbContext, tokenService);
+        DeliveryRequestService service = CreateService(dbContext, tokenService);
 
         InitiateDeliveryResponse response = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
 
@@ -35,7 +36,7 @@ public sealed class DeliveryRequestServiceTests
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
         locker.OperationalStatus = LockerOperationalStatus.OutOfService;
         await dbContext.SaveChangesAsync();
-        var service = new DeliveryRequestService(dbContext, new Sha256TokenHashService());
+        DeliveryRequestService service = CreateService(dbContext);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => service.InitiateAsync(new InitiateDeliveryRequest(locker.Code)));
@@ -46,7 +47,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        var service = new DeliveryRequestService(dbContext, new Sha256TokenHashService());
+        DeliveryRequestService service = CreateService(dbContext);
         InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
         DateTimeOffset originalExpiry = initiated.SessionExpiresAt;
 
@@ -64,7 +65,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        var service = new DeliveryRequestService(dbContext, new Sha256TokenHashService());
+        DeliveryRequestService service = CreateService(dbContext);
         InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
 
         await Assert.ThrowsAsync<ArgumentException>(() => service.UploadImageAsync(
@@ -78,7 +79,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        var service = new DeliveryRequestService(dbContext, new Sha256TokenHashService());
+        DeliveryRequestService service = CreateService(dbContext);
         InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
         DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests.SingleAsync();
         deliveryRequest.SessionExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1);
@@ -98,7 +99,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        var service = new DeliveryRequestService(dbContext, new Sha256TokenHashService());
+        DeliveryRequestService service = CreateService(dbContext);
         InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.SubmitRecipientAsync(
@@ -113,7 +114,8 @@ public sealed class DeliveryRequestServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
         ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234567");
-        var service = new DeliveryRequestService(dbContext, new Sha256TokenHashService());
+        var pushNotificationService = new RecordingPushNotificationService();
+        DeliveryRequestService service = CreateService(dbContext, pushNotificationService: pushNotificationService);
         InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
         await service.UploadImageAsync(
             initiated.Id,
@@ -131,6 +133,7 @@ public sealed class DeliveryRequestServiceTests
         Assert.Equal("0901234567", persisted.RecipientPhoneSnapshot);
         Assert.Equal(resident.DeliveryApprovalMode, persisted.ApprovalModeSnapshot);
         Assert.Null(persisted.ApprovalExpiresAt);
+        Assert.Empty(pushNotificationService.Requests);
     }
 
     [Fact]
@@ -139,7 +142,8 @@ public sealed class DeliveryRequestServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
         ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234568", DeliveryApprovalMode.Manual);
-        var service = new DeliveryRequestService(dbContext, new Sha256TokenHashService());
+        var pushNotificationService = new RecordingPushNotificationService();
+        DeliveryRequestService service = CreateService(dbContext, pushNotificationService: pushNotificationService);
         InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
         await service.UploadImageAsync(
             initiated.Id,
@@ -155,6 +159,9 @@ public sealed class DeliveryRequestServiceTests
         Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
         Assert.Equal(DeliveryApprovalMode.Manual, persisted.ApprovalModeSnapshot);
         Assert.NotNull(persisted.ApprovalExpiresAt);
+        Assert.Equal(
+            [(resident.UserId, persisted.Id, locker.Code)],
+            pushNotificationService.Requests);
     }
 
     [Fact]
@@ -167,7 +174,7 @@ public sealed class DeliveryRequestServiceTests
         request.ResidentProfileId = resident.Id;
         dbContext.DeliveryRequests.Add(request);
         await dbContext.SaveChangesAsync();
-        var service = new DeliveryRequestService(dbContext, new Sha256TokenHashService());
+        DeliveryRequestService service = CreateService(dbContext);
 
         DeliveryRequestSummaryResponse response = await service.ApproveDeliveryRequestAsync(resident.UserId, request.Id);
 
@@ -185,7 +192,7 @@ public sealed class DeliveryRequestServiceTests
         request.ResidentProfileId = resident.Id;
         dbContext.DeliveryRequests.Add(request);
         await dbContext.SaveChangesAsync();
-        var service = new DeliveryRequestService(dbContext, new Sha256TokenHashService());
+        DeliveryRequestService service = CreateService(dbContext);
 
         DeliveryRequestSummaryResponse response = await service.RejectDeliveryRequestAsync(resident.UserId, request.Id);
 
@@ -204,7 +211,7 @@ public sealed class DeliveryRequestServiceTests
         DeliveryRequest request = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(token), DeliveryRequestStatus.Approved, DateTimeOffset.UtcNow.AddMinutes(10));
         dbContext.DeliveryRequests.Add(request);
         await dbContext.SaveChangesAsync();
-        var service = new DeliveryRequestService(dbContext, tokenService);
+        DeliveryRequestService service = CreateService(dbContext, tokenService);
 
         CompartmentReservationResponse response = await service.ReserveCompartmentAsync(request.Id, token);
 
@@ -243,7 +250,7 @@ public sealed class DeliveryRequestServiceTests
         };
         dbContext.CompartmentReservations.Add(reservation);
         await dbContext.SaveChangesAsync();
-        var service = new DeliveryRequestService(dbContext, tokenService);
+        DeliveryRequestService service = CreateService(dbContext, tokenService);
 
         DropOffConfirmationResponse response = await service.ConfirmDropOffAsync(request.Id, token);
 
@@ -270,7 +277,7 @@ public sealed class DeliveryRequestServiceTests
         DeliveryRequest pending = CreateDeliveryRequest(locker.Id, policy.Id, "pending", DeliveryRequestStatus.PendingApproval, now.AddMinutes(-1));
         dbContext.DeliveryRequests.AddRange(started, pending);
         await dbContext.SaveChangesAsync();
-        var service = new DeliveryRequestService(dbContext, new Sha256TokenHashService());
+        DeliveryRequestService service = CreateService(dbContext);
 
         int count = await service.ExpireStartedSessionsAsync();
 
@@ -287,6 +294,15 @@ public sealed class DeliveryRequestServiceTests
             .Options;
         return new ApplicationDbContext(options);
     }
+
+    private static DeliveryRequestService CreateService(
+        ApplicationDbContext dbContext,
+        Sha256TokenHashService? tokenHashService = null,
+        IPushNotificationService? pushNotificationService = null) =>
+        new(
+            dbContext,
+            tokenHashService ?? new Sha256TokenHashService(),
+            pushNotificationService ?? new RecordingPushNotificationService());
 
     private static async Task<(Locker Locker, SystemPolicy Policy)> SeedLockerAndPolicyAsync(ApplicationDbContext dbContext)
     {
@@ -410,4 +426,19 @@ public sealed class DeliveryRequestServiceTests
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
+
+    private sealed class RecordingPushNotificationService : IPushNotificationService
+    {
+        public List<(Guid UserId, Guid RequestId, string LockerCode)> Requests { get; } = [];
+
+        public Task SendDeliveryApprovalRequestAsync(
+            Guid residentUserId,
+            Guid deliveryRequestId,
+            string lockerCode,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add((residentUserId, deliveryRequestId, lockerCode));
+            return Task.CompletedTask;
+        }
+    }
 }

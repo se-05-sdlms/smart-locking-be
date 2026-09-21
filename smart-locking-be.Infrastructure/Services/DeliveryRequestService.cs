@@ -10,7 +10,8 @@ namespace smart_locking_be.Infrastructure.Services;
 
 public sealed class DeliveryRequestService(
     ApplicationDbContext dbContext,
-    ITokenHashService tokenHashService) : IDeliveryRequestService
+    ITokenHashService tokenHashService,
+    IPushNotificationService pushNotificationService) : IDeliveryRequestService
 {
     // ==========================================
     // Issue #19: Guest Shipper Initiate & Submit
@@ -118,6 +119,16 @@ public sealed class DeliveryRequestService(
         deliveryRequest.UpdatedAt = now;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (deliveryRequest.Status == DeliveryRequestStatus.PendingApproval)
+        {
+            await pushNotificationService.SendDeliveryApprovalRequestAsync(
+                resident.UserId,
+                deliveryRequest.Id,
+                deliveryRequest.Locker.Code,
+                cancellationToken);
+        }
+
         return MapSummary(deliveryRequest);
     }
 
@@ -518,6 +529,7 @@ public sealed class DeliveryRequestService(
         string tokenHash = tokenHashService.HashToken(guestSessionToken.Trim());
         DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests
             .Include(request => request.SystemPolicy)
+            .Include(request => request.Locker)
             .SingleOrDefaultAsync(request => request.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu giao hàng.");
 
