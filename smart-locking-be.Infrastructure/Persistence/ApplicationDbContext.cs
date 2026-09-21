@@ -11,8 +11,6 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<ResidentBiometric> ResidentBiometrics => Set<ResidentBiometric>();
     public DbSet<OtpChallenge> OtpChallenges => Set<OtpChallenge>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
-    public DbSet<Building> Buildings => Set<Building>();
-    public DbSet<LockerCluster> LockerClusters => Set<LockerCluster>();
     public DbSet<Locker> Lockers => Set<Locker>();
     public DbSet<LockerCompartment> LockerCompartments => Set<LockerCompartment>();
     public DbSet<OperatorAssignment> OperatorAssignments => Set<OperatorAssignment>();

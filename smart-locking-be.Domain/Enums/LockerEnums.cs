@@ -1,38 +1,6 @@
 namespace smart_locking_be.Domain.Enums;
 
 /// <summary>
-/// Trạng thái hoạt động hành chính của tòa nhà.
-/// </summary>
-public enum BuildingStatus
-{
-    /// <summary>
-    /// Tòa nhà đang hoạt động trong hệ thống.
-    /// </summary>
-    Active,
-
-    /// <summary>
-    /// Tòa nhà tạm ngừng hoặc chưa kích hoạt trong hệ thống.
-    /// </summary>
-    Inactive
-}
-
-/// <summary>
-/// Trạng thái hoạt động hành chính của cụm locker.
-/// </summary>
-public enum LockerClusterStatus
-{
-    /// <summary>
-    /// Cụm locker đang hoạt động.
-    /// </summary>
-    Active,
-
-    /// <summary>
-    /// Cụm locker tạm dừng hoạt động.
-    /// </summary>
-    Inactive
-}
-
-/// <summary>
 /// Trạng thái vận hành do hệ thống hoặc Nhân viên vận hành quản lý cho locker.
 /// </summary>
 public enum LockerOperationalStatus

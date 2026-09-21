@@ -1,3 +1,4 @@
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -11,20 +12,23 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.CreateTable(
-                name: "Building",
+                name: "Locker",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
                     Code = table.Column<string>(type: "character varying", maxLength: 50, nullable: false),
-                    Name = table.Column<string>(type: "character varying", maxLength: 200, nullable: false),
-                    Address = table.Column<string>(type: "text", nullable: false),
-                    Status = table.Column<string>(type: "character varying", nullable: false),
+                    Address = table.Column<string>(type: "character varying", maxLength: 500, nullable: false),
+                    RecoveryAddress = table.Column<string>(type: "character varying", maxLength: 500, nullable: false),
+                    DeviceIdentifier = table.Column<string>(type: "character varying", maxLength: 100, nullable: false),
+                    OperationalStatus = table.Column<string>(type: "character varying", nullable: false),
+                    ConnectionStatus = table.Column<string>(type: "character varying", nullable: false),
+                    LastSeenAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     UpdatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Building", x => x.Id);
+                    table.PrimaryKey("PK_Locker", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -50,25 +54,26 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "LockerCluster",
+                name: "LockerCompartment",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    BuildingId = table.Column<Guid>(type: "uuid", nullable: false),
+                    LockerId = table.Column<Guid>(type: "uuid", nullable: false),
                     Code = table.Column<string>(type: "character varying", maxLength: 50, nullable: false),
-                    Name = table.Column<string>(type: "character varying", maxLength: 200, nullable: false),
-                    LocationDescription = table.Column<string>(type: "text", nullable: true),
-                    Status = table.Column<string>(type: "character varying", nullable: false),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                    HardwareCode = table.Column<string>(type: "character varying", maxLength: 100, nullable: false),
+                    HardwareChannel = table.Column<int>(type: "integer", nullable: false),
+                    OperationalStatus = table.Column<string>(type: "character varying", nullable: false),
+                    DoorStatus = table.Column<string>(type: "character varying", nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_LockerCluster", x => x.Id);
+                    table.PrimaryKey("PK_LockerCompartment", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_LockerCluster_Building_BuildingId",
-                        column: x => x.BuildingId,
-                        principalTable: "Building",
+                        name: "FK_LockerCompartment_Locker_LockerId",
+                        column: x => x.LockerId,
+                        principalTable: "Locker",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                 });
@@ -93,6 +98,41 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     table.ForeignKey(
                         name: "FK_AuditLog_User_ActorUserId",
                         column: x => x.ActorUserId,
+                        principalTable: "User",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "OperatorAssignment",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    OperatorUserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    LockerId = table.Column<Guid>(type: "uuid", nullable: false),
+                    AssignedByUserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    AssignedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    RevokedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    Reason = table.Column<string>(type: "text", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_OperatorAssignment", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_OperatorAssignment_Locker_LockerId",
+                        column: x => x.LockerId,
+                        principalTable: "Locker",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_OperatorAssignment_User_AssignedByUserId",
+                        column: x => x.AssignedByUserId,
+                        principalTable: "User",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_OperatorAssignment_User_OperatorUserId",
+                        column: x => x.OperatorUserId,
                         principalTable: "User",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
@@ -198,211 +238,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Locker",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    LockerClusterId = table.Column<Guid>(type: "uuid", nullable: false),
-                    Code = table.Column<string>(type: "character varying", maxLength: 50, nullable: false),
-                    DeviceIdentifier = table.Column<string>(type: "character varying", maxLength: 100, nullable: false),
-                    OperationalStatus = table.Column<string>(type: "character varying", nullable: false),
-                    ConnectionStatus = table.Column<string>(type: "character varying", nullable: false),
-                    LastSeenAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Locker", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_Locker_LockerCluster_LockerClusterId",
-                        column: x => x.LockerClusterId,
-                        principalTable: "LockerCluster",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "ResidentBiometric",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    ResidentProfileId = table.Column<Guid>(type: "uuid", nullable: false),
-                    TemplateReference = table.Column<string>(type: "character varying", maxLength: 500, nullable: false),
-                    EnrolledAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    RevokedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ResidentBiometric", x => x.Id);
-                    table.CheckConstraint("CK_ResidentBiometric_RevokedAt", "\"RevokedAt\" IS NULL OR \"RevokedAt\" >= \"EnrolledAt\"");
-                    table.ForeignKey(
-                        name: "FK_ResidentBiometric_ResidentProfile_ResidentProfileId",
-                        column: x => x.ResidentProfileId,
-                        principalTable: "ResidentProfile",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "NotificationRule",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    SystemPolicyId = table.Column<Guid>(type: "uuid", nullable: false),
-                    EventType = table.Column<string>(type: "character varying", maxLength: 100, nullable: false),
-                    Channel = table.Column<string>(type: "character varying", nullable: false),
-                    LeadTimeMinutes = table.Column<int>(type: "integer", nullable: true),
-                    IsEnabled = table.Column<bool>(type: "boolean", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_NotificationRule", x => x.Id);
-                    table.CheckConstraint("CK_NotificationRule_LeadTimeMinutes", "\"LeadTimeMinutes\" IS NULL OR \"LeadTimeMinutes\" >= 0");
-                    table.ForeignKey(
-                        name: "FK_NotificationRule_SystemPolicy_SystemPolicyId",
-                        column: x => x.SystemPolicyId,
-                        principalTable: "SystemPolicy",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "LockerCompartment",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    LockerId = table.Column<Guid>(type: "uuid", nullable: false),
-                    Code = table.Column<string>(type: "character varying", maxLength: 50, nullable: false),
-                    OperationalStatus = table.Column<string>(type: "character varying", nullable: false),
-                    DoorStatus = table.Column<string>(type: "character varying", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_LockerCompartment", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_LockerCompartment_Locker_LockerId",
-                        column: x => x.LockerId,
-                        principalTable: "Locker",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "OperatorAssignment",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    OperatorUserId = table.Column<Guid>(type: "uuid", nullable: false),
-                    BuildingId = table.Column<Guid>(type: "uuid", nullable: true),
-                    LockerClusterId = table.Column<Guid>(type: "uuid", nullable: true),
-                    LockerId = table.Column<Guid>(type: "uuid", nullable: true),
-                    AssignedByUserId = table.Column<Guid>(type: "uuid", nullable: false),
-                    AssignedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    RevokedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    Reason = table.Column<string>(type: "text", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_OperatorAssignment", x => x.Id);
-                    table.CheckConstraint("CK_OperatorAssignment_ExactlyOneScope", "(CASE WHEN \"BuildingId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"LockerClusterId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"LockerId\" IS NOT NULL THEN 1 ELSE 0 END) = 1");
-                    table.ForeignKey(
-                        name: "FK_OperatorAssignment_Building_BuildingId",
-                        column: x => x.BuildingId,
-                        principalTable: "Building",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_OperatorAssignment_LockerCluster_LockerClusterId",
-                        column: x => x.LockerClusterId,
-                        principalTable: "LockerCluster",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_OperatorAssignment_Locker_LockerId",
-                        column: x => x.LockerId,
-                        principalTable: "Locker",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_OperatorAssignment_User_AssignedByUserId",
-                        column: x => x.AssignedByUserId,
-                        principalTable: "User",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_OperatorAssignment_User_OperatorUserId",
-                        column: x => x.OperatorUserId,
-                        principalTable: "User",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "DeliveryRequest",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    ResidentProfileId = table.Column<Guid>(type: "uuid", nullable: true),
-                    LockerClusterId = table.Column<Guid>(type: "uuid", nullable: false),
-                    SystemPolicyId = table.Column<Guid>(type: "uuid", nullable: false),
-                    AllocatedCompartmentId = table.Column<Guid>(type: "uuid", nullable: true),
-                    GuestSessionTokenHash = table.Column<string>(type: "character varying", maxLength: 256, nullable: false),
-                    ShipperName = table.Column<string>(type: "character varying", maxLength: 150, nullable: true),
-                    ShipperPhone = table.Column<string>(type: "character varying", maxLength: 20, nullable: true),
-                    RecipientPhoneSnapshot = table.Column<string>(type: "character varying", maxLength: 20, nullable: true),
-                    ParcelImageUrl = table.Column<string>(type: "character varying", maxLength: 2048, nullable: true),
-                    OcrExtractedPhone = table.Column<string>(type: "character varying", maxLength: 20, nullable: true),
-                    OcrStatus = table.Column<string>(type: "character varying", nullable: true),
-                    ApprovalModeSnapshot = table.Column<string>(type: "character varying", nullable: true),
-                    Status = table.Column<string>(type: "character varying", nullable: false),
-                    LastActivityAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    SessionExpiresAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    ApprovalExpiresAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    ReservationExpiresAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    DecisionAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    AllocatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    DepositedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    CompartmentReleasedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    FailureCode = table.Column<string>(type: "character varying", nullable: true),
-                    FailureDetail = table.Column<string>(type: "text", nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_DeliveryRequest", x => x.Id);
-                    table.CheckConstraint("CK_DeliveryRequest_AllocatedStatusRequiresCompartment", "\"Status\" NOT IN ('Allocated', 'Deposited') OR \"AllocatedCompartmentId\" IS NOT NULL");
-                    table.ForeignKey(
-                        name: "FK_DeliveryRequest_LockerCluster_LockerClusterId",
-                        column: x => x.LockerClusterId,
-                        principalTable: "LockerCluster",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_DeliveryRequest_LockerCompartment_AllocatedCompartmentId",
-                        column: x => x.AllocatedCompartmentId,
-                        principalTable: "LockerCompartment",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_DeliveryRequest_ResidentProfile_ResidentProfileId",
-                        column: x => x.ResidentProfileId,
-                        principalTable: "ResidentProfile",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_DeliveryRequest_SystemPolicy_SystemPolicyId",
-                        column: x => x.SystemPolicyId,
-                        principalTable: "SystemPolicy",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "LockerEvent",
                 columns: table => new
                 {
@@ -438,6 +273,113 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         name: "FK_LockerEvent_User_ActorUserId",
                         column: x => x.ActorUserId,
                         principalTable: "User",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ResidentBiometric",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    ResidentProfileId = table.Column<Guid>(type: "uuid", nullable: false),
+                    TemplateReference = table.Column<string>(type: "character varying", maxLength: 500, nullable: false),
+                    EnrolledAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    RevokedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ResidentBiometric", x => x.Id);
+                    table.CheckConstraint("CK_ResidentBiometric_RevokedAt", "\"RevokedAt\" IS NULL OR \"RevokedAt\" >= \"EnrolledAt\"");
+                    table.ForeignKey(
+                        name: "FK_ResidentBiometric_ResidentProfile_ResidentProfileId",
+                        column: x => x.ResidentProfileId,
+                        principalTable: "ResidentProfile",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "DeliveryRequest",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    ResidentProfileId = table.Column<Guid>(type: "uuid", nullable: true),
+                    LockerId = table.Column<Guid>(type: "uuid", nullable: false),
+                    SystemPolicyId = table.Column<Guid>(type: "uuid", nullable: false),
+                    AllocatedCompartmentId = table.Column<Guid>(type: "uuid", nullable: true),
+                    GuestSessionTokenHash = table.Column<string>(type: "character varying", maxLength: 256, nullable: false),
+                    ShipperName = table.Column<string>(type: "character varying", maxLength: 150, nullable: true),
+                    ShipperPhone = table.Column<string>(type: "character varying", maxLength: 20, nullable: true),
+                    RecipientPhoneSnapshot = table.Column<string>(type: "character varying", maxLength: 20, nullable: true),
+                    ParcelImageUrl = table.Column<string>(type: "character varying", maxLength: 2048, nullable: true),
+                    OcrExtractedPhone = table.Column<string>(type: "character varying", maxLength: 20, nullable: true),
+                    OcrStatus = table.Column<string>(type: "character varying", nullable: true),
+                    ApprovalModeSnapshot = table.Column<string>(type: "character varying", nullable: true),
+                    Status = table.Column<string>(type: "character varying", nullable: false),
+                    LastActivityAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    SessionExpiresAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    ApprovalExpiresAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    ReservationExpiresAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    DecisionAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    AllocatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    DepositedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    CompartmentReleasedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    FailureCode = table.Column<string>(type: "character varying", nullable: true),
+                    FailureDetail = table.Column<string>(type: "text", nullable: true),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_DeliveryRequest", x => x.Id);
+                    table.CheckConstraint("CK_DeliveryRequest_AllocatedStatusRequiresCompartment", "\"Status\" NOT IN ('Allocated', 'Deposited') OR \"AllocatedCompartmentId\" IS NOT NULL");
+                    table.ForeignKey(
+                        name: "FK_DeliveryRequest_LockerCompartment_AllocatedCompartmentId",
+                        column: x => x.AllocatedCompartmentId,
+                        principalTable: "LockerCompartment",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_DeliveryRequest_Locker_LockerId",
+                        column: x => x.LockerId,
+                        principalTable: "Locker",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_DeliveryRequest_ResidentProfile_ResidentProfileId",
+                        column: x => x.ResidentProfileId,
+                        principalTable: "ResidentProfile",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_DeliveryRequest_SystemPolicy_SystemPolicyId",
+                        column: x => x.SystemPolicyId,
+                        principalTable: "SystemPolicy",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "NotificationRule",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    SystemPolicyId = table.Column<Guid>(type: "uuid", nullable: false),
+                    EventType = table.Column<string>(type: "character varying", maxLength: 100, nullable: false),
+                    Channel = table.Column<string>(type: "character varying", nullable: false),
+                    LeadTimeMinutes = table.Column<int>(type: "integer", nullable: true),
+                    IsEnabled = table.Column<bool>(type: "boolean", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_NotificationRule", x => x.Id);
+                    table.CheckConstraint("CK_NotificationRule_LeadTimeMinutes", "\"LeadTimeMinutes\" IS NULL OR \"LeadTimeMinutes\" >= 0");
+                    table.ForeignKey(
+                        name: "FK_NotificationRule_SystemPolicy_SystemPolicyId",
+                        column: x => x.SystemPolicyId,
+                        principalTable: "SystemPolicy",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                 });
@@ -578,7 +520,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
                     ResidentProfileId = table.Column<Guid>(type: "uuid", nullable: false),
                     OriginalParcelId = table.Column<Guid>(type: "uuid", nullable: true),
-                    LockerClusterId = table.Column<Guid>(type: "uuid", nullable: false),
+                    LockerId = table.Column<Guid>(type: "uuid", nullable: false),
                     AllocatedCompartmentId = table.Column<Guid>(type: "uuid", nullable: true),
                     ReturnCode = table.Column<string>(type: "character varying", maxLength: 100, nullable: false),
                     ReturnReason = table.Column<string>(type: "text", nullable: true),
@@ -603,15 +545,15 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     table.CheckConstraint("CK_ReturnRequest_ResidentDepositedAt", "\"ResidentDepositedAt\" IS NULL OR \"AllocatedAt\" IS NULL OR \"ResidentDepositedAt\" >= \"AllocatedAt\"");
                     table.CheckConstraint("CK_ReturnRequest_ShipperPickedUpAt", "\"ShipperPickedUpAt\" IS NULL OR \"ResidentDepositedAt\" IS NULL OR \"ShipperPickedUpAt\" >= \"ResidentDepositedAt\"");
                     table.ForeignKey(
-                        name: "FK_ReturnRequest_LockerCluster_LockerClusterId",
-                        column: x => x.LockerClusterId,
-                        principalTable: "LockerCluster",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
                         name: "FK_ReturnRequest_LockerCompartment_AllocatedCompartmentId",
                         column: x => x.AllocatedCompartmentId,
                         principalTable: "LockerCompartment",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_ReturnRequest_Locker_LockerId",
+                        column: x => x.LockerId,
+                        principalTable: "Locker",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
@@ -1042,17 +984,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                 column: "OccurredAt");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Building_Status",
-                table: "Building",
-                column: "Status");
-
-            migrationBuilder.CreateIndex(
-                name: "UX_Building_Code",
-                table: "Building",
-                column: "Code",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
                 name: "IX_CompartmentReservation_DeliveryRequestId",
                 table: "CompartmentReservation",
                 column: "DeliveryRequestId");
@@ -1070,9 +1001,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                 filter: "\"ReleasedAt\" IS NULL");
 
             migrationBuilder.CreateIndex(
-                name: "IX_DeliveryRequest_Cluster_Status",
+                name: "IX_DeliveryRequest_Locker_Status",
                 table: "DeliveryRequest",
-                columns: new[] { "LockerClusterId", "Status" });
+                columns: new[] { "LockerId", "Status" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_DeliveryRequest_Resident_Status",
@@ -1146,9 +1077,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                 column: "OperationalStatus");
 
             migrationBuilder.CreateIndex(
-                name: "UX_Locker_ClusterId_Code",
+                name: "UX_Locker_Code",
                 table: "Locker",
-                columns: new[] { "LockerClusterId", "Code" },
+                column: "Code",
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -1188,17 +1119,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                 columns: new[] { "UserId", "OccurredAt" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_LockerCluster_Status",
-                table: "LockerCluster",
-                column: "Status");
-
-            migrationBuilder.CreateIndex(
-                name: "UX_LockerCluster_BuildingId_Code",
-                table: "LockerCluster",
-                columns: new[] { "BuildingId", "Code" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
                 name: "IX_LockerCompartment_DoorStatus",
                 table: "LockerCompartment",
                 column: "DoorStatus");
@@ -1212,6 +1132,18 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                 name: "UX_LockerCompartment_LockerId_Code",
                 table: "LockerCompartment",
                 columns: new[] { "LockerId", "Code" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "UX_LockerCompartment_LockerId_HardwareCode",
+                table: "LockerCompartment",
+                columns: new[] { "LockerId", "HardwareCode" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "UX_LockerCompartment_LockerId_HardwareChannel",
+                table: "LockerCompartment",
+                columns: new[] { "LockerId", "HardwareChannel" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -1281,25 +1213,11 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                 columns: new[] { "OperatorUserId", "RevokedAt" });
 
             migrationBuilder.CreateIndex(
-                name: "UX_OperatorAssignment_ActiveBuilding",
-                table: "OperatorAssignment",
-                columns: new[] { "OperatorUserId", "BuildingId" },
-                unique: true,
-                filter: "\"RevokedAt\" IS NULL AND \"BuildingId\" IS NOT NULL");
-
-            migrationBuilder.CreateIndex(
-                name: "UX_OperatorAssignment_ActiveCluster",
-                table: "OperatorAssignment",
-                columns: new[] { "OperatorUserId", "LockerClusterId" },
-                unique: true,
-                filter: "\"RevokedAt\" IS NULL AND \"LockerClusterId\" IS NOT NULL");
-
-            migrationBuilder.CreateIndex(
                 name: "UX_OperatorAssignment_ActiveLocker",
                 table: "OperatorAssignment",
                 columns: new[] { "OperatorUserId", "LockerId" },
                 unique: true,
-                filter: "\"RevokedAt\" IS NULL AND \"LockerId\" IS NOT NULL");
+                filter: "\"RevokedAt\" IS NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_OtpChallenge_Destination_Purpose_CreatedAt",
@@ -1419,9 +1337,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_ReturnRequest_Cluster_Status",
+                name: "IX_ReturnRequest_Locker_Status",
                 table: "ReturnRequest",
-                columns: new[] { "LockerClusterId", "Status" });
+                columns: new[] { "LockerId", "Status" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_ReturnRequest_Resident_Status",
@@ -1557,12 +1475,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
             migrationBuilder.DropTable(
                 name: "User");
-
-            migrationBuilder.DropTable(
-                name: "LockerCluster");
-
-            migrationBuilder.DropTable(
-                name: "Building");
         }
     }
 }

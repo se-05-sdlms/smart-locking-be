@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddScoped<IPasswordHashService, Pbkdf2PasswordHashService>();
         services.AddScoped<ITokenHashService, Sha256TokenHashService>();
         services.AddScoped<IResidentService, ResidentService>();
+        services.AddScoped<ILockerService, LockerService>();
         services.AddScoped<IUserService, UserService>();
 
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE TRONG TƯƠNG LAI:

@@ -23,9 +23,9 @@ public sealed class ReturnRequest
     public Guid? OriginalParcelId { get; set; }
 
     /// <summary>
-    /// Mã định danh cụm locker nơi Cư dân thực hiện trả hàng.
+    /// Mã định danh tủ locker nơi Cư dân thực hiện trả hàng.
     /// </summary>
-    public Guid LockerClusterId { get; set; }
+    public Guid LockerId { get; set; }
 
     /// <summary>
     /// Mã định danh ngăn locker được phân bổ giữ đặt trước cho Cư dân gửi hàng trả; null trước khi phân bổ.
@@ -113,9 +113,9 @@ public sealed class ReturnRequest
     public Parcel? OriginalParcel { get; set; }
 
     /// <summary>
-    /// Cụm locker diễn ra quá trình trả hàng.
+    /// Tủ locker diễn ra quá trình trả hàng.
     /// </summary>
-    public LockerCluster LockerCluster { get; set; } = null!;
+    public Locker Locker { get; set; } = null!;
 
     /// <summary>
     /// Ngăn locker được phân bổ cho yêu cầu trả hàng.

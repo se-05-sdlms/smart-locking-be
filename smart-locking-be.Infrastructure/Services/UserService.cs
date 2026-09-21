@@ -78,10 +78,6 @@ public sealed class UserService(
             .AsNoTracking()
             .Include(u => u.ResidentProfile)
             .Include(u => u.OperatorAssignments)
-                .ThenInclude(a => a.Building)
-            .Include(u => u.OperatorAssignments)
-                .ThenInclude(a => a.LockerCluster)
-            .Include(u => u.OperatorAssignments)
                 .ThenInclude(a => a.Locker)
             .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
 
@@ -107,15 +103,6 @@ public sealed class UserService(
         if (string.IsNullOrWhiteSpace(request.Email) || !request.Email.Contains('@'))
         {
             throw new ArgumentException("Email không hợp lệ.", nameof(request.Email));
-        }
-
-        int scopeCount = (request.BuildingId.HasValue ? 1 : 0) +
-                         (request.LockerClusterId.HasValue ? 1 : 0) +
-                         (request.LockerId.HasValue ? 1 : 0);
-
-        if (scopeCount > 1)
-        {
-            throw new ArgumentException("Chỉ được phân công chính xác 1 phạm vi: BuildingId, LockerClusterId, hoặc LockerId.");
         }
 
         string email = request.Email.Trim().ToLowerInvariant();
@@ -163,15 +150,13 @@ public sealed class UserService(
 
         dbContext.ResidentProfiles.Add(profile);
 
-        if (scopeCount == 1 && request.Role == UserRole.LockerOperator)
+        if (request.LockerId.HasValue && request.Role == UserRole.LockerOperator)
         {
             var assignment = new OperatorAssignment
             {
                 Id = Guid.NewGuid(),
                 OperatorUserId = user.Id,
-                BuildingId = request.BuildingId,
-                LockerClusterId = request.LockerClusterId,
-                LockerId = request.LockerId,
+                LockerId = request.LockerId.Value,
                 AssignedByUserId = actorAdminId,
                 AssignedAt = now,
                 Reason = request.AssignmentReason ?? "Phân công ban đầu khi tạo tài khoản"
@@ -372,21 +357,15 @@ public sealed class UserService(
             throw new KeyNotFoundException("Không tìm thấy nhân viên vận hành.");
         }
 
-        int scopeCount = (request.BuildingId.HasValue ? 1 : 0) +
-                         (request.LockerClusterId.HasValue ? 1 : 0) +
-                         (request.LockerId.HasValue ? 1 : 0);
-
-        if (scopeCount != 1)
+        if (request.LockerId == Guid.Empty)
         {
-            throw new ArgumentException("Phải chỉ định chính xác 1 phạm vi: BuildingId, LockerClusterId, hoặc LockerId.");
+            throw new ArgumentException("Phải chỉ định LockerId hợp lệ.", nameof(request.LockerId));
         }
 
         bool activeExists = await dbContext.OperatorAssignments.AnyAsync(a =>
             a.OperatorUserId == operatorId &&
             a.RevokedAt == null &&
-            ((request.BuildingId != null && a.BuildingId == request.BuildingId) ||
-             (request.LockerClusterId != null && a.LockerClusterId == request.LockerClusterId) ||
-             (request.LockerId != null && a.LockerId == request.LockerId)), cancellationToken);
+            a.LockerId == request.LockerId, cancellationToken);
 
         if (activeExists)
         {
@@ -398,8 +377,6 @@ public sealed class UserService(
         {
             Id = Guid.NewGuid(),
             OperatorUserId = operatorId,
-            BuildingId = request.BuildingId,
-            LockerClusterId = request.LockerClusterId,
             LockerId = request.LockerId,
             AssignedByUserId = actorAdminId,
             AssignedAt = now,
@@ -424,39 +401,13 @@ public sealed class UserService(
         dbContext.AuditLogs.Add(auditLog);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        string? buildingName = null;
-        if (assignment.BuildingId.HasValue)
-        {
-            buildingName = await dbContext.Buildings
-                .Where(b => b.Id == assignment.BuildingId.Value)
-                .Select(b => b.Name)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
-
-        string? clusterName = null;
-        if (assignment.LockerClusterId.HasValue)
-        {
-            clusterName = await dbContext.LockerClusters
-                .Where(c => c.Id == assignment.LockerClusterId.Value)
-                .Select(c => c.Name)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
-
-        string? lockerCode = null;
-        if (assignment.LockerId.HasValue)
-        {
-            lockerCode = await dbContext.Lockers
-                .Where(l => l.Id == assignment.LockerId.Value)
-                .Select(l => l.Code)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
+        string? lockerCode = await dbContext.Lockers
+            .Where(l => l.Id == assignment.LockerId)
+            .Select(l => l.Code)
+            .FirstOrDefaultAsync(cancellationToken);
 
         return new OperatorAssignmentResponse(
             assignment.Id,
-            assignment.BuildingId,
-            buildingName,
-            assignment.LockerClusterId,
-            clusterName,
             assignment.LockerId,
             lockerCode,
             assignment.AssignedAt,
@@ -513,10 +464,6 @@ public sealed class UserService(
             .OrderByDescending(a => a.AssignedAt)
             .Select(a => new OperatorAssignmentResponse(
                 a.Id,
-                a.BuildingId,
-                a.Building?.Name,
-                a.LockerClusterId,
-                a.LockerCluster?.Name,
                 a.LockerId,
                 a.Locker?.Code,
                 a.AssignedAt,
