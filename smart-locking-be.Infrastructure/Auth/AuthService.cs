@@ -1,7 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using smart_locking_be.Application.Auth;
+using smart_locking_be.Application.DTOs.Auth;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;

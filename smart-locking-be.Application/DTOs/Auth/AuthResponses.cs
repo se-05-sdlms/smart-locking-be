@@ -1,4 +1,4 @@
-namespace smart_locking_be.Application.Auth;
+namespace smart_locking_be.Application.DTOs.Auth;
 
 public sealed record AuthTokenResponse(
     string AccessToken,

@@ -1,12 +1,11 @@
-using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
-using smart_locking_be.Application.Auth;
 using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Users;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
+using System.Security.Cryptography;
 
 namespace smart_locking_be.Infrastructure.Services;
 

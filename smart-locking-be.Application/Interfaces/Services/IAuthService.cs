@@ -1,4 +1,6 @@
-namespace smart_locking_be.Application.Auth;
+using smart_locking_be.Application.DTOs.Auth;
+
+namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface IAuthService
 {
