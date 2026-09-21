@@ -33,6 +33,7 @@ public static class DependencyInjection
         services.AddScoped<IResidentService, ResidentService>();
         services.AddScoped<ILockerService, LockerService>();
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IOperatorService, OperatorService>();
 
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE TRONG TƯƠNG LAI:
         // Các Service thực thi nghiệp vụ tiêm trực tiếp ApplicationDbContext được ghép cặp như sau:
