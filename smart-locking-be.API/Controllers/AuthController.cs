@@ -2,7 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using smart_locking_be.API.Constants;
-using smart_locking_be.Application.Auth;
+using smart_locking_be.Application.DTOs.Auth;
+using smart_locking_be.Application.Interfaces.Services;
 using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;

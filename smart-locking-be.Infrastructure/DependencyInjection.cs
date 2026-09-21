@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using smart_locking_be.Application.Auth;
 using smart_locking_be.Application.Interfaces;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Infrastructure.Auth;
