@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
-using smart_locking_be.Application.Auth;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;

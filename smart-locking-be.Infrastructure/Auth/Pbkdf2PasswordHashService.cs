@@ -1,4 +1,4 @@
-using smart_locking_be.Application.Auth;
+using smart_locking_be.Application.Interfaces.Services;
 using System.Security.Cryptography;
 
 namespace smart_locking_be.Infrastructure.Auth;

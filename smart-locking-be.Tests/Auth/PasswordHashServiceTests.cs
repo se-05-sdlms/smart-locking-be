@@ -1,4 +1,4 @@
-using smart_locking_be.Application.Auth;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Infrastructure.Auth;
 
 namespace smart_locking_be.Tests.Auth;
