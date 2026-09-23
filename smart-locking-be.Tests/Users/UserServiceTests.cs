@@ -316,6 +316,52 @@ public sealed class UserServiceTests
     }
 
     [Fact]
+    public async Task AssignOperatorScopeAsync_WhenLockerAssignedToAnotherOperator_ThrowsInvalidOperationException()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var adminId = Guid.NewGuid();
+            var assignedOperatorId = Guid.NewGuid();
+            var newOperatorId = Guid.NewGuid();
+            var lockerId = Guid.NewGuid();
+
+            dbContext.Users.AddRange(
+                new User
+                {
+                    Id = assignedOperatorId,
+                    Email = "assigned.op@boxora.com",
+                    Role = UserRole.LockerOperator,
+                    Status = UserStatus.Active
+                },
+                new User
+                {
+                    Id = newOperatorId,
+                    Email = "new.op@boxora.com",
+                    Role = UserRole.LockerOperator,
+                    Status = UserStatus.Active
+                });
+            dbContext.OperatorAssignments.Add(new OperatorAssignment
+            {
+                Id = Guid.NewGuid(),
+                OperatorUserId = assignedOperatorId,
+                LockerId = lockerId,
+                AssignedByUserId = adminId,
+                AssignedAt = DateTimeOffset.UtcNow
+            });
+            await dbContext.SaveChangesAsync();
+
+            var request = new AssignOperatorScopeRequest(lockerId, "Phân công lại tủ");
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.AssignOperatorScopeAsync(adminId, newOperatorId, request));
+
+            Assert.Equal("Tủ này đã được phân công cho một nhân viên vận hành khác.", exception.Message);
+            Assert.Equal(1, await dbContext.OperatorAssignments.CountAsync(a => a.LockerId == lockerId));
+        }
+    }
+
+    [Fact]
     public async Task RevokeOperatorScopeAsync_UpdatesRevokedAt()
     {
         var (service, dbContext) = CreateTestService();

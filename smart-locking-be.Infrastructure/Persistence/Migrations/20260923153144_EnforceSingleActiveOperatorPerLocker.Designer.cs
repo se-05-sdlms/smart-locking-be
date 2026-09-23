@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using smart_locking_be.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using smart_locking_be.Infrastructure.Persistence;
 namespace smart_locking_be.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260923153144_EnforceSingleActiveOperatorPerLocker")]
+    partial class EnforceSingleActiveOperatorPerLocker
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -591,13 +594,13 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("UX_LockerCompartment_LockerId_Code");
 
-                    b.HasIndex("LockerId", "HardwareCode")
-                        .IsUnique()
-                        .HasDatabaseName("UX_LockerCompartment_LockerId_HardwareCode");
-
                     b.HasIndex("LockerId", "HardwareChannel")
                         .IsUnique()
                         .HasDatabaseName("UX_LockerCompartment_LockerId_HardwareChannel");
+
+                    b.HasIndex("LockerId", "HardwareCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_LockerCompartment_LockerId_HardwareCode");
 
                     b.ToTable("LockerCompartment", (string)null);
                 });

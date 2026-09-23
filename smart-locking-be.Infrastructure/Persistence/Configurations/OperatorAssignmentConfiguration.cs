@@ -25,7 +25,7 @@ public sealed class OperatorAssignmentConfiguration() : BaseConfiguration<Operat
 
         builder.HasIndex(entity => new { entity.OperatorUserId, entity.RevokedAt })
             .HasDatabaseName("IX_OperatorAssignment_Operator_RevokedAt");
-        builder.HasIndex(entity => new { entity.OperatorUserId, entity.LockerId })
+        builder.HasIndex(entity => entity.LockerId)
             .HasDatabaseName("UX_OperatorAssignment_ActiveLocker")
             .HasFilter("\"RevokedAt\" IS NULL")
             .IsUnique();

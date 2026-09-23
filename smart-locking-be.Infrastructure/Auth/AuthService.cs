@@ -285,7 +285,7 @@ public sealed class AuthService(
         user.LastLoginAt);
 
     private static string? NormalizeEmail(string? email) =>
-        string.IsNullOrWhiteSpace(email) ? null : email.Trim().ToUpperInvariant();
+        string.IsNullOrWhiteSpace(email) ? null : email.Trim().ToLowerInvariant();
 
     private static string? NormalizePhone(string? phoneNumber) =>
         string.IsNullOrWhiteSpace(phoneNumber) ? null : phoneNumber.Trim();
