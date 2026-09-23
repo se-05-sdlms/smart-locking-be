@@ -362,13 +362,12 @@ public sealed class UserService(
         }
 
         bool activeExists = await dbContext.OperatorAssignments.AnyAsync(a =>
-            a.OperatorUserId == operatorId &&
             a.RevokedAt == null &&
             a.LockerId == request.LockerId, cancellationToken);
 
         if (activeExists)
         {
-            throw new InvalidOperationException("Nhân viên đã được phân công phạm vi này và phân công vẫn đang có hiệu lực.");
+            throw new InvalidOperationException("Tủ này đã được phân công cho một nhân viên vận hành khác.");
         }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
