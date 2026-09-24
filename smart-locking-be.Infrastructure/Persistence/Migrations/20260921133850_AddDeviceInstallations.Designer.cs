@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using smart_locking_be.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using smart_locking_be.Infrastructure.Persistence;
 namespace smart_locking_be.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260921133850_AddDeviceInstallations")]
+    partial class AddDeviceInstallations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -820,9 +823,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid?>("DeliveryRequestId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("DeliveryStatus")
                         .IsRequired()
                         .HasColumnType("character varying");
@@ -863,9 +863,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("DeliveryRequestId")
-                        .HasDatabaseName("IX_Notification_DeliveryRequestId");
 
                     b.HasIndex("Type", "CreatedAt")
                         .HasDatabaseName("IX_Notification_Type_CreatedAt");
@@ -944,7 +941,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("LockerId")
+                    b.HasIndex("OperatorUserId", "LockerId")
                         .IsUnique()
                         .HasDatabaseName("UX_OperatorAssignment_ActiveLocker")
                         .HasFilter("\"RevokedAt\" IS NULL");
@@ -1955,11 +1952,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.Notification", b =>
                 {
-                    b.HasOne("smart_locking_be.Domain.Entities.DeliveryRequest", "DeliveryRequest")
-                        .WithMany("Notifications")
-                        .HasForeignKey("DeliveryRequestId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("smart_locking_be.Domain.Entities.Incident", "Incident")
                         .WithMany("Notifications")
                         .HasForeignKey("IncidentId")
@@ -1980,8 +1972,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("DeliveryRequest");
 
                     b.Navigation("Incident");
 
@@ -2194,8 +2184,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("AccessEvents");
 
                     b.Navigation("Incidents");
-
-                    b.Navigation("Notifications");
 
                     b.Navigation("Parcel");
 

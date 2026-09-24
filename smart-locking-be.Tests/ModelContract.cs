@@ -4,7 +4,7 @@ internal static class ModelContract
 {
     internal static readonly string[] EntityNames =
     [
-        "AuditLog", "CompartmentReservation", "DeliveryRequest", "EmergencyUnlock",
+        "AuditLog", "CompartmentReservation", "DeliveryRequest", "DeviceInstallation", "EmergencyUnlock",
         "Incident", "IncidentAction", "Locker", "LockerAccessEvent",
         "LockerCompartment", "LockerEvent", "MaintenanceActivity", "MaintenanceRequest", "Notification",
         "NotificationRule", "OperatorAssignment", "OtpChallenge", "OverdueCharge", "Parcel",
@@ -102,6 +102,12 @@ internal static class ModelContract
                 P("FailureCode", "DeliveryRequestFailureCode", true), P("FailureDetail", "String", true),
                 P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
             ],
+            ["DeviceInstallation"] =
+            [
+                P("Id", "Guid"), P("UserId", "Guid"), P("InstallationId", "String"),
+                P("ExpoPushToken", "String"), P("Platform", "String"), P("IsActive", "Boolean"),
+                P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
+            ],
             ["ReturnRequest"] =
             [
                 P("Id", "Guid"), P("ResidentProfileId", "Guid"), P("OriginalParcelId", "Guid", true),
@@ -161,7 +167,8 @@ internal static class ModelContract
             ],
             ["Notification"] =
             [
-                P("Id", "Guid"), P("UserId", "Guid"), P("Type", "String"), P("Channel", "NotificationChannel"),
+                P("Id", "Guid"), P("UserId", "Guid"), P("DeliveryRequestId", "Guid", true),
+                P("Type", "String"), P("Channel", "NotificationChannel"),
                 P("Title", "String"), P("Message", "String"), P("ParcelId", "Guid", true),
                 P("IncidentId", "Guid", true), P("PaymentTransactionId", "Guid", true),
                 P("DeliveryStatus", "NotificationDeliveryStatus"), P("IsRead", "Boolean"),

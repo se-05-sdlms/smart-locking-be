@@ -113,6 +113,11 @@ public sealed class User
     public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
 
     /// <summary>
+    /// Các thiết bị đã đăng ký nhận push notification của User.
+    /// </summary>
+    public ICollection<DeviceInstallation> DeviceInstallations { get; set; } = new List<DeviceInstallation>();
+
+    /// <summary>
     /// Các incident do User đã đăng nhập báo cáo.
     /// </summary>
     public ICollection<Incident> ReportedIncidents { get; set; } = new List<Incident>();

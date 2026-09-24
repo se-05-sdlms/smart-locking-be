@@ -173,6 +173,11 @@ public sealed class DeliveryRequest
     public ICollection<LockerAccessEvent> AccessEvents { get; set; } = new List<LockerAccessEvent>();
 
     /// <summary>
+    /// Các thông báo phát sinh từ yêu cầu giao hàng này.
+    /// </summary>
+    public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
+
+    /// <summary>
     /// Các sự cố phát sinh trong quá trình gửi hàng.
     /// </summary>
     public ICollection<Incident> Incidents { get; set; } = new List<Incident>();
