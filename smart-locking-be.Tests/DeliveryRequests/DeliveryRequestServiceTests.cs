@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -109,7 +110,7 @@ public sealed class DeliveryRequestServiceTests
     }
 
     [Fact]
-    public async Task SubmitRecipientAsync_WithAutoApprovalResident_SetsApproved()
+    public async Task SubmitRecipientAsync_WithAutoApprovalResident_StillRequiresManualApprovalForTenMinutes()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
@@ -128,12 +129,14 @@ public sealed class DeliveryRequestServiceTests
             new SubmitRecipientPhoneRequest(" 0901234567 "));
 
         DeliveryRequest persisted = await dbContext.DeliveryRequests.SingleAsync();
-        Assert.Equal(DeliveryRequestStatus.Approved, response.Status);
+        Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
         Assert.Equal(resident.Id, persisted.ResidentProfileId);
         Assert.Equal("0901234567", persisted.RecipientPhoneSnapshot);
-        Assert.Equal(resident.DeliveryApprovalMode, persisted.ApprovalModeSnapshot);
-        Assert.Null(persisted.ApprovalExpiresAt);
-        Assert.Empty(pushNotificationService.Requests);
+        Assert.Equal(DeliveryApprovalMode.Manual, persisted.ApprovalModeSnapshot);
+        Assert.Equal(TimeSpan.FromMinutes(10), persisted.ApprovalExpiresAt - persisted.UpdatedAt);
+        Assert.Equal(
+            [(resident.UserId, persisted.Id, locker.Code)],
+            pushNotificationService.Requests);
     }
 
     [Fact]
@@ -158,10 +161,52 @@ public sealed class DeliveryRequestServiceTests
         DeliveryRequest persisted = await dbContext.DeliveryRequests.SingleAsync();
         Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
         Assert.Equal(DeliveryApprovalMode.Manual, persisted.ApprovalModeSnapshot);
-        Assert.NotNull(persisted.ApprovalExpiresAt);
+        Assert.Equal(TimeSpan.FromMinutes(10), persisted.ApprovalExpiresAt - persisted.UpdatedAt);
         Assert.Equal(
             [(resident.UserId, persisted.Id, locker.Code)],
             pushNotificationService.Requests);
+    }
+
+    [Fact]
+    public async Task SubmitRecipientAsync_WhenPushCannotBeDelivered_KeepsRequestAndInAppNotification()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
+        ResidentProfile resident = await SeedResidentAsync(
+            dbContext,
+            "0901234569",
+            DeliveryApprovalMode.Manual);
+        var notificationService = new ExpoPushNotificationService(
+            dbContext,
+            new HttpClient(),
+            TimeProvider.System,
+            NullLogger<ExpoPushNotificationService>.Instance);
+        DeliveryRequestService service = CreateService(
+            dbContext,
+            pushNotificationService: notificationService);
+        InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
+        await service.UploadImageAsync(
+            initiated.Id,
+            initiated.GuestSessionToken,
+            new UploadParcelImageRequest("https://cdn.example.com/parcel.jpg"));
+
+        DeliveryRequestSummaryResponse response = await service.SubmitRecipientAsync(
+            initiated.Id,
+            initiated.GuestSessionToken,
+            new SubmitRecipientPhoneRequest(resident.User.PhoneNumber!));
+
+        Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
+        Assert.Equal(DeliveryRequestStatus.PendingApproval, (await dbContext.DeliveryRequests.SingleAsync()).Status);
+        Assert.Contains(
+            dbContext.Notifications,
+            notification =>
+                notification.Channel == NotificationChannel.InApp &&
+                notification.DeliveryStatus == NotificationDeliveryStatus.Sent);
+        Assert.Contains(
+            dbContext.Notifications,
+            notification =>
+                notification.Channel == NotificationChannel.Push &&
+                notification.DeliveryStatus == NotificationDeliveryStatus.Failed);
     }
 
     [Fact]
@@ -198,6 +243,34 @@ public sealed class DeliveryRequestServiceTests
 
         Assert.Equal(DeliveryRequestStatus.Rejected, response.Status);
         Assert.NotNull(request.DecisionAt);
+    }
+
+    [Fact]
+    public async Task ApproveDeliveryRequestAsync_AtTenMinuteDeadline_ExpiresRequest()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
+        ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234597", DeliveryApprovalMode.Manual);
+        DateTimeOffset deadline = new(2026, 9, 24, 8, 0, 0, TimeSpan.Zero);
+        DeliveryRequest request = CreateDeliveryRequest(
+            locker.Id,
+            policy.Id,
+            "token",
+            DeliveryRequestStatus.PendingApproval,
+            deadline.AddMinutes(5));
+        request.ResidentProfileId = resident.Id;
+        request.ApprovalExpiresAt = deadline;
+        dbContext.DeliveryRequests.Add(request);
+        await dbContext.SaveChangesAsync();
+        DeliveryRequestService service = CreateService(
+            dbContext,
+            timeProvider: new FixedTimeProvider(deadline));
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => service.ApproveDeliveryRequestAsync(resident.UserId, request.Id));
+
+        Assert.Equal(DeliveryRequestStatus.Expired, request.Status);
+        Assert.Equal(DeliveryRequestFailureCode.ApprovalExpired, request.FailureCode);
     }
 
     [Fact]
@@ -298,11 +371,13 @@ public sealed class DeliveryRequestServiceTests
     private static DeliveryRequestService CreateService(
         ApplicationDbContext dbContext,
         Sha256TokenHashService? tokenHashService = null,
-        IPushNotificationService? pushNotificationService = null) =>
+        IPushNotificationService? pushNotificationService = null,
+        TimeProvider? timeProvider = null) =>
         new(
             dbContext,
             tokenHashService ?? new Sha256TokenHashService(),
-            pushNotificationService ?? new RecordingPushNotificationService());
+            pushNotificationService ?? new RecordingPushNotificationService(),
+            timeProvider ?? TimeProvider.System);
 
     private static async Task<(Locker Locker, SystemPolicy Policy)> SeedLockerAndPolicyAsync(ApplicationDbContext dbContext)
     {
@@ -431,14 +506,26 @@ public sealed class DeliveryRequestServiceTests
     {
         public List<(Guid UserId, Guid RequestId, string LockerCode)> Requests { get; } = [];
 
-        public Task SendDeliveryApprovalRequestAsync(
+        public Guid EnqueueDeliveryApprovalRequest(
             Guid residentUserId,
             Guid deliveryRequestId,
-            string lockerCode,
-            CancellationToken cancellationToken = default)
+            string lockerCode)
         {
             Requests.Add((residentUserId, deliveryRequestId, lockerCode));
+            return Guid.NewGuid();
+        }
+
+        public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default)
+        {
             return Task.CompletedTask;
         }
+
+        public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(
+            CancellationToken cancellationToken = default) => Task.FromResult(0);
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 }

@@ -2,9 +2,15 @@ namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface IPushNotificationService
 {
-    Task SendDeliveryApprovalRequestAsync(
+    Guid EnqueueDeliveryApprovalRequest(
         Guid residentUserId,
         Guid deliveryRequestId,
-        string lockerCode,
+        string lockerCode);
+
+    Task TrySendAsync(
+        Guid notificationId,
+        CancellationToken cancellationToken = default);
+
+    Task<int> RetryPendingDeliveryApprovalNotificationsAsync(
         CancellationToken cancellationToken = default);
 }

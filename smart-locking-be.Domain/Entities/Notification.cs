@@ -18,6 +18,11 @@ public sealed class Notification
     public Guid UserId { get; set; }
 
     /// <summary>
+    /// Mã yêu cầu giao hàng liên quan nếu thông báo phát sinh từ luồng Shipper gửi hàng.
+    /// </summary>
+    public Guid? DeliveryRequestId { get; set; }
+
+    /// <summary>
     /// Mã loại thông báo phục vụ phân loại và hiển thị giao diện.
     /// </summary>
     public string Type { get; set; } = string.Empty;
@@ -81,6 +86,11 @@ public sealed class Notification
     /// Người dùng nhận thông báo.
     /// </summary>
     public User User { get; set; } = null!;
+
+    /// <summary>
+    /// Yêu cầu giao hàng liên quan nếu có.
+    /// </summary>
+    public DeliveryRequest? DeliveryRequest { get; set; }
 
     /// <summary>
     /// Kiện hàng liên quan nếu có.

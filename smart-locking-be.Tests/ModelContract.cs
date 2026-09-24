@@ -167,7 +167,8 @@ internal static class ModelContract
             ],
             ["Notification"] =
             [
-                P("Id", "Guid"), P("UserId", "Guid"), P("Type", "String"), P("Channel", "NotificationChannel"),
+                P("Id", "Guid"), P("UserId", "Guid"), P("DeliveryRequestId", "Guid", true),
+                P("Type", "String"), P("Channel", "NotificationChannel"),
                 P("Title", "String"), P("Message", "String"), P("ParcelId", "Guid", true),
                 P("IncidentId", "Guid", true), P("PaymentTransactionId", "Guid", true),
                 P("DeliveryStatus", "NotificationDeliveryStatus"), P("IsRead", "Boolean"),

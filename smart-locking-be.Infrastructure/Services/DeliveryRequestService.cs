@@ -10,8 +10,11 @@ namespace smart_locking_be.Infrastructure.Services;
 public sealed class DeliveryRequestService(
     ApplicationDbContext dbContext,
     ITokenHashService tokenHashService,
-    IPushNotificationService pushNotificationService) : IDeliveryRequestService
+    IPushNotificationService pushNotificationService,
+    TimeProvider timeProvider) : IDeliveryRequestService
 {
+    private static readonly TimeSpan ApprovalWindow = TimeSpan.FromMinutes(10);
+
     // ==========================================
     // Issue #19: Guest Shipper Initiate & Submit
     // ==========================================
@@ -21,7 +24,7 @@ public sealed class DeliveryRequestService(
         CancellationToken cancellationToken = default)
     {
         string lockerCode = RequireValue(request.LockerCode, nameof(request.LockerCode), 50);
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
 
         Locker locker = await dbContext.Lockers.SingleOrDefaultAsync(
             item => item.Code == lockerCode,
@@ -72,7 +75,7 @@ public sealed class DeliveryRequestService(
     {
         DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
         string parcelImageUrl = ValidateImageUrl(request.ParcelImageUrl);
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
 
         deliveryRequest.ParcelImageUrl = parcelImageUrl;
         RefreshSession(deliveryRequest, now);
@@ -89,7 +92,7 @@ public sealed class DeliveryRequestService(
     {
         DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
         string recipientPhone = RequireValue(request.RecipientPhone, nameof(request.RecipientPhone), 20);
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
 
         if (deliveryRequest.ParcelImageUrl is null)
         {
@@ -107,33 +110,26 @@ public sealed class DeliveryRequestService(
 
         deliveryRequest.ResidentProfileId = resident.Id;
         deliveryRequest.RecipientPhoneSnapshot = recipientPhone;
-        deliveryRequest.ApprovalModeSnapshot = resident.DeliveryApprovalMode;
-        deliveryRequest.Status = resident.DeliveryApprovalMode == DeliveryApprovalMode.Auto
-            ? DeliveryRequestStatus.Approved
-            : DeliveryRequestStatus.PendingApproval;
-        deliveryRequest.ApprovalExpiresAt = resident.DeliveryApprovalMode == DeliveryApprovalMode.Manual
-            ? now.AddMinutes(deliveryRequest.SystemPolicy.ManualApprovalTimeoutMinutes)
-            : null;
+        deliveryRequest.ApprovalModeSnapshot = DeliveryApprovalMode.Manual;
+        deliveryRequest.Status = DeliveryRequestStatus.PendingApproval;
+        deliveryRequest.ApprovalExpiresAt = now.Add(ApprovalWindow);
         deliveryRequest.LastActivityAt = now;
         deliveryRequest.UpdatedAt = now;
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        Guid pushNotificationId = pushNotificationService.EnqueueDeliveryApprovalRequest(
+            resident.UserId,
+            deliveryRequest.Id,
+            deliveryRequest.Locker.Code);
 
-        if (deliveryRequest.Status == DeliveryRequestStatus.PendingApproval)
-        {
-            await pushNotificationService.SendDeliveryApprovalRequestAsync(
-                resident.UserId,
-                deliveryRequest.Id,
-                deliveryRequest.Locker.Code,
-                cancellationToken);
-        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await pushNotificationService.TrySendAsync(pushNotificationId, cancellationToken);
 
         return MapSummary(deliveryRequest);
     }
 
     public async Task<int> ExpireStartedSessionsAsync(CancellationToken cancellationToken = default)
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
         List<DeliveryRequest> expiredSessions = await dbContext.DeliveryRequests
             .Where(request =>
                 request.Status == DeliveryRequestStatus.Started &&
@@ -163,7 +159,7 @@ public sealed class DeliveryRequestService(
         Guid residentUserId,
         CancellationToken cancellationToken = default)
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
         ResidentProfile resident = await GetActiveResidentProfileAsync(residentUserId, cancellationToken);
 
         List<DeliveryRequest> pendingRequests = await dbContext.DeliveryRequests
@@ -182,7 +178,7 @@ public sealed class DeliveryRequestService(
             r.ParcelImageUrl,
             r.RecipientPhoneSnapshot,
             r.CreatedAt,
-            r.ApprovalExpiresAt ?? r.CreatedAt.AddMinutes(30)
+            r.ApprovalExpiresAt ?? r.CreatedAt.Add(ApprovalWindow)
         )).ToList();
     }
 
@@ -191,7 +187,7 @@ public sealed class DeliveryRequestService(
         Guid requestId,
         CancellationToken cancellationToken = default)
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
         ResidentProfile resident = await GetActiveResidentProfileAsync(residentUserId, cancellationToken);
 
         DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests
@@ -232,7 +228,7 @@ public sealed class DeliveryRequestService(
         Guid requestId,
         CancellationToken cancellationToken = default)
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
         ResidentProfile resident = await GetActiveResidentProfileAsync(residentUserId, cancellationToken);
 
         DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests
@@ -270,7 +266,7 @@ public sealed class DeliveryRequestService(
 
     public async Task<int> ExpirePendingApprovalsAsync(CancellationToken cancellationToken = default)
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
         List<DeliveryRequest> expiredRequests = await dbContext.DeliveryRequests
             .Where(r => r.Status == DeliveryRequestStatus.PendingApproval &&
                         r.ApprovalExpiresAt != null &&
@@ -307,7 +303,7 @@ public sealed class DeliveryRequestService(
             throw new InvalidOperationException($"Chưa thể phân bổ ngăn tủ cho yêu cầu ở trạng thái {deliveryRequest.Status}.");
         }
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
 
         List<LockerCompartment> compartments = await dbContext.LockerCompartments
             .Where(c => c.LockerId == deliveryRequest.LockerId &&
@@ -375,7 +371,7 @@ public sealed class DeliveryRequestService(
 
     public async Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default)
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
         List<DeliveryRequest> expiredReservations = await dbContext.DeliveryRequests
             .Where(r => r.Status == DeliveryRequestStatus.Allocated &&
                         r.ReservationExpiresAt != null &&
@@ -426,7 +422,7 @@ public sealed class DeliveryRequestService(
             throw new InvalidOperationException("Yêu cầu giao hàng chưa được phân bổ ngăn tủ.");
         }
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
 
         if (deliveryRequest.ReservationExpiresAt.HasValue && deliveryRequest.ReservationExpiresAt <= now)
         {
@@ -502,7 +498,7 @@ public sealed class DeliveryRequestService(
             throw new InvalidOperationException($"Không thể cập nhật yêu cầu ở trạng thái {deliveryRequest.Status}.");
         }
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = timeProvider.GetUtcNow();
         if (deliveryRequest.SessionExpiresAt <= now)
         {
             deliveryRequest.Status = DeliveryRequestStatus.Expired;
