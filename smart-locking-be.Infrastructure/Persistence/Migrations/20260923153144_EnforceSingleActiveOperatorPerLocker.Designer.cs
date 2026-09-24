@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using smart_locking_be.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using smart_locking_be.Infrastructure.Persistence;
 namespace smart_locking_be.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260923153144_EnforceSingleActiveOperatorPerLocker")]
+    partial class EnforceSingleActiveOperatorPerLocker
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -229,55 +232,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_DeliveryRequest_AllocatedStatusRequiresCompartment", "\"Status\" NOT IN ('Allocated', 'Deposited') OR \"AllocatedCompartmentId\" IS NOT NULL");
                         });
-                });
-
-            modelBuilder.Entity("smart_locking_be.Domain.Entities.DeviceInstallation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ExpoPushToken")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying");
-
-                    b.Property<string>("InstallationId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Platform")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExpoPushToken")
-                        .IsUnique()
-                        .HasDatabaseName("UX_DeviceInstallation_ExpoPushToken");
-
-                    b.HasIndex("InstallationId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_DeviceInstallation_InstallationId");
-
-                    b.HasIndex("UserId", "IsActive")
-                        .HasDatabaseName("IX_DeviceInstallation_UserId_IsActive");
-
-                    b.ToTable("DeviceInstallation", (string)null);
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.EmergencyUnlock", b =>
@@ -1697,17 +1651,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("SystemPolicy");
                 });
 
-            modelBuilder.Entity("smart_locking_be.Domain.Entities.DeviceInstallation", b =>
-                {
-                    b.HasOne("smart_locking_be.Domain.Entities.User", "User")
-                        .WithMany("DeviceInstallations")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("smart_locking_be.Domain.Entities.EmergencyUnlock", b =>
                 {
                     b.HasOne("smart_locking_be.Domain.Entities.Incident", "Incident")
@@ -2309,8 +2252,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("CreatedOperatorAssignments");
 
                     b.Navigation("CreatedSystemPolicies");
-
-                    b.Navigation("DeviceInstallations");
 
                     b.Navigation("EmergencyUnlocks");
 

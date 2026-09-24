@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();
         services.AddScoped<IPushNotificationService, ExpoPushNotificationService>();
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IAdminService, AdminService>();
 
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE TRONG TƯƠNG LAI:
         // Các Service thực thi nghiệp vụ tiêm trực tiếp ApplicationDbContext được ghép cặp như sau:

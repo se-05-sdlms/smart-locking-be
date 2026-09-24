@@ -27,7 +27,7 @@ internal static class RelationalModelContract
         I("LockerCompartment", "IX_LockerCompartment_OperationalStatus", false, null, "OperationalStatus"),
         I("LockerCompartment", "IX_LockerCompartment_DoorStatus", false, null, "DoorStatus"),
         I("OperatorAssignment", "IX_OperatorAssignment_Operator_RevokedAt", false, null, "OperatorUserId", "RevokedAt"),
-        I("OperatorAssignment", "UX_OperatorAssignment_ActiveLocker", true, "\"RevokedAt\" IS NULL", "OperatorUserId", "LockerId"),
+        I("OperatorAssignment", "UX_OperatorAssignment_ActiveLocker", true, "\"RevokedAt\" IS NULL", "LockerId"),
         I("SystemPolicy", "UX_SystemPolicy_Version", true, null, "Version"),
         I("SystemPolicy", "UX_SystemPolicy_OneActive", true, "\"IsActive\" = TRUE", "IsActive"),
         I("SystemPolicy", "IX_SystemPolicy_EffectiveFrom", false, null, "EffectiveFrom"),
