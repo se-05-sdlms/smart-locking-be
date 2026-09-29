@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 using smart_locking_be.Application.DTOs.Auth;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -14,13 +13,10 @@ public sealed class AuthService(
     IPasswordHashService passwordHashService,
     ITokenHashService tokenHashService,
     IJwtTokenService jwtTokenService,
-    IConfiguration configuration,
-    ILogger<AuthService> logger) : IAuthService
+    IOtpService otpService,
+    IConfiguration configuration) : IAuthService
 {
     private const string InvalidCredentialsMessage = "Invalid credentials.";
-    private const int OtpMaxAttempts = 5;
-    private static readonly TimeSpan OtpLifetime = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan OtpLockout = TimeSpan.FromMinutes(15);
 
     public async Task<AuthTokenResponse> RegisterAsync(
         RegisterRequest request,
@@ -69,6 +65,21 @@ public sealed class AuthService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return response;
+    }
+
+    public async Task RequestRegistrationOtpAsync(
+        RequestRegistrationOtpRequest request,
+        CancellationToken cancellationToken)
+    {
+        string phoneNumber = NormalizePhone(request.PhoneNumber)
+            ?? throw new InvalidOperationException("Phone number is required.");
+        bool exists = await dbContext.Users.AnyAsync(user => user.PhoneNumber == phoneNumber, cancellationToken);
+        if (exists)
+        {
+            return;
+        }
+
+        await otpService.IssueAsync(phoneNumber, OtpPurpose.Registration, null, cancellationToken);
     }
 
     public async Task<AuthTokenResponse> LoginAsync(
@@ -164,25 +175,7 @@ public sealed class AuthService(
             return;
         }
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        string code = tokenHashService.CreateNumericCode();
-
-        dbContext.OtpChallenges.Add(new OtpChallenge
-        {
-            Id = Guid.NewGuid(),
-            UserId = user.Id,
-            DestinationPhone = user.PhoneNumber,
-            Purpose = OtpPurpose.PasswordReset,
-            CodeHash = tokenHashService.HashToken(code),
-            ExpiresAt = now.Add(OtpLifetime),
-            AttemptCount = 0,
-            CreatedAt = now
-        });
-
-        // ponytail: first pass has no SMS provider; replace this with a notification service before production.
-        logger.LogInformation("Password reset OTP for user {UserId}: {OtpCode}", user.Id, code);
-
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await otpService.IssueAsync(user.PhoneNumber, OtpPurpose.PasswordReset, user.Id, cancellationToken);
     }
 
     public async Task ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken)
@@ -195,43 +188,21 @@ public sealed class AuthService(
             throw new InvalidOperationException("Invalid OTP.");
         }
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        OtpChallenge challenge = await dbContext.OtpChallenges
-            .Where(otp =>
-                otp.UserId == user.Id &&
-                otp.DestinationPhone == user.PhoneNumber &&
-                otp.Purpose == OtpPurpose.PasswordReset &&
-                otp.UsedAt == null &&
-                otp.RevokedAt == null)
-            .OrderByDescending(otp => otp.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? throw new InvalidOperationException("Invalid OTP.");
-
-        if (challenge.ExpiresAt <= now || challenge.LockedUntil > now)
-        {
-            throw new InvalidOperationException("Invalid OTP.");
-        }
-
-        if (challenge.CodeHash != tokenHashService.HashToken(request.OtpCode))
-        {
-            challenge.AttemptCount++;
-            if (challenge.AttemptCount >= OtpMaxAttempts)
-            {
-                challenge.LockedUntil = now.Add(OtpLockout);
-            }
-
-            await dbContext.SaveChangesAsync(cancellationToken);
-            throw new InvalidOperationException("Invalid OTP.");
-        }
-
         if (string.IsNullOrWhiteSpace(request.NewPassword))
         {
             throw new InvalidOperationException("Password is required.");
         }
 
+        await otpService.VerifyAndConsumeAsync(
+            user.PhoneNumber,
+            request.OtpCode,
+            OtpPurpose.PasswordReset,
+            user.Id,
+            cancellationToken);
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         user.PasswordHash = passwordHashService.HashPassword(request.NewPassword);
         user.UpdatedAt = now;
-        challenge.UsedAt = now;
 
         await dbContext.SaveChangesAsync(cancellationToken);
     }

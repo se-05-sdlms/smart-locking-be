@@ -27,6 +27,7 @@ public static class DependencyInjection
         // 2. Đăng ký Service mẫu (Interface ở Application, Implementation ở Infrastructure tiêm DbContext trực tiếp)
         services.AddScoped<IService, Service>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IOtpService, OtpService>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IPasswordHashService, Pbkdf2PasswordHashService>();
         services.AddScoped<ITokenHashService, Sha256TokenHashService>();

@@ -5,6 +5,8 @@ public sealed record RegisterRequest(
     string? Email,
     string Password);
 
+public sealed record RequestRegistrationOtpRequest(string PhoneNumber);
+
 public sealed record LoginRequest(
     string LoginIdentifier,
     string Password);
