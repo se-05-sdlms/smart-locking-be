@@ -32,6 +32,11 @@ public static class DependencyInjection
         services.AddScoped<ITokenHashService, Sha256TokenHashService>();
         services.AddScoped<IResidentService, ResidentService>();
         services.AddScoped<ILockerService, LockerService>();
+        services.AddScoped<IDeliveryRequestService, DeliveryRequestService>();
+        services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton(new HttpClient { Timeout = TimeSpan.FromSeconds(10) });
+        services.AddScoped<IPushNotificationService, ExpoPushNotificationService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IAdminService, AdminService>();
 

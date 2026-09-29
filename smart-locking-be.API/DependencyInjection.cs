@@ -1,5 +1,6 @@
 using Serilog;
 using smart_locking_be.API.Extensions;
+using smart_locking_be.API.Services;
 
 namespace smart_locking_be.API;
 
@@ -33,6 +34,9 @@ public static class DependencyInjection
 
         // 7. Swagger / OpenAPI Documentation
         services.AddSwaggerDocumentation();
+
+        // 8. Delivery request session expiration
+        services.AddHostedService<DeliveryRequestExpirationWorker>();
 
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE CẤP API TRONG TƯƠNG LAI:
         // Khi cần tạo các service hoặc BackgroundWorker ở tầng API, thực hiện đăng ký tại đây:

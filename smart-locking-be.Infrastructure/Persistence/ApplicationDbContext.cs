@@ -25,6 +25,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<OverdueCharge> OverdueCharges => Set<OverdueCharge>();
     public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<DeviceInstallation> DeviceInstallations => Set<DeviceInstallation>();
     public DbSet<Incident> Incidents => Set<Incident>();
     public DbSet<IncidentAction> IncidentActions => Set<IncidentAction>();
     public DbSet<LockerEvent> LockerEvents => Set<LockerEvent>();
