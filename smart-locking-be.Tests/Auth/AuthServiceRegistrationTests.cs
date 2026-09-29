@@ -147,6 +147,33 @@ public sealed class AuthServiceRegistrationTests
         Assert.Equal(user.Id, auditLog.ActorUserId);
     }
 
+    [Fact]
+    public async Task ResetPasswordAsync_WithShortPassword_DoesNotConsumeOtp()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = "old-hash",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        OtpChallenge challenge = CreateRegistrationChallenge();
+        challenge.UserId = user.Id;
+        challenge.Purpose = OtpPurpose.PasswordReset;
+        dbContext.AddRange(user, challenge);
+        await dbContext.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService(dbContext).ResetPasswordAsync(
+            new ResetPasswordRequest(user.PhoneNumber, OtpCode, "short"),
+            null,
+            default));
+
+        Assert.Null(challenge.UsedAt);
+        Assert.Empty(dbContext.AuditLogs);
+    }
+
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

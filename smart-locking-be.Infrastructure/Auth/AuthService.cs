@@ -263,9 +263,9 @@ public sealed class AuthService(
             throw new InvalidOperationException("Invalid OTP.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.NewPassword))
+        if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
         {
-            throw new InvalidOperationException("Password is required.");
+            throw new InvalidOperationException("Password must contain at least 8 characters.");
         }
 
         await otpService.VerifyAndConsumeAsync(
