@@ -98,6 +98,37 @@ public sealed class AuthServiceRegistrationTests
         Assert.Single(dbContext.Users);
     }
 
+    [Fact]
+    public async Task ResetPasswordAsync_WithValidOtp_UpdatesPasswordAndAudits()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var passwordHashService = new Pbkdf2PasswordHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = passwordHashService.HashPassword("old-password"),
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        OtpChallenge challenge = CreateRegistrationChallenge();
+        challenge.UserId = user.Id;
+        challenge.Purpose = OtpPurpose.PasswordReset;
+        dbContext.AddRange(user, challenge);
+        await dbContext.SaveChangesAsync();
+
+        await CreateService(dbContext).ResetPasswordAsync(
+            new ResetPasswordRequest(user.PhoneNumber, OtpCode, "new-password"),
+            "127.0.0.1",
+            default);
+
+        Assert.True(passwordHashService.VerifyPassword("new-password", user.PasswordHash));
+        Assert.NotNull(challenge.UsedAt);
+        AuditLog auditLog = await dbContext.AuditLogs.SingleAsync();
+        Assert.Equal("ResetPassword", auditLog.Action);
+        Assert.Equal(user.Id, auditLog.ActorUserId);
+    }
+
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

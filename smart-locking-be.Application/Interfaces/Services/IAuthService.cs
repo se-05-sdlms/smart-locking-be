@@ -18,5 +18,8 @@ public interface IAuthService
 
     Task RequestPasswordResetAsync(RequestPasswordResetRequest request, CancellationToken cancellationToken);
 
-    Task ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken);
+    Task ResetPasswordAsync(
+        ResetPasswordRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken);
 }

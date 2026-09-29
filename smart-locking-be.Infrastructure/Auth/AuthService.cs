@@ -241,7 +241,10 @@ public sealed class AuthService(
         await otpService.IssueAsync(user.PhoneNumber, OtpPurpose.PasswordReset, user.Id, cancellationToken);
     }
 
-    public async Task ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken)
+    public async Task ResetPasswordAsync(
+        ResetPasswordRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken)
     {
         User user = await FindUserByIdentifierAsync(request.LoginIdentifier, cancellationToken)
             ?? throw new InvalidOperationException("Invalid OTP.");
@@ -266,6 +269,17 @@ public sealed class AuthService(
         DateTimeOffset now = DateTimeOffset.UtcNow;
         user.PasswordHash = passwordHashService.HashPassword(request.NewPassword);
         user.UpdatedAt = now;
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = user.Id,
+            Action = "ResetPassword",
+            EntityType = nameof(User),
+            EntityId = user.Id,
+            Result = AuditLogResult.Succeeded,
+            IpAddress = ipAddress,
+            OccurredAt = now
+        });
 
         await dbContext.SaveChangesAsync(cancellationToken);
     }

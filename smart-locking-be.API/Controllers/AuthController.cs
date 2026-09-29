@@ -125,7 +125,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     {
         try
         {
-            await authService.ResetPasswordAsync(request, cancellationToken);
+            await authService.ResetPasswordAsync(request, GetIpAddress(), cancellationToken);
 
             return NoContent();
         }
