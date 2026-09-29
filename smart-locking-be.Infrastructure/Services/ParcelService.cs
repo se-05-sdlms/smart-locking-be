@@ -14,8 +14,15 @@ public sealed class ParcelService(ApplicationDbContext dbContext) : IParcelServi
         string role,
         ParcelListView view,
         string? search,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
         CancellationToken cancellationToken)
     {
+        if (from.HasValue && to.HasValue && from > to)
+        {
+            throw new ArgumentException("From date must not be after to date.");
+        }
+
         IQueryable<Parcel> query = ScopeToUser(userId, role);
         query = view switch
         {
@@ -34,6 +41,15 @@ public sealed class ParcelService(ApplicationDbContext dbContext) : IParcelServi
                 parcel.ParcelCode.ToLower().Contains(term) ||
                 parcel.DeliveryRequest.Locker.Code.ToLower().Contains(term) ||
                 parcel.DeliveryRequest.Locker.Address.ToLower().Contains(term));
+        }
+
+        if (from.HasValue)
+        {
+            query = query.Where(parcel => parcel.StoredAt >= from.Value);
+        }
+        if (to.HasValue)
+        {
+            query = query.Where(parcel => parcel.StoredAt <= to.Value);
         }
 
         return await query

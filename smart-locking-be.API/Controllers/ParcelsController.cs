@@ -15,9 +15,11 @@ public sealed class ParcelsController(IParcelService parcelService) : Controller
     public async Task<IActionResult> GetParcels(
         [FromQuery] ParcelListView view = ParcelListView.Active,
         [FromQuery] string? search = null,
+        [FromQuery] DateTimeOffset? from = null,
+        [FromQuery] DateTimeOffset? to = null,
         CancellationToken cancellationToken = default) =>
         await ExecuteAsync((userId, role) =>
-            parcelService.GetParcelsAsync(userId, role, view, search, cancellationToken));
+            parcelService.GetParcelsAsync(userId, role, view, search, from, to, cancellationToken));
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetParcel(Guid id, CancellationToken cancellationToken) =>

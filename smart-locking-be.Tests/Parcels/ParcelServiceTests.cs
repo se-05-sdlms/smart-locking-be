@@ -21,7 +21,7 @@ public sealed class ParcelServiceTests
         await dbContext.SaveChangesAsync();
 
         IReadOnlyCollection<ParcelListItemResponse> result = await new ParcelService(dbContext)
-            .GetParcelsAsync(owner.Id, nameof(UserRole.Resident), ParcelListView.Active, null, default);
+            .GetParcelsAsync(owner.Id, nameof(UserRole.Resident), ParcelListView.Active, null, null, null, default);
 
         ParcelListItemResponse parcel = Assert.Single(result);
         Assert.Equal(active.Id, parcel.Id);
@@ -47,7 +47,7 @@ public sealed class ParcelServiceTests
         await dbContext.SaveChangesAsync();
 
         IReadOnlyCollection<ParcelListItemResponse> result = await new ParcelService(dbContext)
-            .GetParcelsAsync(operatorUser.Id, nameof(UserRole.LockerOperator), ParcelListView.All, null, default);
+            .GetParcelsAsync(operatorUser.Id, nameof(UserRole.LockerOperator), ParcelListView.All, null, null, null, default);
 
         Assert.Equal(assigned.Id, Assert.Single(result).Id);
     }
@@ -63,6 +63,23 @@ public sealed class ParcelServiceTests
 
         await Assert.ThrowsAsync<KeyNotFoundException>(() => new ParcelService(dbContext)
             .GetParcelAsync(requester.Id, nameof(UserRole.Resident), parcel.Id, default));
+    }
+
+    [Fact]
+    public async Task GetParcelsAsync_WithInvalidDateRange_RejectsRequest()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        User resident = CreateUser(UserRole.Resident);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        await Assert.ThrowsAsync<ArgumentException>(() => new ParcelService(dbContext).GetParcelsAsync(
+            resident.Id,
+            nameof(UserRole.Resident),
+            ParcelListView.History,
+            null,
+            now,
+            now.AddDays(-1),
+            default));
     }
 
     [Fact]

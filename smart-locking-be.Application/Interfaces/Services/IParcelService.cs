@@ -9,6 +9,8 @@ public interface IParcelService
         string role,
         ParcelListView view,
         string? search,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
         CancellationToken cancellationToken);
 
     Task<ParcelDetailResponse> GetParcelAsync(
