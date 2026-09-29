@@ -68,6 +68,11 @@ public sealed class Locker
     public ICollection<ReturnRequest> ReturnRequests { get; set; } = new List<ReturnRequest>();
 
     /// <summary>
+    /// Các Cư dân đăng ký sử dụng tủ Locker này.
+    /// </summary>
+    public ICollection<ResidentProfile> RegisteredResidents { get; set; } = new List<ResidentProfile>();
+
+    /// <summary>
     /// Danh sách các ngăn vật lý thuộc tủ locker.
     /// </summary>
     public ICollection<LockerCompartment> Compartments { get; set; } = new List<LockerCompartment>();

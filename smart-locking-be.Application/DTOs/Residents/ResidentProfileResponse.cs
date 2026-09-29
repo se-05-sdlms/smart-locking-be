@@ -5,6 +5,7 @@ namespace smart_locking_be.Application.DTOs.Residents;
 public sealed record ResidentProfileResponse(
     Guid Id,
     Guid UserId,
+    Guid? RegisteredLockerId,
     string FullName,
     string? PhoneNumber,
     string? Email,

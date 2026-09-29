@@ -11,6 +11,7 @@ internal static class RelationalModelContract
         I("ResidentProfile", "UX_ResidentProfile_UserId", true, null, "UserId"),
         I("ResidentProfile", "UX_ResidentProfile_PersonalQrTokenHash", true, null, "PersonalQrTokenHash"),
         I("ResidentProfile", "IX_ResidentProfile_DeliveryApprovalMode", false, null, "DeliveryApprovalMode"),
+        I("ResidentProfile", "IX_ResidentProfile_RegisteredLockerId", false, null, "RegisteredLockerId"),
         I("ResidentBiometric", "UX_ResidentBiometric_ActiveResident", true, "\"RevokedAt\" IS NULL", "ResidentProfileId"),
         I("ResidentBiometric", "IX_ResidentBiometric_TemplateReference", false, null, "TemplateReference"),
         I("OtpChallenge", "IX_OtpChallenge_Destination_Purpose_CreatedAt", false, null, "DestinationPhone", "Purpose", "CreatedAt"),
@@ -91,7 +92,8 @@ internal static class RelationalModelContract
 
     internal static readonly ForeignKeyExpectation[] ForeignKeys =
     [
-        F("ResidentProfile", "User", "UserId", true), F("ResidentBiometric", "ResidentProfile", "ResidentProfileId"),
+        F("ResidentProfile", "User", "UserId", true), F("ResidentProfile", "Locker", "RegisteredLockerId"),
+        F("ResidentBiometric", "ResidentProfile", "ResidentProfileId"),
         F("OtpChallenge", "User", "UserId"), F("OtpChallenge", "Parcel", "ParcelId"),
         F("RefreshToken", "User", "UserId"), F("RefreshToken", "RefreshToken", "ReplacedByTokenId"),
         F("LockerCompartment", "Locker", "LockerId"), F("OperatorAssignment", "User", "OperatorUserId"),

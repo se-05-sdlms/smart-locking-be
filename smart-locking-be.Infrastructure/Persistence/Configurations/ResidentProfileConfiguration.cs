@@ -18,6 +18,11 @@ public sealed class ResidentProfileConfiguration() : BaseConfiguration<ResidentP
             .HasForeignKey<ResidentProfile>(entity => entity.UserId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(entity => entity.RegisteredLocker)
+            .WithMany(locker => locker.RegisteredResidents)
+            .HasForeignKey(entity => entity.RegisteredLockerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.HasIndex(entity => entity.UserId)
             .HasDatabaseName("UX_ResidentProfile_UserId")
             .IsUnique();
@@ -26,5 +31,7 @@ public sealed class ResidentProfileConfiguration() : BaseConfiguration<ResidentP
             .IsUnique();
         builder.HasIndex(entity => entity.DeliveryApprovalMode)
             .HasDatabaseName("IX_ResidentProfile_DeliveryApprovalMode");
+        builder.HasIndex(entity => entity.RegisteredLockerId)
+            .HasDatabaseName("IX_ResidentProfile_RegisteredLockerId");
     }
 }

@@ -172,6 +172,7 @@ public sealed class ResidentService(
         new(
             profile.Id,
             user.Id,
+            profile.RegisteredLockerId,
             profile.FullName,
             user.PhoneNumber,
             user.Email,
