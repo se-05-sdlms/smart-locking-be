@@ -1,9 +1,12 @@
 namespace smart_locking_be.Application.DTOs.Auth;
 
 public sealed record RegisterRequest(
-    string? PhoneNumber,
-    string? Email,
-    string Password);
+    string PhoneNumber,
+    string OtpCode,
+    string Password,
+    string FullName,
+    Guid RegisteredLockerId,
+    string? Email);
 
 public sealed record RequestRegistrationOtpRequest(string PhoneNumber);
 

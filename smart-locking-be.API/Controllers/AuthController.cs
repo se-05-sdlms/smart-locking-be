@@ -15,8 +15,29 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
 {
     [HttpPost("register")]
     [AllowAnonymous]
-    public async Task<IActionResult> Register(RegisterRequest request, CancellationToken cancellationToken) =>
-        await Handle(() => authService.RegisterAsync(request, GetIpAddress(), cancellationToken));
+    public async Task<IActionResult> Register(RegisterRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await authService.RegisterAsync(request, GetIpAddress(), cancellationToken));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+        catch (KeyNotFoundException exception)
+        {
+            return NotFound(new { message = exception.Message });
+        }
+        catch (InvalidOperationException exception) when (exception.Message == "User already exists.")
+        {
+            return Conflict(new { message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
 
     [HttpPost("registration-otp/request")]
     [AllowAnonymous]
