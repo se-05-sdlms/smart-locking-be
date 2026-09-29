@@ -14,6 +14,24 @@ public sealed class AuthServiceRegistrationTests
     private const string OtpCode = "123456";
 
     [Fact]
+    public async Task GetRegistrationLockersAsync_ReturnsOnlyOperationalLockers()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Locker operational = CreateLocker(LockerOperationalStatus.Operational);
+        Locker inactive = CreateLocker(LockerOperationalStatus.Inactive);
+        dbContext.AddRange(operational, inactive);
+        await dbContext.SaveChangesAsync();
+
+        IReadOnlyCollection<RegistrationLockerResponse> result =
+            await CreateService(dbContext).GetRegistrationLockersAsync(default);
+
+        RegistrationLockerResponse locker = Assert.Single(result);
+        Assert.Equal(operational.Id, locker.Id);
+        Assert.Equal(operational.Code, locker.Code);
+        Assert.Equal(operational.Address, locker.Address);
+    }
+
+    [Fact]
     public async Task RegisterAsync_WithValidOtpAndLocker_CreatesCompleteResidentAccount()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
