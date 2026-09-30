@@ -18,6 +18,11 @@ public sealed class ResidentProfile
     public Guid UserId { get; set; }
 
     /// <summary>
+    /// Mã tủ Locker duy nhất Cư dân đăng ký sử dụng. Có thể null với dữ liệu cũ chưa hoàn tất onboarding.
+    /// </summary>
+    public Guid? RegisteredLockerId { get; set; }
+
+    /// <summary>
     /// Họ tên đầy đủ của Cư dân dùng trong hiển thị và nghiệp vụ giao nhận.
     /// </summary>
     public string FullName { get; set; } = string.Empty;
@@ -66,6 +71,11 @@ public sealed class ResidentProfile
     /// Tài khoản người dùng gắn 1-1 với hồ sơ Cư dân.
     /// </summary>
     public User User { get; set; } = null!;
+
+    /// <summary>
+    /// Tủ Locker duy nhất Cư dân đăng ký sử dụng.
+    /// </summary>
+    public Locker? RegisteredLocker { get; set; }
 
     /// <summary>
     /// Các bản ghi dữ liệu sinh trắc học của Cư dân.

@@ -18,6 +18,27 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     public async Task<IActionResult> Register(RegisterRequest request, CancellationToken cancellationToken) =>
         await Handle(() => authService.RegisterAsync(request, GetIpAddress(), cancellationToken));
 
+    [HttpPost("registration-otp/request")]
+    [AllowAnonymous]
+    public async Task<IActionResult> RequestRegistrationOtp(
+        RequestRegistrationOtpRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await authService.RequestRegistrationOtpAsync(request, cancellationToken);
+            return NoContent();
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<IActionResult> Login(LoginRequest request, CancellationToken cancellationToken) =>

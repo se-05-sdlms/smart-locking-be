@@ -115,6 +115,7 @@ public sealed class ResidentServiceTests
         await using var dbContext = CreateInMemoryDbContext();
         var userId = Guid.NewGuid();
         var issuedAt = DateTimeOffset.UtcNow;
+        var lockerId = Guid.NewGuid();
         var user = new User
         {
             Id = userId,
@@ -128,6 +129,7 @@ public sealed class ResidentServiceTests
         {
             Id = Guid.NewGuid(),
             UserId = userId,
+            RegisteredLockerId = lockerId,
             FullName = "Nguyen Van A",
             DateOfBirth = new DateOnly(1995, 5, 20),
             AvatarUrl = "https://boxora.com/avatar.png",
@@ -147,6 +149,7 @@ public sealed class ResidentServiceTests
 
         Assert.NotNull(response);
         Assert.Equal(userId, response.UserId);
+        Assert.Equal(lockerId, response.RegisteredLockerId);
         Assert.Equal("Nguyen Van A", response.FullName);
         Assert.Equal(new DateOnly(1995, 5, 20), response.DateOfBirth);
         Assert.Equal("https://boxora.com/avatar.png", response.AvatarUrl);

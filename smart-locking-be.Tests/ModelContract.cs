@@ -25,7 +25,8 @@ internal static class ModelContract
             ],
             ["ResidentProfile"] =
             [
-                P("Id", "Guid"), P("UserId", "Guid"), P("FullName", "String"), P("DateOfBirth", "DateOnly", true),
+                P("Id", "Guid"), P("UserId", "Guid"), P("RegisteredLockerId", "Guid", true),
+                P("FullName", "String"), P("DateOfBirth", "DateOnly", true),
                 P("AvatarUrl", "String", true), P("DeliveryApprovalMode", "DeliveryApprovalMode"),
                 P("PersonalQrTokenHash", "String"), P("PersonalQrIssuedAt", "DateTimeOffset"),
                 P("FaceRecognitionEnabled", "Boolean"), P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
