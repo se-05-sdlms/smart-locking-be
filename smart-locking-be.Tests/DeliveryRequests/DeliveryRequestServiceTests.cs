@@ -110,7 +110,7 @@ public sealed class DeliveryRequestServiceTests
     }
 
     [Fact]
-    public async Task SubmitRecipientAsync_WithAutoApprovalResident_StillRequiresManualApprovalForTenMinutes()
+    public async Task SubmitRecipientAsync_WithAutoApprovalResident_ApprovesWithoutPush()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
@@ -129,14 +129,13 @@ public sealed class DeliveryRequestServiceTests
             new SubmitRecipientPhoneRequest(" 0901234567 "));
 
         DeliveryRequest persisted = await dbContext.DeliveryRequests.SingleAsync();
-        Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
+        Assert.Equal(DeliveryRequestStatus.Approved, response.Status);
         Assert.Equal(resident.Id, persisted.ResidentProfileId);
         Assert.Equal("0901234567", persisted.RecipientPhoneSnapshot);
-        Assert.Equal(DeliveryApprovalMode.Manual, persisted.ApprovalModeSnapshot);
-        Assert.Equal(TimeSpan.FromMinutes(10), persisted.ApprovalExpiresAt - persisted.UpdatedAt);
-        Assert.Equal(
-            [(resident.UserId, persisted.Id, locker.Code)],
-            pushNotificationService.Requests);
+        Assert.Equal(DeliveryApprovalMode.Auto, persisted.ApprovalModeSnapshot);
+        Assert.Equal(persisted.UpdatedAt, persisted.DecisionAt);
+        Assert.Null(persisted.ApprovalExpiresAt);
+        Assert.Empty(pushNotificationService.Requests);
     }
 
     [Fact]
@@ -161,7 +160,7 @@ public sealed class DeliveryRequestServiceTests
         DeliveryRequest persisted = await dbContext.DeliveryRequests.SingleAsync();
         Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
         Assert.Equal(DeliveryApprovalMode.Manual, persisted.ApprovalModeSnapshot);
-        Assert.Equal(TimeSpan.FromMinutes(10), persisted.ApprovalExpiresAt - persisted.UpdatedAt);
+        Assert.Equal(TimeSpan.FromMinutes(30), persisted.ApprovalExpiresAt - persisted.UpdatedAt);
         Assert.Equal(
             [(resident.UserId, persisted.Id, locker.Code)],
             pushNotificationService.Requests);

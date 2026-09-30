@@ -13,8 +13,6 @@ public sealed class DeliveryRequestService(
     IPushNotificationService pushNotificationService,
     TimeProvider timeProvider) : IDeliveryRequestService
 {
-    private static readonly TimeSpan ApprovalWindow = TimeSpan.FromMinutes(10);
-
     // ==========================================
     // Issue #19: Guest Shipper Initiate & Submit
     // ==========================================
@@ -110,19 +108,31 @@ public sealed class DeliveryRequestService(
 
         deliveryRequest.ResidentProfileId = resident.Id;
         deliveryRequest.RecipientPhoneSnapshot = recipientPhone;
-        deliveryRequest.ApprovalModeSnapshot = DeliveryApprovalMode.Manual;
-        deliveryRequest.Status = DeliveryRequestStatus.PendingApproval;
-        deliveryRequest.ApprovalExpiresAt = now.Add(ApprovalWindow);
+        deliveryRequest.ApprovalModeSnapshot = resident.DeliveryApprovalMode;
+        deliveryRequest.Status = resident.DeliveryApprovalMode == DeliveryApprovalMode.Auto
+            ? DeliveryRequestStatus.Approved
+            : DeliveryRequestStatus.PendingApproval;
+        deliveryRequest.ApprovalExpiresAt = resident.DeliveryApprovalMode == DeliveryApprovalMode.Manual
+            ? now.AddMinutes(deliveryRequest.SystemPolicy.ManualApprovalTimeoutMinutes)
+            : null;
+        deliveryRequest.DecisionAt = resident.DeliveryApprovalMode == DeliveryApprovalMode.Auto ? now : null;
         deliveryRequest.LastActivityAt = now;
         deliveryRequest.UpdatedAt = now;
 
-        Guid pushNotificationId = pushNotificationService.EnqueueDeliveryApprovalRequest(
-            resident.UserId,
-            deliveryRequest.Id,
-            deliveryRequest.Locker.Code);
+        Guid? pushNotificationId = null;
+        if (resident.DeliveryApprovalMode == DeliveryApprovalMode.Manual)
+        {
+            pushNotificationId = pushNotificationService.EnqueueDeliveryApprovalRequest(
+                resident.UserId,
+                deliveryRequest.Id,
+                deliveryRequest.Locker.Code);
+        }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        await pushNotificationService.TrySendAsync(pushNotificationId, cancellationToken);
+        if (pushNotificationId.HasValue)
+        {
+            await pushNotificationService.TrySendAsync(pushNotificationId.Value, cancellationToken);
+        }
 
         return MapSummary(deliveryRequest);
     }
@@ -165,6 +175,7 @@ public sealed class DeliveryRequestService(
         List<DeliveryRequest> pendingRequests = await dbContext.DeliveryRequests
             .AsNoTracking()
             .Include(r => r.Locker)
+            .Include(r => r.SystemPolicy)
             .Where(r => r.ResidentProfileId == resident.Id &&
                         r.Status == DeliveryRequestStatus.PendingApproval &&
                         (r.ApprovalExpiresAt == null || r.ApprovalExpiresAt > now))
@@ -178,7 +189,7 @@ public sealed class DeliveryRequestService(
             r.ParcelImageUrl,
             r.RecipientPhoneSnapshot,
             r.CreatedAt,
-            r.ApprovalExpiresAt ?? r.CreatedAt.Add(ApprovalWindow)
+            r.ApprovalExpiresAt ?? r.CreatedAt.AddMinutes(r.SystemPolicy.ManualApprovalTimeoutMinutes)
         )).ToList();
     }
 
