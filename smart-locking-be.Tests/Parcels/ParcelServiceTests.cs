@@ -4,11 +4,28 @@ using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
 using smart_locking_be.Infrastructure.Services;
+using System.Text.Json;
 
 namespace smart_locking_be.Tests.Parcels;
 
 public sealed class ParcelServiceTests
 {
+    [Fact]
+    public void ParcelResponse_UsesStableStringEnums()
+    {
+        var response = new ParcelStatusHistoryResponse(
+            Guid.NewGuid(),
+            ParcelStatus.Stored,
+            ParcelStatus.Overdue,
+            null,
+            DateTimeOffset.UtcNow);
+
+        string json = JsonSerializer.Serialize(response);
+
+        Assert.Contains("\"FromStatus\":\"Stored\"", json);
+        Assert.Contains("\"ToStatus\":\"Overdue\"", json);
+    }
+
     [Fact]
     public async Task GetParcelsAsync_ForResident_ReturnsOnlyOwnedActiveParcels()
     {

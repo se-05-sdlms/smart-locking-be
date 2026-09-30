@@ -1,4 +1,5 @@
 using smart_locking_be.Domain.Enums;
+using System.Text.Json.Serialization;
 
 namespace smart_locking_be.Application.DTOs.Parcels;
 
@@ -12,7 +13,7 @@ public enum ParcelListView
 public sealed record ParcelListItemResponse(
     Guid Id,
     string ParcelCode,
-    ParcelStatus Status,
+    [property: JsonConverter(typeof(JsonStringEnumConverter))] ParcelStatus Status,
     Guid LockerId,
     string LockerCode,
     string LockerAddress,
@@ -25,12 +26,12 @@ public sealed record ParcelListItemResponse(
     DateTimeOffset? RemovedAt,
     decimal? OverdueAmount,
     string? Currency,
-    OverdueChargeStatus? OverdueChargeStatus);
+    [property: JsonConverter(typeof(JsonStringEnumConverter))] OverdueChargeStatus? OverdueChargeStatus);
 
 public sealed record ParcelDetailResponse(
     Guid Id,
     string ParcelCode,
-    ParcelStatus Status,
+    [property: JsonConverter(typeof(JsonStringEnumConverter))] ParcelStatus Status,
     Guid LockerId,
     string LockerCode,
     string LockerAddress,
@@ -47,11 +48,11 @@ public sealed record ParcelDetailResponse(
     DateTimeOffset? RemovedAt,
     decimal? OverdueAmount,
     string? Currency,
-    OverdueChargeStatus? OverdueChargeStatus);
+    [property: JsonConverter(typeof(JsonStringEnumConverter))] OverdueChargeStatus? OverdueChargeStatus);
 
 public sealed record ParcelStatusHistoryResponse(
     Guid Id,
-    ParcelStatus? FromStatus,
-    ParcelStatus ToStatus,
+    [property: JsonConverter(typeof(JsonStringEnumConverter))] ParcelStatus? FromStatus,
+    [property: JsonConverter(typeof(JsonStringEnumConverter))] ParcelStatus ToStatus,
     string? Reason,
     DateTimeOffset ChangedAt);
