@@ -131,4 +131,9 @@ public sealed class ReturnRequest
     /// Lịch sử các lần mở cửa/xác thực liên quan đến yêu cầu trả hàng.
     /// </summary>
     public ICollection<LockerAccessEvent> AccessEvents { get; set; } = new List<LockerAccessEvent>();
+
+    /// <summary>
+    /// Các sự cố phát sinh trong quá trình gửi hoặc nhận hàng trả.
+    /// </summary>
+    public ICollection<Incident> Incidents { get; set; } = new List<Incident>();
 }

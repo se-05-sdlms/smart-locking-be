@@ -53,6 +53,11 @@ public sealed class Incident
     public Guid? PaymentTransactionId { get; set; }
 
     /// <summary>
+    /// Mã định danh yêu cầu trả hàng liên quan nếu sự cố phát sinh trong luồng trả hàng.
+    /// </summary>
+    public Guid? ReturnRequestId { get; set; }
+
+    /// <summary>
     /// Mã định danh Nhân viên vận hành đang được giao xử lý sự cố.
     /// </summary>
     public Guid? AssignedOperatorUserId { get; set; }
@@ -81,6 +86,11 @@ public sealed class Incident
     /// Mô tả chi tiết vấn đề hoặc sự cố.
     /// </summary>
     public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Đường dẫn ảnh bằng chứng do người báo cáo cung cấp nếu có.
+    /// </summary>
+    public string? EvidenceUrl { get; set; }
 
     /// <summary>
     /// Tóm tắt kết quả và phương án xử lý khi sự cố được giải quyết.
@@ -136,6 +146,11 @@ public sealed class Incident
     /// Giao dịch thanh toán liên quan nếu có.
     /// </summary>
     public PaymentTransaction? PaymentTransaction { get; set; }
+
+    /// <summary>
+    /// Yêu cầu trả hàng liên quan nếu có.
+    /// </summary>
+    public ReturnRequest? ReturnRequest { get; set; }
 
     /// <summary>
     /// Nhân viên vận hành được phân công xử lý sự cố.
