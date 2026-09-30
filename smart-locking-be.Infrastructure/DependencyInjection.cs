@@ -35,6 +35,7 @@ public static class DependencyInjection
         services.AddScoped<ILockerService, LockerService>();
         services.AddScoped<IDeliveryRequestService, DeliveryRequestService>();
         services.AddScoped<IParcelService, ParcelService>();
+        services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(new HttpClient { Timeout = TimeSpan.FromSeconds(10) });
