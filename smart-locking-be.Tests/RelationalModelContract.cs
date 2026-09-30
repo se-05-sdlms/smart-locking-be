@@ -9,7 +9,6 @@ internal static class RelationalModelContract
         I("User", "IX_User_Status", false, null, "Status"),
         I("User", "IX_User_Role", false, null, "Role"),
         I("ResidentProfile", "UX_ResidentProfile_UserId", true, null, "UserId"),
-        I("ResidentProfile", "UX_ResidentProfile_PersonalQrTokenHash", true, null, "PersonalQrTokenHash"),
         I("ResidentProfile", "IX_ResidentProfile_DeliveryApprovalMode", false, null, "DeliveryApprovalMode"),
         I("ResidentProfile", "IX_ResidentProfile_RegisteredLockerId", false, null, "RegisteredLockerId"),
         I("ResidentBiometric", "UX_ResidentBiometric_ActiveResident", true, "\"RevokedAt\" IS NULL", "ResidentProfileId"),

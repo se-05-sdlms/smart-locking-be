@@ -13,7 +13,6 @@ public sealed record ResidentProfileResponse(
     string? AvatarUrl,
     DeliveryApprovalMode DeliveryApprovalMode,
     bool FaceRecognitionEnabled,
-    DateTimeOffset PersonalQrIssuedAt,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt
 );

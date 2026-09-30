@@ -9,6 +9,4 @@ public interface IResidentService
     Task<ResidentProfileResponse> UpdateProfileAsync(Guid userId, UpdateResidentProfileRequest request, CancellationToken cancellationToken = default);
 
     Task<ResidentProfileResponse> UpdateApprovalModeAsync(Guid userId, UpdateApprovalModeRequest request, CancellationToken cancellationToken = default);
-
-    Task<PersonalQrResponse> GetPersonalQrAsync(Guid userId, CancellationToken cancellationToken = default);
 }

@@ -136,11 +136,6 @@ public enum LockerAccessMethod
     Otp,
 
     /// <summary>
-    /// Quét mã QR cá nhân của Cư dân.
-    /// </summary>
-    PersonalQr,
-
-    /// <summary>
     /// Mở ngăn từ xa qua ứng dụng di động của Cư dân.
     /// </summary>
     RemoteApp,

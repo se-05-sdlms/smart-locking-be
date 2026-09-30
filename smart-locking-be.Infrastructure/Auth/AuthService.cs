@@ -111,8 +111,6 @@ public sealed class AuthService(
             RegisteredLockerId = locker.Id,
             FullName = fullName,
             DeliveryApprovalMode = defaultApprovalMode,
-            PersonalQrTokenHash = tokenHashService.HashToken(tokenHashService.CreateSecureToken()),
-            PersonalQrIssuedAt = now,
             FaceRecognitionEnabled = false,
             CreatedAt = now,
             UpdatedAt = now

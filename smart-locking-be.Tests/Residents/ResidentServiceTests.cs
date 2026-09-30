@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Residents;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
-using smart_locking_be.Infrastructure.Auth;
 using smart_locking_be.Infrastructure.Persistence;
 using smart_locking_be.Infrastructure.Services;
 
@@ -23,8 +22,7 @@ public sealed class ResidentServiceTests
     public async Task GetProfileAsync_WhenUserNotFound_ThrowsKeyNotFoundException()
     {
         await using var dbContext = CreateInMemoryDbContext();
-        var tokenHashService = new Sha256TokenHashService();
-        var service = new ResidentService(dbContext, tokenHashService);
+        var service = new ResidentService(dbContext);
 
         await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetProfileAsync(Guid.NewGuid()));
     }
@@ -45,8 +43,7 @@ public sealed class ResidentServiceTests
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
 
-        var tokenHashService = new Sha256TokenHashService();
-        var service = new ResidentService(dbContext, tokenHashService);
+        var service = new ResidentService(dbContext);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.GetProfileAsync(user.Id));
         Assert.Contains("khóa", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -68,8 +65,7 @@ public sealed class ResidentServiceTests
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
 
-        var tokenHashService = new Sha256TokenHashService();
-        var service = new ResidentService(dbContext, tokenHashService);
+        var service = new ResidentService(dbContext);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.GetProfileAsync(user.Id));
         Assert.Contains("vô hiệu hóa", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -91,8 +87,7 @@ public sealed class ResidentServiceTests
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
 
-        var tokenHashService = new Sha256TokenHashService();
-        var service = new ResidentService(dbContext, tokenHashService);
+        var service = new ResidentService(dbContext);
 
         var response = await service.GetProfileAsync(user.Id);
 
@@ -102,11 +97,8 @@ public sealed class ResidentServiceTests
         Assert.Equal("newresident@boxora.com", response.Email);
         Assert.Equal("0912345678", response.FullName);
         Assert.Equal(DeliveryApprovalMode.Auto, response.DeliveryApprovalMode);
-        Assert.NotEqual(default, response.PersonalQrIssuedAt);
-
         var persistedProfile = await dbContext.ResidentProfiles.FirstOrDefaultAsync(p => p.UserId == user.Id);
         Assert.NotNull(persistedProfile);
-        Assert.NotEmpty(persistedProfile.PersonalQrTokenHash);
     }
 
     [Fact]
@@ -114,7 +106,6 @@ public sealed class ResidentServiceTests
     {
         await using var dbContext = CreateInMemoryDbContext();
         var userId = Guid.NewGuid();
-        var issuedAt = DateTimeOffset.UtcNow;
         var lockerId = Guid.NewGuid();
         var user = new User
         {
@@ -134,16 +125,13 @@ public sealed class ResidentServiceTests
             DateOfBirth = new DateOnly(1995, 5, 20),
             AvatarUrl = "https://boxora.com/avatar.png",
             DeliveryApprovalMode = DeliveryApprovalMode.Auto,
-            PersonalQrTokenHash = "testhash",
-            PersonalQrIssuedAt = issuedAt,
             FaceRecognitionEnabled = false
         };
         dbContext.Users.Add(user);
         dbContext.ResidentProfiles.Add(profile);
         await dbContext.SaveChangesAsync();
 
-        var tokenHashService = new Sha256TokenHashService();
-        var service = new ResidentService(dbContext, tokenHashService);
+        var service = new ResidentService(dbContext);
 
         var response = await service.GetProfileAsync(userId);
 
@@ -154,7 +142,6 @@ public sealed class ResidentServiceTests
         Assert.Equal(new DateOnly(1995, 5, 20), response.DateOfBirth);
         Assert.Equal("https://boxora.com/avatar.png", response.AvatarUrl);
         Assert.Equal(DeliveryApprovalMode.Auto, response.DeliveryApprovalMode);
-        Assert.Equal(issuedAt, response.PersonalQrIssuedAt);
     }
 
     [Fact]
@@ -171,8 +158,7 @@ public sealed class ResidentServiceTests
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
 
-        var tokenHashService = new Sha256TokenHashService();
-        var service = new ResidentService(dbContext, tokenHashService);
+        var service = new ResidentService(dbContext);
 
         var request = new UpdateResidentProfileRequest("   ", null, null);
 
@@ -193,8 +179,7 @@ public sealed class ResidentServiceTests
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
 
-        var tokenHashService = new Sha256TokenHashService();
-        var service = new ResidentService(dbContext, tokenHashService);
+        var service = new ResidentService(dbContext);
 
         var request = new UpdateResidentProfileRequest(
             "Valid Name",
@@ -221,16 +206,13 @@ public sealed class ResidentServiceTests
             Id = Guid.NewGuid(),
             UserId = userId,
             FullName = "Old Name",
-            DeliveryApprovalMode = DeliveryApprovalMode.Manual,
-            PersonalQrTokenHash = "hash123",
-            PersonalQrIssuedAt = DateTimeOffset.UtcNow
+            DeliveryApprovalMode = DeliveryApprovalMode.Manual
         };
         dbContext.Users.Add(user);
         dbContext.ResidentProfiles.Add(profile);
         await dbContext.SaveChangesAsync();
 
-        var tokenHashService = new Sha256TokenHashService();
-        var service = new ResidentService(dbContext, tokenHashService);
+        var service = new ResidentService(dbContext);
 
         var request = new UpdateResidentProfileRequest(
             "Tran Thi B",
@@ -266,16 +248,13 @@ public sealed class ResidentServiceTests
             Id = Guid.NewGuid(),
             UserId = userId,
             FullName = "Test Resident",
-            DeliveryApprovalMode = DeliveryApprovalMode.Manual,
-            PersonalQrTokenHash = "hash123",
-            PersonalQrIssuedAt = DateTimeOffset.UtcNow
+            DeliveryApprovalMode = DeliveryApprovalMode.Manual
         };
         dbContext.Users.Add(user);
         dbContext.ResidentProfiles.Add(profile);
         await dbContext.SaveChangesAsync();
 
-        var tokenHashService = new Sha256TokenHashService();
-        var service = new ResidentService(dbContext, tokenHashService);
+        var service = new ResidentService(dbContext);
 
         var response = await service.UpdateApprovalModeAsync(
             userId,
@@ -287,42 +266,4 @@ public sealed class ResidentServiceTests
         Assert.Equal(DeliveryApprovalMode.Auto, updatedProfile.DeliveryApprovalMode);
     }
 
-    [Fact]
-    public async Task GetPersonalQrAsync_RotatesPersonalQrToken_ReturnsTokenAndPersistsHash()
-    {
-        await using var dbContext = CreateInMemoryDbContext();
-        var userId = Guid.NewGuid();
-        var user = new User
-        {
-            Id = userId,
-            PhoneNumber = "0900000006",
-            Role = UserRole.Resident,
-            Status = UserStatus.Active
-        };
-        var profile = new ResidentProfile
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            FullName = "Test Resident",
-            DeliveryApprovalMode = DeliveryApprovalMode.Manual,
-            PersonalQrTokenHash = "initial-hash",
-            PersonalQrIssuedAt = DateTimeOffset.UtcNow.AddDays(-10)
-        };
-        dbContext.Users.Add(user);
-        dbContext.ResidentProfiles.Add(profile);
-        await dbContext.SaveChangesAsync();
-
-        var tokenHashService = new Sha256TokenHashService();
-        var service = new ResidentService(dbContext, tokenHashService);
-
-        var response = await service.GetPersonalQrAsync(userId);
-
-        Assert.NotNull(response);
-        Assert.NotEmpty(response.QrToken);
-        Assert.True(response.IssuedAt > DateTimeOffset.UtcNow.AddMinutes(-1));
-
-        var updatedProfile = await dbContext.ResidentProfiles.FirstAsync(p => p.UserId == userId);
-        Assert.NotEqual("initial-hash", updatedProfile.PersonalQrTokenHash);
-        Assert.Equal(tokenHashService.HashToken(response.QrToken), updatedProfile.PersonalQrTokenHash);
-    }
 }

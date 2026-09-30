@@ -14,7 +14,6 @@ public sealed record UserDetailResponse(
     string? AvatarUrl,
     DeliveryApprovalMode? DeliveryApprovalMode,
     bool FaceRecognitionEnabled,
-    DateTimeOffset? PersonalQrIssuedAt,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     DateTimeOffset? LastLoginAt,

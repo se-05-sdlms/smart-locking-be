@@ -7,9 +7,7 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class ResidentService(
-    ApplicationDbContext dbContext,
-    ITokenHashService tokenHashService) : IResidentService
+public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentService
 {
     public async Task<ResidentProfileResponse> GetProfileAsync(Guid userId, CancellationToken cancellationToken = default)
     {
@@ -87,26 +85,6 @@ public sealed class ResidentService(
         return MapToResponse(user, profile);
     }
 
-    public async Task<PersonalQrResponse> GetPersonalQrAsync(Guid userId, CancellationToken cancellationToken = default)
-    {
-        User user = await FindUserWithProfileAsync(userId, cancellationToken);
-        ValidateUserAccess(user);
-
-        ResidentProfile profile = user.ResidentProfile ?? await EnsureProfileCreatedAsync(user, cancellationToken);
-
-        string rawToken = tokenHashService.CreateSecureToken();
-        string tokenHash = tokenHashService.HashToken(rawToken);
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-
-        profile.PersonalQrTokenHash = tokenHash;
-        profile.PersonalQrIssuedAt = now;
-        profile.UpdatedAt = now;
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return new PersonalQrResponse(rawToken, now);
-    }
-
     private async Task<User> FindUserWithProfileAsync(Guid userId, CancellationToken cancellationToken)
     {
         return await dbContext.Users
@@ -141,8 +119,6 @@ public sealed class ResidentService(
     private async Task<ResidentProfile> EnsureProfileCreatedAsync(User user, CancellationToken cancellationToken)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        string initialRawToken = tokenHashService.CreateSecureToken();
-        string initialTokenHash = tokenHashService.HashToken(initialRawToken);
 
         string defaultFullName = !string.IsNullOrWhiteSpace(user.PhoneNumber)
             ? user.PhoneNumber
@@ -154,8 +130,6 @@ public sealed class ResidentService(
             UserId = user.Id,
             FullName = defaultFullName,
             DeliveryApprovalMode = DeliveryApprovalMode.Auto,
-            PersonalQrTokenHash = initialTokenHash,
-            PersonalQrIssuedAt = now,
             FaceRecognitionEnabled = false,
             CreatedAt = now,
             UpdatedAt = now
@@ -180,7 +154,6 @@ public sealed class ResidentService(
             profile.AvatarUrl,
             profile.DeliveryApprovalMode,
             profile.FaceRecognitionEnabled,
-            profile.PersonalQrIssuedAt,
             profile.CreatedAt,
             profile.UpdatedAt
         );
