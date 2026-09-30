@@ -1,10 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using smart_locking_be.Application.DTOs.Auth;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
+using System.Text.RegularExpressions;
 
 namespace smart_locking_be.Infrastructure.Auth;
 
@@ -16,7 +18,17 @@ public sealed class AuthService(
     IOtpService otpService,
     IConfiguration configuration) : IAuthService
 {
+    private static readonly Regex PhonePattern = new("^0[0-9]{9}$", RegexOptions.Compiled);
     private const string InvalidCredentialsMessage = "Invalid credentials.";
+
+    public async Task<IReadOnlyCollection<RegistrationLockerResponse>> GetRegistrationLockersAsync(
+        CancellationToken cancellationToken) =>
+        await dbContext.Lockers
+            .AsNoTracking()
+            .Where(locker => locker.OperationalStatus == LockerOperationalStatus.Operational)
+            .OrderBy(locker => locker.Code)
+            .Select(locker => new RegistrationLockerResponse(locker.Id, locker.Code, locker.Address))
+            .ToListAsync(cancellationToken);
 
     public async Task<AuthTokenResponse> RegisterAsync(
         RegisterRequest request,
@@ -24,26 +36,58 @@ public sealed class AuthService(
         CancellationToken cancellationToken)
     {
         string? email = NormalizeEmail(request.Email);
-        string? phoneNumber = NormalizePhone(request.PhoneNumber);
+        string phoneNumber = NormalizePhone(request.PhoneNumber)
+            ?? throw new ArgumentException("Phone number is required.", nameof(request.PhoneNumber));
 
-        if (email is null && phoneNumber is null)
+        if (!PhonePattern.IsMatch(phoneNumber))
         {
-            throw new InvalidOperationException("Email or phone number is required.");
+            throw new ArgumentException(
+                "Phone number must contain 10 digits and start with 0.",
+                nameof(request.PhoneNumber));
         }
 
-        if (string.IsNullOrWhiteSpace(request.Password))
+        if (request.Password.Length < 8)
         {
-            throw new InvalidOperationException("Password is required.");
+            throw new ArgumentException("Password must contain at least 8 characters.", nameof(request.Password));
+        }
+
+        string fullName = request.FullName.Trim();
+        if (string.IsNullOrWhiteSpace(fullName) || fullName.Length > 150)
+        {
+            throw new ArgumentException("Full name must contain between 1 and 150 characters.", nameof(request.FullName));
         }
 
         bool exists = await dbContext.Users.AnyAsync(user =>
-            (email != null && user.Email == email) ||
-            (phoneNumber != null && user.PhoneNumber == phoneNumber), cancellationToken);
+            (email != null && user.Email == email) || user.PhoneNumber == phoneNumber, cancellationToken);
 
         if (exists)
         {
             throw new InvalidOperationException("User already exists.");
         }
+
+        Locker locker = await dbContext.Lockers.SingleOrDefaultAsync(
+            candidate => candidate.Id == request.RegisteredLockerId,
+            cancellationToken) ?? throw new KeyNotFoundException("Registered locker not found.");
+        if (locker.OperationalStatus != LockerOperationalStatus.Operational)
+        {
+            throw new InvalidOperationException("Registered locker is not operational.");
+        }
+
+        DeliveryApprovalMode defaultApprovalMode = await dbContext.SystemPolicies
+            .Where(policy => policy.IsActive)
+            .Select(policy => (DeliveryApprovalMode?)policy.DefaultApprovalMode)
+            .SingleOrDefaultAsync(cancellationToken) ?? DeliveryApprovalMode.Auto;
+
+        await using IDbContextTransaction? transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        await otpService.VerifyAndConsumeAsync(
+            phoneNumber,
+            request.OtpCode,
+            OtpPurpose.Registration,
+            null,
+            cancellationToken);
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         User user = new()
@@ -60,9 +104,37 @@ public sealed class AuthService(
         };
 
         dbContext.Users.Add(user);
+        dbContext.ResidentProfiles.Add(new ResidentProfile
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            RegisteredLockerId = locker.Id,
+            FullName = fullName,
+            DeliveryApprovalMode = defaultApprovalMode,
+            PersonalQrTokenHash = tokenHashService.HashToken(tokenHashService.CreateSecureToken()),
+            PersonalQrIssuedAt = now,
+            FaceRecognitionEnabled = false,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = user.Id,
+            Action = "RegisterResident",
+            EntityType = nameof(User),
+            EntityId = user.Id,
+            Result = AuditLogResult.Succeeded,
+            IpAddress = ipAddress,
+            OccurredAt = now
+        });
 
         (AuthTokenResponse response, _) = IssueTokens(user, ipAddress, now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         return response;
     }
@@ -178,7 +250,10 @@ public sealed class AuthService(
         await otpService.IssueAsync(user.PhoneNumber, OtpPurpose.PasswordReset, user.Id, cancellationToken);
     }
 
-    public async Task ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken)
+    public async Task ResetPasswordAsync(
+        ResetPasswordRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken)
     {
         User user = await FindUserByIdentifierAsync(request.LoginIdentifier, cancellationToken)
             ?? throw new InvalidOperationException("Invalid OTP.");
@@ -188,9 +263,9 @@ public sealed class AuthService(
             throw new InvalidOperationException("Invalid OTP.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.NewPassword))
+        if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
         {
-            throw new InvalidOperationException("Password is required.");
+            throw new InvalidOperationException("Password must contain at least 8 characters.");
         }
 
         await otpService.VerifyAndConsumeAsync(
@@ -203,6 +278,17 @@ public sealed class AuthService(
         DateTimeOffset now = DateTimeOffset.UtcNow;
         user.PasswordHash = passwordHashService.HashPassword(request.NewPassword);
         user.UpdatedAt = now;
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = user.Id,
+            Action = "ResetPassword",
+            EntityType = nameof(User),
+            EntityId = user.Id,
+            Result = AuditLogResult.Succeeded,
+            IpAddress = ipAddress,
+            OccurredAt = now
+        });
 
         await dbContext.SaveChangesAsync(cancellationToken);
     }

@@ -15,3 +15,8 @@ public sealed record UserProfileResponse(
     string Status,
     bool MustChangePassword,
     DateTimeOffset? LastLoginAt);
+
+public sealed record RegistrationLockerResponse(
+    Guid Id,
+    string Code,
+    string Address);
