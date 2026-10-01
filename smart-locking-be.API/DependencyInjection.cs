@@ -38,6 +38,9 @@ public static class DependencyInjection
         // 8. Delivery request session expiration
         services.AddHostedService<DeliveryRequestExpirationWorker>();
 
+        // 9. Periodic overdue parcel fee calculation
+        services.AddHostedService<OverdueChargeWorker>();
+
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE CẤP API TRONG TƯƠNG LAI:
         // Khi cần tạo các service hoặc BackgroundWorker ở tầng API, thực hiện đăng ký tại đây:
         // - AddScoped (cho request-scoped logic):
