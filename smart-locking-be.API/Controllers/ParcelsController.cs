@@ -1,7 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http.Timeouts;
+using Microsoft.AspNetCore.RateLimiting;
+using smart_locking_be.API.Constants;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.Interfaces.Services;
+using smart_locking_be.Domain.Enums;
 using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
@@ -9,7 +13,9 @@ namespace smart_locking_be.API.Controllers;
 [ApiController]
 [Route("api/parcels")]
 [Authorize(Roles = "Resident,LockerOperator")]
-public sealed class ParcelsController(IParcelService parcelService) : ControllerBase
+public sealed class ParcelsController(
+    IParcelService parcelService,
+    IParcelPickupService parcelPickupService) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetParcels(
@@ -30,6 +36,50 @@ public sealed class ParcelsController(IParcelService parcelService) : Controller
     public async Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken) =>
         await ExecuteAsync((userId, role) =>
             parcelService.GetHistoryAsync(userId, role, id, cancellationToken));
+
+    [HttpPost("{id:guid}/unlock-pickup")]
+    [Authorize(Roles = "Resident")]
+    [EnableRateLimiting(RateLimitPolicyNames.DeviceCommand)]
+    [RequestTimeout(RequestTimeoutPolicyNames.DeviceCommand)]
+    public async Task<IActionResult> UnlockPickup(Guid id, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
+        }
+
+        try
+        {
+            PickupUnlockResponse response = await parcelPickupService.UnlockAsync(
+                userId,
+                id,
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                Request.Headers.UserAgent.ToString(),
+                cancellationToken);
+            return response.Result switch
+            {
+                LockerAccessResult.Succeeded => Accepted(response),
+                LockerAccessResult.Blocked => Conflict(response),
+                _ => StatusCode(StatusCodes.Status503ServiceUnavailable, response),
+            };
+        }
+        catch (KeyNotFoundException exception)
+        {
+            return NotFound(new { message = exception.Message });
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { message = exception.Message });
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
 
     private async Task<IActionResult> ExecuteAsync<TResponse>(
         Func<Guid, string, Task<TResponse>> action)

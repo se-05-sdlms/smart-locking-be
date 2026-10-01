@@ -37,6 +37,7 @@ public static class DependencyInjection
         services.AddScoped<ILockerCommandDispatcher, MqttLockerCommandDispatcher>();
         services.AddScoped<IDeliveryRequestService, DeliveryRequestService>();
         services.AddScoped<IParcelService, ParcelService>();
+        services.AddScoped<IParcelPickupService, ParcelPickupService>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();
         services.AddSingleton(TimeProvider.System);
