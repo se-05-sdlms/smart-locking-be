@@ -28,7 +28,6 @@ internal static class ModelContract
                 P("Id", "Guid"), P("UserId", "Guid"), P("RegisteredLockerId", "Guid", true),
                 P("FullName", "String"), P("DateOfBirth", "DateOnly", true),
                 P("AvatarUrl", "String", true), P("DeliveryApprovalMode", "DeliveryApprovalMode"),
-                P("PersonalQrTokenHash", "String"), P("PersonalQrIssuedAt", "DateTimeOffset"),
                 P("FaceRecognitionEnabled", "Boolean"), P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
             ],
             ["ResidentBiometric"] =
@@ -77,7 +76,7 @@ internal static class ModelContract
                 P("OverdueFeePerHour", "Decimal"), P("Currency", "String"), P("MaxStorageHours", "Int32"),
                 P("ClearanceEligibilityAfterHours", "Int32"), P("ClearanceNoticeBeforeHours", "Int32"),
                 P("OtpMaxAttempts", "Int32"), P("OtpLockoutMinutes", "Int32"),
-                P("EnablePersonalQr", "Boolean"), P("EnableOtp", "Boolean"), P("EnableRemoteUnlock", "Boolean"),
+                P("EnableOtp", "Boolean"), P("EnableRemoteUnlock", "Boolean"),
                 P("EnableFaceRecognition", "Boolean"), P("EffectiveFrom", "DateTimeOffset"),
                 P("EffectiveTo", "DateTimeOffset", true), P("IsActive", "Boolean"), P("CreatedByUserId", "Guid"),
                 P("CreatedAt", "DateTimeOffset")

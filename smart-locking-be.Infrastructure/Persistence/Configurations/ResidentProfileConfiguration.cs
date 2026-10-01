@@ -11,7 +11,6 @@ public sealed class ResidentProfileConfiguration() : BaseConfiguration<ResidentP
         Varchar(builder.Property(entity => entity.FullName)).IsRequired().HasMaxLength(150);
         Varchar(builder.Property(entity => entity.AvatarUrl)).HasMaxLength(2048);
         EnumAsString(builder.Property(entity => entity.DeliveryApprovalMode)).IsRequired();
-        Varchar(builder.Property(entity => entity.PersonalQrTokenHash)).IsRequired().HasMaxLength(256);
 
         builder.HasOne(entity => entity.User)
             .WithOne(user => user.ResidentProfile)
@@ -25,9 +24,6 @@ public sealed class ResidentProfileConfiguration() : BaseConfiguration<ResidentP
 
         builder.HasIndex(entity => entity.UserId)
             .HasDatabaseName("UX_ResidentProfile_UserId")
-            .IsUnique();
-        builder.HasIndex(entity => entity.PersonalQrTokenHash)
-            .HasDatabaseName("UX_ResidentProfile_PersonalQrTokenHash")
             .IsUnique();
         builder.HasIndex(entity => entity.DeliveryApprovalMode)
             .HasDatabaseName("IX_ResidentProfile_DeliveryApprovalMode");

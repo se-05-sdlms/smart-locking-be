@@ -23,8 +23,7 @@ public sealed class UserServiceTests
     {
         var dbContext = CreateInMemoryDbContext();
         var passwordHashService = new Pbkdf2PasswordHashService();
-        var tokenHashService = new Sha256TokenHashService();
-        var service = new UserService(dbContext, passwordHashService, tokenHashService);
+        var service = new UserService(dbContext, passwordHashService);
         return (service, dbContext);
     }
 
@@ -107,9 +106,7 @@ public sealed class UserServiceTests
                 UserId = userId,
                 FullName = "Nguyen Van A",
                 DateOfBirth = new DateOnly(1990, 1, 1),
-                DeliveryApprovalMode = DeliveryApprovalMode.Manual,
-                PersonalQrTokenHash = "hash",
-                PersonalQrIssuedAt = DateTimeOffset.UtcNow
+                DeliveryApprovalMode = DeliveryApprovalMode.Manual
             };
             dbContext.Users.Add(user);
             dbContext.ResidentProfiles.Add(profile);

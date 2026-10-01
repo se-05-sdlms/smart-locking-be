@@ -51,7 +51,6 @@ public sealed class AuthServiceRegistrationTests
         Assert.Equal("0912345678", user.PhoneNumber);
         Assert.Equal(locker.Id, user.ResidentProfile!.RegisteredLockerId);
         Assert.Equal("Nguyen Van A", user.ResidentProfile.FullName);
-        Assert.NotEmpty(user.ResidentProfile.PersonalQrTokenHash);
         Assert.NotNull((await dbContext.OtpChallenges.SingleAsync()).UsedAt);
         Assert.Equal(AuditLogResult.Succeeded, (await dbContext.AuditLogs.SingleAsync()).Result);
         Assert.Single(dbContext.RefreshTokens);

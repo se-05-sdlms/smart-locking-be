@@ -161,7 +161,6 @@ public sealed class ParcelServiceTests
             Id = Guid.NewGuid(),
             UserId = residentUser.Id,
             FullName = "Resident",
-            PersonalQrTokenHash = "hash"
         };
         var locker = new Locker
         {

@@ -134,8 +134,6 @@ public sealed class ParcelPickupServiceTests
             User = resident,
             FullName = "Cư Dân",
             DeliveryApprovalMode = DeliveryApprovalMode.Manual,
-            PersonalQrTokenHash = "hash",
-            PersonalQrIssuedAt = Now,
             CreatedAt = Now,
             UpdatedAt = Now,
         };

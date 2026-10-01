@@ -78,11 +78,6 @@ public sealed class SystemPolicy
     public int OtpLockoutMinutes { get; set; }
 
     /// <summary>
-    /// Cho phép lấy hàng bằng mã QR cá nhân của Cư dân.
-    /// </summary>
-    public bool EnablePersonalQr { get; set; }
-
-    /// <summary>
     /// Cho phép lấy hàng bằng mã OTP.
     /// </summary>
     public bool EnableOtp { get; set; }

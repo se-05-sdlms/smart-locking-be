@@ -11,8 +11,7 @@ namespace smart_locking_be.Infrastructure.Services;
 
 public sealed class UserService(
     ApplicationDbContext dbContext,
-    IPasswordHashService passwordHashService,
-    ITokenHashService tokenHashService) : IUserService
+    IPasswordHashService passwordHashService) : IUserService
 {
     public async Task<PagedResult<UserListItemResponse>> GetUsersAsync(
         GetUsersFilterRequest filter,
@@ -141,8 +140,6 @@ public sealed class UserService(
             UserId = user.Id,
             FullName = request.FullName.Trim(),
             DeliveryApprovalMode = DeliveryApprovalMode.Manual,
-            PersonalQrTokenHash = tokenHashService.HashToken(tokenHashService.CreateSecureToken()),
-            PersonalQrIssuedAt = now,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -245,8 +242,6 @@ public sealed class UserService(
                 UserId = user.Id,
                 FullName = request.FullName.Trim(),
                 DeliveryApprovalMode = DeliveryApprovalMode.Manual,
-                PersonalQrTokenHash = tokenHashService.HashToken(tokenHashService.CreateSecureToken()),
-                PersonalQrIssuedAt = now,
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -481,7 +476,6 @@ public sealed class UserService(
             user.ResidentProfile?.AvatarUrl,
             user.ResidentProfile?.DeliveryApprovalMode,
             user.ResidentProfile?.FaceRecognitionEnabled ?? false,
-            user.ResidentProfile?.PersonalQrIssuedAt,
             user.CreatedAt,
             user.UpdatedAt,
             user.LastLoginAt,

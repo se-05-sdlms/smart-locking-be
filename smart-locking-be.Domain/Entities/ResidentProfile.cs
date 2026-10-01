@@ -43,16 +43,6 @@ public sealed class ResidentProfile
     public DeliveryApprovalMode DeliveryApprovalMode { get; set; }
 
     /// <summary>
-    /// Giá trị băm của token QR cá nhân dùng để nhận hàng; không lưu raw token.
-    /// </summary>
-    public string PersonalQrTokenHash { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Thời điểm mã QR cá nhân hiện tại được phát hành.
-    /// </summary>
-    public DateTimeOffset PersonalQrIssuedAt { get; set; }
-
-    /// <summary>
     /// Cho biết Cư dân đã bật phương thức nhận hàng bằng nhận diện khuôn mặt hay chưa.
     /// </summary>
     public bool FaceRecognitionEnabled { get; set; }

@@ -449,8 +449,6 @@ public sealed class DeliveryRequestServiceTests
             UserId = user.Id,
             FullName = "Cư Dân",
             DeliveryApprovalMode = approvalMode,
-            PersonalQrTokenHash = "qr-hash",
-            PersonalQrIssuedAt = now,
             User = user,
             CreatedAt = now,
             UpdatedAt = now

@@ -49,17 +49,6 @@ public class ResidentsController(IResidentService residentService) : ControllerB
         return await ExecuteAsync(() => residentService.UpdateApprovalModeAsync(userId, request, cancellationToken));
     }
 
-    [HttpGet("me/qr")]
-    public async Task<IActionResult> GetPersonalQr(CancellationToken cancellationToken)
-    {
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
-
-        return await ExecuteAsync(() => residentService.GetPersonalQrAsync(userId, cancellationToken));
-    }
-
     private bool TryGetUserId(out Guid userId)
     {
         string? claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
