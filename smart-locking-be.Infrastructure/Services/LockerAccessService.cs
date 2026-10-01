@@ -45,7 +45,7 @@ public sealed class LockerAccessService(
             OccurredAt = now,
         };
 
-        string? blockedReason = GetBlockedReason(compartment);
+        string? blockedReason = GetBlockedReason(compartment, request.AccessType);
         if (blockedReason is not null)
         {
             accessEvent.Result = LockerAccessResult.Blocked;
@@ -75,19 +75,22 @@ public sealed class LockerAccessService(
         return Map(accessEvent, compartment);
     }
 
-    private static string? GetBlockedReason(LockerCompartment compartment)
+    private static string? GetBlockedReason(LockerCompartment compartment, LockerAccessType accessType)
     {
-        if (compartment.Locker.OperationalStatus != LockerOperationalStatus.Operational)
-        {
-            return "Locker hiện không sẵn sàng vận hành.";
-        }
         if (compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
         {
             return "Locker hiện không trực tuyến.";
         }
-        if (compartment.OperationalStatus != LockerCompartmentOperationalStatus.Operational)
+        if (accessType is not LockerAccessType.OperatorEmergency and not LockerAccessType.Maintenance)
         {
-            return "Ngăn locker hiện không sẵn sàng vận hành.";
+            if (compartment.Locker.OperationalStatus != LockerOperationalStatus.Operational)
+            {
+                return "Locker hiện không sẵn sàng vận hành.";
+            }
+            if (compartment.OperationalStatus != LockerCompartmentOperationalStatus.Operational)
+            {
+                return "Ngăn locker hiện không sẵn sàng vận hành.";
+            }
         }
         return null;
     }

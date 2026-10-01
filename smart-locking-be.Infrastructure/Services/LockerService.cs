@@ -7,8 +7,27 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class LockerService(ApplicationDbContext dbContext) : ILockerService
+public sealed class LockerService : ILockerService
 {
+    private readonly ApplicationDbContext dbContext;
+    private readonly ILockerAccessService? lockerAccessService;
+    private readonly TimeProvider timeProvider;
+
+    public LockerService(ApplicationDbContext dbContext)
+        : this(dbContext, null, TimeProvider.System)
+    {
+    }
+
+    public LockerService(
+        ApplicationDbContext dbContext,
+        ILockerAccessService? lockerAccessService,
+        TimeProvider? timeProvider = null)
+    {
+        this.dbContext = dbContext;
+        this.lockerAccessService = lockerAccessService;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
     public async Task<IReadOnlyCollection<LockerSummaryResponse>> GetLockersAsync(
         Guid userId,
         string userRole,
@@ -350,6 +369,138 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return MapCompartmentToResponse(compartment);
+    }
+
+    public async Task<EmergencyUnlockResponse> EmergencyUnlockCompartmentAsync(
+        Guid userId,
+        string userRole,
+        Guid lockerId,
+        Guid compartmentId,
+        EmergencyUnlockRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+        {
+            throw new ArgumentException("Dữ liệu yêu cầu mở khóa khẩn cấp không được để trống.", nameof(request));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length < 5)
+        {
+            throw new ArgumentException("Lý do mở khóa khẩn cấp là bắt buộc và phải có ít nhất 5 ký tự.", nameof(request.Reason));
+        }
+
+        var locker = await dbContext.Lockers
+            .Include(l => l.Compartments)
+            .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
+
+        if (userRole == nameof(UserRole.Administrator))
+        {
+            // Administrator có toàn quyền mở khóa khẩn cấp
+        }
+        else if (userRole == nameof(UserRole.LockerOperator))
+        {
+            var isAssigned = await dbContext.OperatorAssignments
+                .AsNoTracking()
+                .AnyAsync(a => a.OperatorUserId == userId && a.LockerId == lockerId && a.RevokedAt == null, cancellationToken);
+
+            if (!isAssigned)
+            {
+                throw new UnauthorizedAccessException("Bạn không được phân công quản lý tủ locker này nên không có quyền mở khóa khẩn cấp.");
+            }
+        }
+        else
+        {
+            throw new UnauthorizedAccessException($"Role '{userRole}' không có quyền thực hiện mở khóa khẩn cấp.");
+        }
+
+        if (locker.ConnectionStatus != LockerConnectionStatus.Online)
+        {
+            throw new InvalidOperationException("Tủ locker hiện đang ngoại tuyến (Offline), không thể gửi lệnh mở khóa khẩn cấp từ xa.");
+        }
+
+        var compartment = locker.Compartments.FirstOrDefault(c => c.Id == compartmentId)
+            ?? throw new KeyNotFoundException($"Ngăn tủ với ID '{compartmentId}' không tồn tại trong tủ locker này.");
+
+        if (request.IncidentId.HasValue)
+        {
+            var incidentExists = await dbContext.Incidents
+                .AsNoTracking()
+                .AnyAsync(i => i.Id == request.IncidentId.Value, cancellationToken);
+
+            if (!incidentExists)
+            {
+                throw new KeyNotFoundException($"Sự cố với ID '{request.IncidentId.Value}' không tồn tại.");
+            }
+        }
+
+        if (lockerAccessService is null)
+        {
+            throw new InvalidOperationException("Dịch vụ điều phối mở khóa (LockerAccessService) chưa được cấu hình.");
+        }
+
+        var requestedAt = timeProvider.GetUtcNow();
+        var openRequest = new OpenLockerRequest(
+            lockerId,
+            compartmentId,
+            userId,
+            null,
+            null,
+            null,
+            LockerAccessType.OperatorEmergency,
+            LockerAccessMethod.SystemAuthorization,
+            ipAddress,
+            $"EmergencyUnlock:{userRole}");
+
+        var accessResponse = await lockerAccessService.OpenAsync(openRequest, cancellationToken);
+        var completedAt = timeProvider.GetUtcNow();
+
+        var emergencyUnlock = new EmergencyUnlock
+        {
+            Id = Guid.NewGuid(),
+            OperatorUserId = userId,
+            LockerId = lockerId,
+            LockerCompartmentId = compartmentId,
+            IncidentId = request.IncidentId,
+            Reason = request.Reason.Trim(),
+            Result = accessResponse.Result == LockerAccessResult.Succeeded
+                ? EmergencyUnlockResult.Succeeded
+                : EmergencyUnlockResult.Failed,
+            RequestedAt = requestedAt,
+            CompletedAt = completedAt
+        };
+
+        dbContext.EmergencyUnlocks.Add(emergencyUnlock);
+
+        var auditLog = new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = userId,
+            Action = "EmergencyUnlock",
+            EntityType = "LockerCompartment",
+            EntityId = compartmentId,
+            Result = accessResponse.Result == LockerAccessResult.Succeeded
+                ? AuditLogResult.Succeeded
+                : AuditLogResult.Failed,
+            IpAddress = ipAddress,
+            Details = $"Mở khóa khẩn cấp ngăn tủ '{compartment.Code}' thuộc tủ '{locker.Code}'. Lý do: {request.Reason.Trim()}. Kết quả: {emergencyUnlock.Result}. Ghi chú: {accessResponse.FailureReason ?? "Thành công"}",
+            OccurredAt = requestedAt
+        };
+
+        dbContext.AuditLogs.Add(auditLog);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new EmergencyUnlockResponse(
+            emergencyUnlock.Id,
+            lockerId,
+            compartmentId,
+            accessResponse.DeviceIdentifier,
+            accessResponse.HardwareChannel,
+            emergencyUnlock.Result,
+            accessResponse.FailureReason,
+            requestedAt,
+            completedAt);
     }
 
     private static (string Code, string Address, string RecoveryAddress, string DeviceIdentifier) ValidateAndTrimLockerInput(

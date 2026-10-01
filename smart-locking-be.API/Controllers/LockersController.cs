@@ -4,6 +4,8 @@ using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using System.Security.Claims;
 
+
+
 namespace smart_locking_be.API.Controllers;
 
 [ApiController]
@@ -131,6 +133,33 @@ public class LockersController(ILockerService lockerService) : ControllerBase
 
         return await ExecuteAsync(() => lockerService.UpdateCompartmentStatusAsync(userId, userRole, id, compartmentId, request, cancellationToken));
     }
+
+    /// <summary>
+    /// Mở khóa khẩn cấp ngăn tủ (Emergency Locker Unlock) phục vụ xử lý sự cố hoặc kiểm tra kỹ thuật (Administrator hoặc LockerOperator được phân công).
+    /// </summary>
+    [HttpPost("{id:guid}/compartments/{compartmentId:guid}/emergency-unlock")]
+    [Authorize(Roles = "Administrator,LockerOperator")]
+    public async Task<IActionResult> EmergencyUnlockCompartment(
+        Guid id,
+        Guid compartmentId,
+        [FromBody] EmergencyUnlockRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
+        }
+
+        return await ExecuteAsync(() => lockerService.EmergencyUnlockCompartmentAsync(
+            userId,
+            userRole,
+            id,
+            compartmentId,
+            request,
+            HttpContext.Connection.RemoteIpAddress?.ToString(),
+            cancellationToken));
+    }
+
 
     private bool TryGetUserIdAndRole(out Guid userId, out string userRole)
     {

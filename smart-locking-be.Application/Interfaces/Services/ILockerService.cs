@@ -19,4 +19,7 @@ public interface ILockerService
     Task<LockerCompartmentResponse> CreateCompartmentAsync(Guid lockerId, CreateCompartmentRequest request, CancellationToken cancellationToken = default);
 
     Task<LockerCompartmentResponse> UpdateCompartmentStatusAsync(Guid userId, string userRole, Guid lockerId, Guid compartmentId, UpdateCompartmentStatusRequest request, CancellationToken cancellationToken = default);
+
+    Task<EmergencyUnlockResponse> EmergencyUnlockCompartmentAsync(Guid userId, string userRole, Guid lockerId, Guid compartmentId, EmergencyUnlockRequest request, string? ipAddress, CancellationToken cancellationToken = default);
 }
+

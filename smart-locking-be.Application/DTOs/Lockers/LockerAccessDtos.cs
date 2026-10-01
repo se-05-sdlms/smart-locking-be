@@ -28,3 +28,19 @@ public sealed record LockerUnlockCommand(
     Guid CommandId,
     string DeviceIdentifier,
     int HardwareChannel);
+
+public sealed record EmergencyUnlockRequest(
+    string Reason,
+    Guid? IncidentId = null);
+
+public sealed record EmergencyUnlockResponse(
+    Guid EmergencyUnlockId,
+    Guid LockerId,
+    Guid LockerCompartmentId,
+    string DeviceIdentifier,
+    int HardwareChannel,
+    EmergencyUnlockResult Result,
+    string? FailureReason,
+    DateTimeOffset RequestedAt,
+    DateTimeOffset? CompletedAt);
+
