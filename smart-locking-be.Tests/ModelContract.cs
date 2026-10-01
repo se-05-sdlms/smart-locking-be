@@ -179,9 +179,11 @@ internal static class ModelContract
                 P("Id", "Guid"), P("ReporterUserId", "Guid", true), P("ReporterName", "String", true),
                 P("ReporterPhone", "String", true), P("DeliveryRequestId", "Guid", true), P("ParcelId", "Guid", true),
                 P("LockerId", "Guid", true), P("LockerCompartmentId", "Guid", true),
-                P("PaymentTransactionId", "Guid", true), P("AssignedOperatorUserId", "Guid", true),
+                P("PaymentTransactionId", "Guid", true), P("ReturnRequestId", "Guid", true),
+                P("AssignedOperatorUserId", "Guid", true),
                 P("Type", "String"), P("Source", "IncidentSource"), P("Status", "IncidentStatus"),
-                P("Title", "String"), P("Description", "String"), P("ResolutionSummary", "String", true),
+                P("Title", "String"), P("Description", "String"), P("EvidenceUrl", "String", true),
+                P("ResolutionSummary", "String", true),
                 P("EscalatedAt", "DateTimeOffset", true), P("ResolvedAt", "DateTimeOffset", true),
                 P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
             ],
