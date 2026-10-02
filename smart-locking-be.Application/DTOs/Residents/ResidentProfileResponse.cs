@@ -14,5 +14,7 @@ public sealed record ResidentProfileResponse(
     DeliveryApprovalMode DeliveryApprovalMode,
     bool FaceRecognitionEnabled,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt
+    DateTimeOffset UpdatedAt,
+    string? RegisteredLockerCode = null,
+    string? RegisteredLockerAddress = null
 );

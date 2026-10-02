@@ -9,6 +9,23 @@ namespace smart_locking_be.Tests.Residents;
 
 public sealed class ResidentServiceTests
 {
+    [Fact]
+    public async Task GetProfileAsync_IncludesRegisteredLockerEvenWhenInactive()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var locker = new Locker { Id = Guid.NewGuid(), Code = "LK-01", Address = "123 Trần Phú", RecoveryAddress = "Reception", DeviceIdentifier = "test-device", OperationalStatus = LockerOperationalStatus.Inactive };
+        var user = new User { Id = Guid.NewGuid(), PasswordHash = "hash", Role = UserRole.Resident, Status = UserStatus.Active };
+        var profile = new ResidentProfile { Id = Guid.NewGuid(), UserId = user.Id, FullName = "Resident", RegisteredLockerId = locker.Id };
+        dbContext.AddRange(locker, user, profile);
+        await dbContext.SaveChangesAsync();
+        dbContext.ChangeTracker.Clear();
+
+        var response = await new ResidentService(dbContext).GetProfileAsync(user.Id);
+
+        Assert.Equal("LK-01", response.RegisteredLockerCode);
+        Assert.Equal("123 Trần Phú", response.RegisteredLockerAddress);
+    }
+
     private static ApplicationDbContext CreateInMemoryDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

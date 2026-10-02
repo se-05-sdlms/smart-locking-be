@@ -88,7 +88,7 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
     private async Task<User> FindUserWithProfileAsync(Guid userId, CancellationToken cancellationToken)
     {
         return await dbContext.Users
-            .Include(u => u.ResidentProfile)
+            .Include(u => u.ResidentProfile).ThenInclude(profile => profile!.RegisteredLocker)
             .SingleOrDefaultAsync(u => u.Id == userId, cancellationToken)
             ?? throw new KeyNotFoundException("Không tìm thấy thông tin tài khoản.");
     }
@@ -155,6 +155,8 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
             profile.DeliveryApprovalMode,
             profile.FaceRecognitionEnabled,
             profile.CreatedAt,
-            profile.UpdatedAt
+            profile.UpdatedAt,
+            profile.RegisteredLocker?.Code,
+            profile.RegisteredLocker?.Address
         );
 }
