@@ -40,6 +40,8 @@ public static class DependencyInjection
         services.AddScoped<IParcelPickupService, ParcelPickupService>();
         services.AddScoped<IOverdueChargeService, OverdueChargeService>();
         services.AddScoped<IIncidentService, IncidentService>();
+        services.AddScoped<IReturnRequestService, ReturnRequestService>();
+        services.AddScoped<IOperationsService, OperationsService>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();
         services.AddSingleton(TimeProvider.System);

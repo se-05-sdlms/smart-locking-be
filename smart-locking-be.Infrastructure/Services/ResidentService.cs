@@ -129,7 +129,7 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
             Id = Guid.NewGuid(),
             UserId = user.Id,
             FullName = defaultFullName,
-            DeliveryApprovalMode = DeliveryApprovalMode.Auto,
+            DeliveryApprovalMode = DeliveryApprovalMode.Manual,
             FaceRecognitionEnabled = false,
             CreatedAt = now,
             UpdatedAt = now

@@ -14,3 +14,5 @@ public sealed record PickupConfirmationResponse(
     Guid ParcelId,
     [property: JsonConverter(typeof(JsonStringEnumConverter))] ParcelStatus Status,
     DateTimeOffset RetrievedAt);
+
+public sealed record ConfirmPickupRequest(Guid AccessEventId);

@@ -21,6 +21,11 @@ public interface IDeliveryRequestService
         SubmitRecipientPhoneRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<GuestDeliveryStatusResponse> GetGuestStatusAsync(
+        Guid id,
+        string guestSessionToken,
+        CancellationToken cancellationToken = default);
+
     Task<int> ExpireStartedSessionsAsync(CancellationToken cancellationToken = default);
 
     // Issue #20: Resident Delivery Approval Flow

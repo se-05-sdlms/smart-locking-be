@@ -69,6 +69,7 @@ public sealed class ParcelPickupService(
     }
 
     public async Task<PickupConfirmationResponse> ConfirmPickupAsync(
+        Guid residentUserId,
         Guid lockerAccessEventId,
         CancellationToken cancellationToken = default)
     {
@@ -83,6 +84,10 @@ public sealed class ParcelPickupService(
         {
             throw new InvalidOperationException("Lượt mở ngăn không hợp lệ để xác nhận lấy hàng.");
         }
+        if (accessEvent.UserId != residentUserId)
+        {
+            throw new UnauthorizedAccessException("Bạn không có quyền xác nhận lượt lấy hàng này.");
+        }
 
         Parcel parcel = await dbContext.Parcels
             .Include(item => item.DeliveryRequest)
@@ -92,6 +97,14 @@ public sealed class ParcelPickupService(
         if (parcel.DeliveryRequest.AllocatedCompartmentId != accessEvent.LockerCompartmentId)
         {
             throw new InvalidOperationException("Lượt mở ngăn không khớp với vị trí bưu kiện.");
+        }
+        DoorStatus doorStatus = await dbContext.LockerCompartments
+            .Where(item => item.Id == accessEvent.LockerCompartmentId)
+            .Select(item => item.DoorStatus)
+            .SingleAsync(cancellationToken);
+        if (doorStatus != DoorStatus.Closed)
+        {
+            throw new InvalidOperationException("Chưa thể hoàn tất nhận hàng vì cửa ngăn chưa đóng.");
         }
         if (parcel.Status == ParcelStatus.Retrieved && parcel.RetrievedAt.HasValue)
         {

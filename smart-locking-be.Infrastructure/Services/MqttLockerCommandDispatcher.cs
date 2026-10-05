@@ -13,6 +13,11 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
         LockerUnlockCommand command,
         CancellationToken cancellationToken = default)
     {
+        if (bool.TryParse(configuration["Mqtt:Simulate"], out bool simulate) && simulate)
+        {
+            return;
+        }
+
         string host = configuration["Mqtt:Host"]?.Trim() ?? string.Empty;
         if (host.Length == 0)
         {

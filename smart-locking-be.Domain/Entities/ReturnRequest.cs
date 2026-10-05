@@ -136,4 +136,6 @@ public sealed class ReturnRequest
     /// Các sự cố phát sinh trong quá trình gửi hoặc nhận hàng trả.
     /// </summary>
     public ICollection<Incident> Incidents { get; set; } = new List<Incident>();
+
+    public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
 }

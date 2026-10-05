@@ -96,7 +96,7 @@ public sealed class ResidentServiceTests
         Assert.Equal("0912345678", response.PhoneNumber);
         Assert.Equal("newresident@boxora.com", response.Email);
         Assert.Equal("0912345678", response.FullName);
-        Assert.Equal(DeliveryApprovalMode.Auto, response.DeliveryApprovalMode);
+        Assert.Equal(DeliveryApprovalMode.Manual, response.DeliveryApprovalMode);
         var persistedProfile = await dbContext.ResidentProfiles.FirstOrDefaultAsync(p => p.UserId == user.Id);
         Assert.NotNull(persistedProfile);
     }

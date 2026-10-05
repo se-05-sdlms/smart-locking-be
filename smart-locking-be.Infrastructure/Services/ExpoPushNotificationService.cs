@@ -17,6 +17,7 @@ public sealed class ExpoPushNotificationService(
 {
     private const string ExpoPushEndpoint = "https://exp.host/--/api/v2/push/send";
     private const string DeliveryApprovalRequestType = "DeliveryApprovalRequested";
+    private const string ParcelStoredType = "ParcelStored";
 
     public Guid EnqueueDeliveryApprovalRequest(
         Guid residentUserId,
@@ -30,6 +31,9 @@ public sealed class ExpoPushNotificationService(
         Notification inAppNotification = CreateNotification(
             residentUserId,
             deliveryRequestId,
+            null,
+            null,
+            DeliveryApprovalRequestType,
             NotificationChannel.InApp,
             title,
             message,
@@ -40,6 +44,9 @@ public sealed class ExpoPushNotificationService(
         Notification pushNotification = CreateNotification(
             residentUserId,
             deliveryRequestId,
+            null,
+            null,
+            DeliveryApprovalRequestType,
             NotificationChannel.Push,
             title,
             message,
@@ -48,6 +55,47 @@ public sealed class ExpoPushNotificationService(
 
         dbContext.Notifications.AddRange(inAppNotification, pushNotification);
         return pushNotification.Id;
+    }
+
+    public Guid EnqueueParcelStored(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string lockerCode,
+        string compartmentCode)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        string title = "Kiện hàng đã được lưu";
+        string message = $"Kiện hàng của bạn đã được lưu tại tủ {lockerCode}, ngăn {compartmentCode}.";
+        Notification inAppNotification = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, ParcelStoredType,
+            NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
+        inAppNotification.SentAt = now;
+        Notification pushNotification = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, ParcelStoredType,
+            NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
+
+        dbContext.Notifications.AddRange(inAppNotification, pushNotification);
+        return pushNotification.Id;
+    }
+
+    public Guid EnqueueReturnNotification(
+        Guid residentUserId,
+        Guid returnRequestId,
+        string type,
+        string title,
+        string message)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        Notification inApp = CreateNotification(
+            residentUserId, null, returnRequestId, null, type,
+            NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
+        inApp.SentAt = now;
+        Notification push = CreateNotification(
+            residentUserId, null, returnRequestId, null, type,
+            NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
+        dbContext.Notifications.AddRange(inApp, push);
+        return push.Id;
     }
 
     public async Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default)
@@ -114,11 +162,6 @@ public sealed class ExpoPushNotificationService(
             return;
         }
 
-        if (!notification.DeliveryRequestId.HasValue)
-        {
-            throw new InvalidOperationException("Push notification không liên kết với yêu cầu giao hàng.");
-        }
-
         List<DeviceInstallation> devices = await dbContext.DeviceInstallations
             .Where(device => device.UserId == notification.UserId && device.IsActive)
             .OrderBy(device => device.CreatedAt)
@@ -137,10 +180,14 @@ public sealed class ExpoPushNotificationService(
             title = notification.Title,
             body = notification.Message,
             sound = "default",
+            priority = "high",
             data = new
             {
-                type = "delivery_request",
-                deliveryRequestId = notification.DeliveryRequestId.Value
+                type = notification.Type,
+                deliveryRequestId = notification.DeliveryRequestId,
+                returnRequestId = notification.ReturnRequestId,
+                parcelId = notification.ParcelId,
+                incidentId = notification.IncidentId
             }
         });
 
@@ -195,7 +242,10 @@ public sealed class ExpoPushNotificationService(
 
     private static Notification CreateNotification(
         Guid residentUserId,
-        Guid deliveryRequestId,
+        Guid? deliveryRequestId,
+        Guid? returnRequestId,
+        Guid? parcelId,
+        string type,
         NotificationChannel channel,
         string title,
         string message,
@@ -206,7 +256,9 @@ public sealed class ExpoPushNotificationService(
             Id = Guid.NewGuid(),
             UserId = residentUserId,
             DeliveryRequestId = deliveryRequestId,
-            Type = DeliveryApprovalRequestType,
+            ReturnRequestId = returnRequestId,
+            ParcelId = parcelId,
+            Type = type,
             Channel = channel,
             Title = title,
             Message = message,

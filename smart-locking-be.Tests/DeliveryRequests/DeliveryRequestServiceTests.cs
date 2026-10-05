@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
+using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -160,10 +161,34 @@ public sealed class DeliveryRequestServiceTests
         DeliveryRequest persisted = await dbContext.DeliveryRequests.SingleAsync();
         Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
         Assert.Equal(DeliveryApprovalMode.Manual, persisted.ApprovalModeSnapshot);
-        Assert.Equal(TimeSpan.FromMinutes(30), persisted.ApprovalExpiresAt - persisted.UpdatedAt);
+        Assert.Equal(TimeSpan.FromMinutes(10), persisted.ApprovalExpiresAt - persisted.UpdatedAt);
         Assert.Equal(
             [(resident.UserId, persisted.Id, locker.Code)],
             pushNotificationService.Requests);
+    }
+
+    [Fact]
+    public async Task SubmitRecipientAsync_WhenResidentUsesAnotherLocker_RejectsRequest()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
+        ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234570");
+        resident.RegisteredLockerId = Guid.NewGuid();
+        await dbContext.SaveChangesAsync();
+        DeliveryRequestService service = CreateService(dbContext);
+        InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
+        await service.UploadImageAsync(
+            initiated.Id,
+            initiated.GuestSessionToken,
+            new UploadParcelImageRequest("https://cdn.example.com/parcel.jpg"));
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.SubmitRecipientAsync(
+                initiated.Id,
+                initiated.GuestSessionToken,
+                new SubmitRecipientPhoneRequest(resident.User.PhoneNumber!)));
+
+        Assert.Contains("không đăng ký", exception.Message);
     }
 
     [Fact]
@@ -340,6 +365,29 @@ public sealed class DeliveryRequestServiceTests
     }
 
     [Fact]
+    public async Task ConfirmDropOffAsync_WhenDoorIsOpen_DoesNotCreateParcel()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
+        LockerCompartment compartment = SeedCompartment(dbContext, locker.Id, 1);
+        compartment.DoorStatus = DoorStatus.Open;
+        string token = "valid-token";
+        var tokenService = new Sha256TokenHashService();
+        DeliveryRequest request = CreateDeliveryRequest(
+            locker.Id, policy.Id, tokenService.HashToken(token), DeliveryRequestStatus.Allocated,
+            DateTimeOffset.UtcNow.AddMinutes(10));
+        request.AllocatedCompartmentId = compartment.Id;
+        request.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
+        dbContext.DeliveryRequests.Add(request);
+        await dbContext.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateService(dbContext, tokenService).ConfirmDropOffAsync(request.Id, token));
+
+        Assert.Empty(dbContext.Parcels);
+    }
+
+    [Fact]
     public async Task ExpireStartedSessionsAsync_ExpiresOnlyStartedRequests()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
@@ -376,6 +424,7 @@ public sealed class DeliveryRequestServiceTests
             dbContext,
             tokenHashService ?? new Sha256TokenHashService(),
             pushNotificationService ?? new RecordingPushNotificationService(),
+            new SuccessfulLockerAccessService(),
             timeProvider ?? TimeProvider.System);
 
     private static async Task<(Locker Locker, SystemPolicy Policy)> SeedLockerAndPolicyAsync(ApplicationDbContext dbContext)
@@ -409,7 +458,7 @@ public sealed class DeliveryRequestServiceTests
             Version = 1,
             DefaultApprovalMode = DeliveryApprovalMode.Manual,
             GuestSessionTimeoutMinutes = 15,
-            ManualApprovalTimeoutMinutes = 30,
+            ManualApprovalTimeoutMinutes = 10,
             CompartmentReservationMinutes = 10,
             OverdueStartAfterHours = 24,
             Currency = "VND",
@@ -433,6 +482,7 @@ public sealed class DeliveryRequestServiceTests
         DeliveryApprovalMode approvalMode = DeliveryApprovalMode.Auto)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        Guid registeredLockerId = await dbContext.Lockers.Select(locker => locker.Id).SingleAsync();
         User user = new()
         {
             Id = Guid.NewGuid(),
@@ -447,6 +497,7 @@ public sealed class DeliveryRequestServiceTests
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
+            RegisteredLockerId = registeredLockerId,
             FullName = "Cư Dân",
             DeliveryApprovalMode = approvalMode,
             User = user,
@@ -512,6 +563,20 @@ public sealed class DeliveryRequestServiceTests
             return Guid.NewGuid();
         }
 
+        public Guid EnqueueParcelStored(
+            Guid residentUserId,
+            Guid deliveryRequestId,
+            Guid parcelId,
+            string lockerCode,
+            string compartmentCode) => Guid.NewGuid();
+
+        public Guid EnqueueReturnNotification(
+            Guid residentUserId,
+            Guid returnRequestId,
+            string type,
+            string title,
+            string message) => Guid.NewGuid();
+
         public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
@@ -519,6 +584,21 @@ public sealed class DeliveryRequestServiceTests
 
         public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(
             CancellationToken cancellationToken = default) => Task.FromResult(0);
+    }
+
+    private sealed class SuccessfulLockerAccessService : ILockerAccessService
+    {
+        public Task<OpenLockerResponse> OpenAsync(
+            OpenLockerRequest request,
+            CancellationToken cancellationToken = default) => Task.FromResult(new OpenLockerResponse(
+                Guid.NewGuid(),
+                request.LockerId,
+                request.LockerCompartmentId,
+                "simulator",
+                1,
+                LockerAccessResult.Succeeded,
+                null,
+                DateTimeOffset.UtcNow));
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider

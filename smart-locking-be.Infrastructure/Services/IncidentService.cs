@@ -9,7 +9,8 @@ namespace smart_locking_be.Infrastructure.Services;
 
 public sealed class IncidentService(
     ApplicationDbContext dbContext,
-    TimeProvider timeProvider) : IIncidentService
+    TimeProvider timeProvider,
+    IPushNotificationService? pushNotificationService = null) : IIncidentService
 {
     private static readonly HashSet<string> SupportedTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -312,6 +313,7 @@ public sealed class IncidentService(
             CreatedAt = now
         });
 
+        Guid? residentPushId = null;
         if (incident.ReporterUserId.HasValue)
         {
             dbContext.Notifications.Add(CreateNotification(
@@ -321,6 +323,11 @@ public sealed class IncidentService(
                 "Cập nhật sự cố",
                 $"Sự cố “{incident.Title}” đã chuyển sang {request.Status}.",
                 now));
+            Notification push = CreateNotification(
+                incident.ReporterUserId.Value, incident, "IncidentStatusChanged", "Cập nhật sự cố",
+                $"Sự cố “{incident.Title}” đã chuyển sang {request.Status}.", now, NotificationChannel.Push);
+            dbContext.Notifications.Add(push);
+            residentPushId = push.Id;
         }
         if (request.Status == IncidentStatus.Escalated)
         {
@@ -341,6 +348,10 @@ public sealed class IncidentService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (residentPushId.HasValue && pushNotificationService is not null)
+        {
+            await pushNotificationService.TrySendAsync(residentPushId.Value, cancellationToken);
+        }
         return await LoadDetailAsync(incidentId, cancellationToken);
     }
 
@@ -456,7 +467,8 @@ public sealed class IncidentService(
         string type,
         string title,
         string message,
-        DateTimeOffset now) => new()
+        DateTimeOffset now,
+        NotificationChannel channel = NotificationChannel.InApp) => new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -464,11 +476,11 @@ public sealed class IncidentService(
             ParcelId = incident.ParcelId,
             PaymentTransactionId = incident.PaymentTransactionId,
             Type = type,
-            Channel = NotificationChannel.InApp,
+            Channel = channel,
             Title = title,
             Message = message,
-            DeliveryStatus = NotificationDeliveryStatus.Sent,
-            SentAt = now,
+            DeliveryStatus = channel == NotificationChannel.Push ? NotificationDeliveryStatus.Pending : NotificationDeliveryStatus.Sent,
+            SentAt = channel == NotificationChannel.Push ? null : now,
             CreatedAt = now
         };
 

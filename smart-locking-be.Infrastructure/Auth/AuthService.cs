@@ -73,10 +73,7 @@ public sealed class AuthService(
             throw new InvalidOperationException("Registered locker is not operational.");
         }
 
-        DeliveryApprovalMode defaultApprovalMode = await dbContext.SystemPolicies
-            .Where(policy => policy.IsActive)
-            .Select(policy => (DeliveryApprovalMode?)policy.DefaultApprovalMode)
-            .SingleOrDefaultAsync(cancellationToken) ?? DeliveryApprovalMode.Auto;
+        DeliveryApprovalMode defaultApprovalMode = DeliveryApprovalMode.Manual;
 
         await using IDbContextTransaction? transaction = dbContext.Database.IsRelational()
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken)

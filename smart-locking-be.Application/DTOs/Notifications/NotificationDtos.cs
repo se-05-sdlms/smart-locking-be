@@ -8,6 +8,7 @@ public sealed record NotificationResponse(
     string Title,
     string Message,
     Guid? DeliveryRequestId,
+    Guid? ReturnRequestId,
     Guid? ParcelId,
     Guid? IncidentId,
     Guid? PaymentTransactionId,

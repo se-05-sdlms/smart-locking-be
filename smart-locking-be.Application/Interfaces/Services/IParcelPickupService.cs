@@ -12,6 +12,7 @@ public interface IParcelPickupService
         CancellationToken cancellationToken = default);
 
     Task<PickupConfirmationResponse> ConfirmPickupAsync(
+        Guid residentUserId,
         Guid lockerAccessEventId,
         CancellationToken cancellationToken = default);
 }

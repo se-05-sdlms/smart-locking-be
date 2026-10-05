@@ -83,3 +83,7 @@ TestResult.xml
 nunit-*.xml
 
 .codegraph/
+
+# Runtime-uploaded return parcel images
+smart-locking-be.API/wwwroot/uploads/returns/*
+!smart-locking-be.API/wwwroot/uploads/returns/.gitkeep

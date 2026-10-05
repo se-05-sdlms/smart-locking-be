@@ -81,6 +81,42 @@ public sealed class ParcelsController(
         }
     }
 
+    [HttpPost("{id:guid}/confirm-pickup")]
+    [Authorize(Roles = "Resident")]
+    public async Task<IActionResult> ConfirmPickup(
+        Guid id,
+        [FromBody] ConfirmPickupRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
+        }
+
+        try
+        {
+            PickupConfirmationResponse response = await parcelPickupService.ConfirmPickupAsync(
+                userId,
+                request.AccessEventId,
+                cancellationToken);
+            return response.ParcelId == id
+                ? Ok(response)
+                : BadRequest(new { message = "Lượt mở ngăn không thuộc bưu kiện được yêu cầu." });
+        }
+        catch (KeyNotFoundException exception)
+        {
+            return NotFound(new { message = exception.Message });
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { message = exception.Message });
+        }
+    }
+
     private async Task<IActionResult> ExecuteAsync<TResponse>(
         Func<Guid, string, Task<TResponse>> action)
     {

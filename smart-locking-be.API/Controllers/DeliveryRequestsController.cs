@@ -63,6 +63,18 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
         return await ExecuteAsync(() => deliveryRequestService.SubmitRecipientAsync(id, token, request, cancellationToken));
     }
 
+    [HttpGet("{id:guid}/status")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetGuestStatus(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetGuestSessionToken(out string token))
+        {
+            return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
+        }
+
+        return await ExecuteAsync(() => deliveryRequestService.GetGuestStatusAsync(id, token, cancellationToken));
+    }
+
     // ==========================================
     // Issue #20: Resident Approval Flow Endpoints
     // ==========================================

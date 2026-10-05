@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
+using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -11,6 +12,7 @@ public sealed class DeliveryRequestService(
     ApplicationDbContext dbContext,
     ITokenHashService tokenHashService,
     IPushNotificationService pushNotificationService,
+    ILockerAccessService lockerAccessService,
     TimeProvider timeProvider) : IDeliveryRequestService
 {
     // ==========================================
@@ -106,6 +108,11 @@ public sealed class DeliveryRequestService(
                 cancellationToken)
             ?? throw new KeyNotFoundException("Không tìm thấy Cư dân đang hoạt động với số điện thoại đã nhập.");
 
+        if (resident.RegisteredLockerId != deliveryRequest.LockerId)
+        {
+            throw new InvalidOperationException("Cư dân không đăng ký nhận hàng tại locker này.");
+        }
+
         deliveryRequest.ResidentProfileId = resident.Id;
         deliveryRequest.RecipientPhoneSnapshot = recipientPhone;
         deliveryRequest.ApprovalModeSnapshot = resident.DeliveryApprovalMode;
@@ -135,6 +142,44 @@ public sealed class DeliveryRequestService(
         }
 
         return MapSummary(deliveryRequest);
+    }
+
+    public async Task<GuestDeliveryStatusResponse> GetGuestStatusAsync(
+        Guid id,
+        string guestSessionToken,
+        CancellationToken cancellationToken = default)
+    {
+        DeliveryRequest deliveryRequest = await FindValidSessionAsync(id, guestSessionToken, cancellationToken);
+
+        if (deliveryRequest.Status == DeliveryRequestStatus.PendingApproval &&
+            deliveryRequest.ApprovalExpiresAt <= timeProvider.GetUtcNow())
+        {
+            deliveryRequest.Status = DeliveryRequestStatus.Expired;
+            deliveryRequest.FailureCode = DeliveryRequestFailureCode.ApprovalExpired;
+            deliveryRequest.UpdatedAt = timeProvider.GetUtcNow();
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        string? compartmentCode = deliveryRequest.AllocatedCompartmentId.HasValue
+            ? await dbContext.LockerCompartments
+                .Where(item => item.Id == deliveryRequest.AllocatedCompartmentId.Value)
+                .Select(item => item.Code)
+                .SingleAsync(cancellationToken)
+            : null;
+        Guid? parcelId = await dbContext.Parcels
+            .Where(item => item.DeliveryRequestId == deliveryRequest.Id)
+            .Select(item => (Guid?)item.Id)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return new GuestDeliveryStatusResponse(
+            deliveryRequest.Id,
+            deliveryRequest.Status,
+            deliveryRequest.ApprovalExpiresAt,
+            compartmentCode,
+            deliveryRequest.ReservationExpiresAt,
+            parcelId,
+            deliveryRequest.FailureCode,
+            deliveryRequest.FailureDetail);
     }
 
     public async Task<int> ExpireStartedSessionsAsync(CancellationToken cancellationToken = default)
@@ -371,6 +416,28 @@ public sealed class DeliveryRequestService(
         dbContext.CompartmentReservations.Add(reservation);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        OpenLockerResponse access = await lockerAccessService.OpenAsync(new OpenLockerRequest(
+            deliveryRequest.LockerId,
+            availableCompartment.Id,
+            null,
+            deliveryRequest.Id,
+            null,
+            null,
+            LockerAccessType.ShipperDropOff,
+            LockerAccessMethod.GuestSession,
+            null,
+            "Guest Web"), cancellationToken);
+        if (access.Result != LockerAccessResult.Succeeded)
+        {
+            reservation.ReleasedAt = now;
+            deliveryRequest.Status = DeliveryRequestStatus.Failed;
+            deliveryRequest.FailureCode = DeliveryRequestFailureCode.DeviceUnavailable;
+            deliveryRequest.FailureDetail = access.FailureReason;
+            deliveryRequest.UpdatedAt = now;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            throw new InvalidOperationException(access.FailureReason ?? "Không thể mở ngăn locker.");
+        }
+
         return new CompartmentReservationResponse(
             deliveryRequest.Id,
             reservation.Id,
@@ -435,6 +502,15 @@ public sealed class DeliveryRequestService(
 
         DateTimeOffset now = timeProvider.GetUtcNow();
 
+        DoorStatus doorStatus = await dbContext.LockerCompartments
+            .Where(item => item.Id == deliveryRequest.AllocatedCompartmentId.Value)
+            .Select(item => item.DoorStatus)
+            .SingleAsync(cancellationToken);
+        if (doorStatus != DoorStatus.Closed)
+        {
+            throw new InvalidOperationException("Chưa thể hoàn tất gửi hàng vì cửa ngăn chưa đóng.");
+        }
+
         if (deliveryRequest.ReservationExpiresAt.HasValue && deliveryRequest.ReservationExpiresAt <= now)
         {
             deliveryRequest.Status = DeliveryRequestStatus.Expired;
@@ -484,7 +560,22 @@ public sealed class DeliveryRequestService(
 
         dbContext.Parcels.Add(parcel);
         dbContext.ParcelStatusHistories.Add(history);
+        Guid residentUserId = await dbContext.ResidentProfiles
+            .Where(item => item.Id == deliveryRequest.ResidentProfileId)
+            .Select(item => item.UserId)
+            .SingleAsync(cancellationToken);
+        string compartmentCode = await dbContext.LockerCompartments
+            .Where(item => item.Id == deliveryRequest.AllocatedCompartmentId.Value)
+            .Select(item => item.Code)
+            .SingleAsync(cancellationToken);
+        Guid pushNotificationId = pushNotificationService.EnqueueParcelStored(
+            residentUserId,
+            deliveryRequest.Id,
+            parcel.Id,
+            deliveryRequest.Locker.Code,
+            compartmentCode);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await pushNotificationService.TrySendAsync(pushNotificationId, cancellationToken);
 
         return new DropOffConfirmationResponse(
             deliveryRequest.Id,

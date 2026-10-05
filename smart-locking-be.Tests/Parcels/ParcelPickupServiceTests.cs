@@ -87,7 +87,7 @@ public sealed class ParcelPickupServiceTests
             new RecordingLockerAccessService(),
             new FixedTimeProvider(Now));
 
-        var response = await service.ConfirmPickupAsync(accessEvent.Id);
+        var response = await service.ConfirmPickupAsync(resident.Id, accessEvent.Id);
 
         Assert.Equal(ParcelStatus.Retrieved, response.Status);
         Assert.Equal(Now, response.RetrievedAt);

@@ -18,14 +18,16 @@ public sealed class DeliveryRequestExpirationWorker(
                 IDeliveryRequestService service = scope.ServiceProvider.GetRequiredService<IDeliveryRequestService>();
                 IPushNotificationService pushNotificationService =
                     scope.ServiceProvider.GetRequiredService<IPushNotificationService>();
+                IReturnRequestService returnRequestService = scope.ServiceProvider.GetRequiredService<IReturnRequestService>();
 
                 int expiredSessionsCount = await service.ExpireStartedSessionsAsync(stoppingToken);
                 int expiredApprovalsCount = await service.ExpirePendingApprovalsAsync(stoppingToken);
                 int expiredReservationsCount = await service.ExpireReservationsAsync(stoppingToken);
+                int expiredReturnReservationsCount = await returnRequestService.ExpireReservationsAsync(stoppingToken);
                 int retriedNotificationsCount =
                     await pushNotificationService.RetryPendingDeliveryApprovalNotificationsAsync(stoppingToken);
 
-                int totalExpired = expiredSessionsCount + expiredApprovalsCount + expiredReservationsCount;
+                int totalExpired = expiredSessionsCount + expiredApprovalsCount + expiredReservationsCount + expiredReturnReservationsCount;
                 if (totalExpired > 0)
                 {
                     logger.LogInformation(

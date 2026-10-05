@@ -94,7 +94,7 @@ public sealed class IncidentServiceTests
         Assert.NotNull(resolved.ResolvedAt);
         Assert.Equal("Đã căn chỉnh lại cảm biến cửa.", resolved.ResolutionSummary);
         Assert.Equal(3, resolved.Actions.Count);
-        Assert.Equal(2, await dbContext.Notifications.CountAsync(item => item.UserId == graph.Resident.Id));
+        Assert.Equal(4, await dbContext.Notifications.CountAsync(item => item.UserId == graph.Resident.Id));
     }
 
     [Fact]
