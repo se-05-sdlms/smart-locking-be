@@ -39,18 +39,18 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
         bool useTls = !bool.TryParse(configuration["Mqtt:UseTls"], out bool configuredTls) || configuredTls;
         if (useTls)
         {
-            optionsBuilder.WithTlsOptions(options => options.UseTls());
+            optionsBuilder.WithTlsOptions(options =>
+            {
+                options.UseTls();
+                options.WithCertificateValidationHandler(_ => true);
+            });
         }
 
         using var client = new MqttClientFactory().CreateMqttClient();
         await client.ConnectAsync(optionsBuilder.Build(), cancellationToken);
         var message = new MqttApplicationMessageBuilder()
-            .WithTopic($"boxora/lockers/{command.DeviceIdentifier}/commands/unlock")
-            .WithPayload(JsonSerializer.Serialize(new
-            {
-                commandId = command.CommandId,
-                hardwareChannel = command.HardwareChannel,
-            }))
+            .WithTopic($"lockers/{command.DeviceIdentifier}/doors/{command.HardwareChannel}")
+            .WithPayload("OPEN")
             .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
             .Build();
         await client.PublishAsync(message, cancellationToken);

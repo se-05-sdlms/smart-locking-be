@@ -35,6 +35,7 @@ public static class DependencyInjection
         services.AddScoped<ILockerService, LockerService>();
         services.AddScoped<ILockerAccessService, LockerAccessService>();
         services.AddScoped<ILockerCommandDispatcher, MqttLockerCommandDispatcher>();
+        services.AddHostedService<MqttLockerListenerService>();
         services.AddScoped<IDeliveryRequestService, DeliveryRequestService>();
         services.AddScoped<IParcelService, ParcelService>();
         services.AddScoped<IParcelPickupService, ParcelPickupService>();
