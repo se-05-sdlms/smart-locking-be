@@ -9,7 +9,9 @@ namespace smart_locking_be.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize(Roles = "Administrator,LockerOperator")]
-public class LockersController(ILockerService lockerService) : ControllerBase
+public class LockersController(
+    ILockerService lockerService,
+    ILockerAccessService lockerAccessService) : ControllerBase
 {
     /// <summary>
     /// Lấy danh sách tủ Locker (Admin xem tất cả, LockerOperator xem danh sách được phân công).
@@ -130,6 +132,32 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         }
 
         return await ExecuteAsync(() => lockerService.UpdateCompartmentStatusAsync(userId, userRole, id, compartmentId, request, cancellationToken));
+    }
+
+    /// <summary>
+    /// Cấu hình và dispatch mã PIN mới cho ngăn tủ (Administrator hoặc LockerOperator).
+    /// </summary>
+    [HttpPost("{id:guid}/compartments/{compartmentId:guid}/pin")]
+    [Authorize(Roles = "Administrator,LockerOperator")]
+    public async Task<IActionResult> ConfigureCompartmentPin(
+        Guid id,
+        Guid compartmentId,
+        [FromBody] ConfigureCompartmentPinRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(() => lockerAccessService.ConfigurePinAsync(id, compartmentId, request, cancellationToken));
+    }
+
+    /// <summary>
+    /// Đồng bộ các sự kiện mở tủ ngoại tuyến qua Bluetooth từ Mobile App sau khi có kết nối mạng.
+    /// </summary>
+    [HttpPost("events/offline-sync")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SyncOfflineEvents(
+        [FromBody] SyncOfflineAccessRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(() => lockerAccessService.SyncOfflineEventsAsync(request, cancellationToken));
     }
 
     private bool TryGetUserIdAndRole(out Guid userId, out string userRole)

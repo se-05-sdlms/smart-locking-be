@@ -7,4 +7,8 @@ public interface ILockerCommandDispatcher
     Task DispatchUnlockAsync(
         LockerUnlockCommand command,
         CancellationToken cancellationToken = default);
+
+    Task DispatchPinConfigAsync(
+        LockerPinConfigCommand command,
+        CancellationToken cancellationToken = default);
 }

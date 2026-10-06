@@ -42,6 +42,8 @@ public sealed class ReturnRequestServiceTests
     private sealed class SuccessfulAccess : ILockerAccessService
     {
         public Task<OpenLockerResponse> OpenAsync(OpenLockerRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new OpenLockerResponse(Guid.NewGuid(), request.LockerId, request.LockerCompartmentId, "SIM", 1, LockerAccessResult.Succeeded, null, DateTimeOffset.UtcNow));
+        public Task<SyncOfflineAccessResponse> SyncOfflineEventsAsync(SyncOfflineAccessRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new SyncOfflineAccessResponse(request.Events.Count, request.Events.Count, []));
+        public Task<ConfigureCompartmentPinResponse> ConfigurePinAsync(Guid lockerId, Guid compartmentId, ConfigureCompartmentPinRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new ConfigureCompartmentPinResponse(lockerId, compartmentId, "SIM", 1, request.PinCode, true, DateTimeOffset.UtcNow));
     }
     private sealed class NoopPush : IPushNotificationService
     {

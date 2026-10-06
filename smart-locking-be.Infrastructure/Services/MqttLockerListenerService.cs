@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Protocol;
+using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
 
@@ -78,10 +80,11 @@ public sealed class MqttLockerListenerService(
                 {
                     logger.LogInformation("[MQTT LISTENER] Đang kết nối tới EMQX Broker ({Host}:{Port})...", host, port);
                     await _mqttClient.ConnectAsync(options, stoppingToken);
-                    logger.LogInformation("[MQTT LISTENER] Đã kết nối thành công! Đăng ký lắng nghe 'lockers/+/doors/+/status'...");
+                    logger.LogInformation("[MQTT LISTENER] Đã kết nối thành công! Đăng ký lắng nghe trạng thái cửa và sự kiện offline...");
 
                     await _mqttClient.SubscribeAsync("lockers/+/doors/+/status", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
-                    logger.LogInformation("[MQTT LISTENER] Đã subscribe thành công topic trạng thái cửa.");
+                    await _mqttClient.SubscribeAsync("lockers/+/events/offline", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
+                    logger.LogInformation("[MQTT LISTENER] Đã subscribe thành công các topic IoT.");
                 }
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
@@ -102,8 +105,16 @@ public sealed class MqttLockerListenerService(
 
     internal async Task HandleMessageAsync(string topic, string payload, CancellationToken cancellationToken)
     {
-        // Topic pattern: lockers/{deviceId}/doors/{channel}/status
         var parts = topic.Split('/');
+
+        // 1. Nhận sự kiện mở tủ Offline: lockers/{deviceId}/events/offline
+        if (parts.Length == 4 && parts[0] == "lockers" && parts[2] == "events" && parts[3] == "offline")
+        {
+            await HandleOfflineEventAsync(parts[1], payload, cancellationToken);
+            return;
+        }
+
+        // 2. Nhận trạng thái cửa: lockers/{deviceId}/doors/{channel}/status
         if (parts.Length != 5 || parts[0] != "lockers" || parts[2] != "doors" || parts[4] != "status")
         {
             return;
@@ -146,6 +157,69 @@ public sealed class MqttLockerListenerService(
         await dbContext.SaveChangesAsync(cancellationToken);
         logger.LogInformation("[MQTT IN] Locker '{DeviceId}' - Ngăn {Channel} -> Cửa: {Status} (Online)",
             deviceIdentifier, channel, doorStatus);
+    }
+
+    private async Task HandleOfflineEventAsync(string deviceIdentifier, string payload, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var root = doc.RootElement;
+            int channel = root.TryGetProperty("channel", out var chElem) ? chElem.GetInt32() : 1;
+            string method = root.TryGetProperty("accessMethod", out var methodElem) ? methodElem.GetString() ?? "Bluetooth" : "Bluetooth";
+            string pinUsed = root.TryGetProperty("pinUsed", out var pinElem) ? pinElem.GetString() ?? "" : "";
+
+            using var scope = serviceScopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            var locker = await dbContext.Lockers
+                .Include(l => l.Compartments)
+                .FirstOrDefaultAsync(l => l.DeviceIdentifier == deviceIdentifier, cancellationToken);
+
+            if (locker is null) return;
+
+            locker.ConnectionStatus = LockerConnectionStatus.Online;
+            locker.LastSeenAt = DateTimeOffset.UtcNow;
+            locker.UpdatedAt = DateTimeOffset.UtcNow;
+
+            var compartment = locker.Compartments.FirstOrDefault(c => c.HardwareChannel == channel);
+            if (compartment is not null)
+            {
+                var accessEvent = new LockerAccessEvent
+                {
+                    Id = Guid.NewGuid(),
+                    LockerId = locker.Id,
+                    LockerCompartmentId = compartment.Id,
+                    AccessType = LockerAccessType.ResidentPickup,
+                    AccessMethod = LockerAccessMethod.Bluetooth,
+                    Result = LockerAccessResult.Succeeded,
+                    DeviceContext = $"MQTT Offline Event Sync ({method}, PIN: {pinUsed})",
+                    OccurredAt = DateTimeOffset.UtcNow
+                };
+                dbContext.LockerAccessEvents.Add(accessEvent);
+
+                var auditLog = new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorUserId = null,
+                    Action = $"OfflineUnlock.{method}",
+                    EntityType = "LockerCompartment",
+                    EntityId = compartment.Id,
+                    Result = AuditLogResult.Succeeded,
+                    Details = $"Mở khóa offline qua {method} cho ngăn '{compartment.Code}' thuộc tủ '{locker.Code}' (Mã PIN: {pinUsed})",
+                    OccurredAt = DateTimeOffset.UtcNow
+                };
+                dbContext.AuditLogs.Add(auditLog);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            logger.LogInformation("[MQTT IN] Locker '{DeviceId}' - Đồng bộ sự kiện mở Offline ({Method}): Ngăn {Channel}",
+                deviceIdentifier, method, channel);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[MQTT LISTENER] Lỗi giải mã sự kiện offline từ '{DeviceId}': {Message}", deviceIdentifier, ex.Message);
+        }
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)

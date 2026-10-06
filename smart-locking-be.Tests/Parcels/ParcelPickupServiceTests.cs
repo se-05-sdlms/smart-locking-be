@@ -245,6 +245,9 @@ public sealed class ParcelPickupServiceTests
                 null,
                 Now));
         }
+
+        public Task<SyncOfflineAccessResponse> SyncOfflineEventsAsync(SyncOfflineAccessRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new SyncOfflineAccessResponse(request.Events.Count, request.Events.Count, []));
+        public Task<ConfigureCompartmentPinResponse> ConfigurePinAsync(Guid lockerId, Guid compartmentId, ConfigureCompartmentPinRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new ConfigureCompartmentPinResponse(lockerId, compartmentId, "esp32-l01", 1, request.PinCode, true, Now));
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider

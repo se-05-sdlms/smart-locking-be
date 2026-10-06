@@ -599,6 +599,9 @@ public sealed class DeliveryRequestServiceTests
                 LockerAccessResult.Succeeded,
                 null,
                 DateTimeOffset.UtcNow));
+
+        public Task<SyncOfflineAccessResponse> SyncOfflineEventsAsync(SyncOfflineAccessRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new SyncOfflineAccessResponse(request.Events.Count, request.Events.Count, []));
+        public Task<ConfigureCompartmentPinResponse> ConfigurePinAsync(Guid lockerId, Guid compartmentId, ConfigureCompartmentPinRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new ConfigureCompartmentPinResponse(lockerId, compartmentId, "simulator", 1, request.PinCode, true, DateTimeOffset.UtcNow));
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider

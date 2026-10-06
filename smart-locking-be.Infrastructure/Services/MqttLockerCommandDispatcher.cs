@@ -18,6 +18,41 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
             return;
         }
 
+        var options = BuildMqttClientOptions();
+        using var client = new MqttClientFactory().CreateMqttClient();
+        await client.ConnectAsync(options, cancellationToken);
+        var message = new MqttApplicationMessageBuilder()
+            .WithTopic($"lockers/{command.DeviceIdentifier}/doors/{command.HardwareChannel}")
+            .WithPayload("OPEN")
+            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+            .Build();
+        await client.PublishAsync(message, cancellationToken);
+        await client.DisconnectAsync(cancellationToken: cancellationToken);
+    }
+
+    public async Task DispatchPinConfigAsync(
+        LockerPinConfigCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        if (bool.TryParse(configuration["Mqtt:Simulate"], out bool simulate) && simulate)
+        {
+            return;
+        }
+
+        var options = BuildMqttClientOptions();
+        using var client = new MqttClientFactory().CreateMqttClient();
+        await client.ConnectAsync(options, cancellationToken);
+        var message = new MqttApplicationMessageBuilder()
+            .WithTopic($"lockers/{command.DeviceIdentifier}/pins/{command.HardwareChannel}")
+            .WithPayload(command.PinCode)
+            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+            .Build();
+        await client.PublishAsync(message, cancellationToken);
+        await client.DisconnectAsync(cancellationToken: cancellationToken);
+    }
+
+    private MqttClientOptions BuildMqttClientOptions()
+    {
         string host = configuration["Mqtt:Host"]?.Trim() ?? string.Empty;
         if (host.Length == 0)
         {
@@ -45,15 +80,6 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
                 options.WithCertificateValidationHandler(_ => true);
             });
         }
-
-        using var client = new MqttClientFactory().CreateMqttClient();
-        await client.ConnectAsync(optionsBuilder.Build(), cancellationToken);
-        var message = new MqttApplicationMessageBuilder()
-            .WithTopic($"lockers/{command.DeviceIdentifier}/doors/{command.HardwareChannel}")
-            .WithPayload("OPEN")
-            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-            .Build();
-        await client.PublishAsync(message, cancellationToken);
-        await client.DisconnectAsync(cancellationToken: cancellationToken);
+        return optionsBuilder.Build();
     }
 }

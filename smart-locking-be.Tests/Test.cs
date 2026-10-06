@@ -180,7 +180,7 @@ public sealed class PersistenceModelTests
         string[] expectedTypes = ["ShipperDropOff", "ResidentPickup", "ResidentReturnDropOff", "ShipperReturnPickup", "OperatorEmergency", "Maintenance"];
         Assert.Equal(expectedTypes, Enum.GetNames(typeof(LockerAccessType)));
 
-        string[] expectedMethods = ["GuestSession", "Otp", "RemoteApp", "FaceRecognition", "OperatorAuthorization", "SystemAuthorization"];
+        string[] expectedMethods = ["GuestSession", "Otp", "RemoteApp", "FaceRecognition", "OperatorAuthorization", "SystemAuthorization", "Bluetooth"];
         Assert.Equal(expectedMethods, Enum.GetNames(typeof(LockerAccessMethod)));
 
         string[] expectedResults = ["Succeeded", "Failed", "Blocked"];

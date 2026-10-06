@@ -75,6 +75,137 @@ public sealed class LockerAccessService(
         return Map(accessEvent, compartment);
     }
 
+    public async Task<ConfigureCompartmentPinResponse> ConfigurePinAsync(
+        Guid lockerId,
+        Guid compartmentId,
+        ConfigureCompartmentPinRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.PinCode) || request.PinCode.Trim().Length < 4)
+        {
+            throw new ArgumentException("Mã PIN phải có ít nhất 4 chữ số.");
+        }
+
+        string pin = request.PinCode.Trim();
+
+        var compartment = await dbContext.LockerCompartments
+            .Include(c => c.Locker)
+            .SingleOrDefaultAsync(c => c.Id == compartmentId && c.LockerId == lockerId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy ngăn locker.");
+
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        bool dispatched = false;
+
+        if (compartment.Locker.ConnectionStatus == LockerConnectionStatus.Online)
+        {
+            try
+            {
+                await commandDispatcher.DispatchPinConfigAsync(
+                    new LockerPinConfigCommand(
+                        Guid.NewGuid(),
+                        compartment.Locker.DeviceIdentifier,
+                        compartment.HardwareChannel,
+                        pin),
+                    cancellationToken);
+                dispatched = true;
+            }
+            catch
+            {
+                dispatched = false;
+            }
+        }
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = null,
+            Action = "LockerCompartment.ConfigurePin",
+            EntityType = "LockerCompartment",
+            EntityId = compartment.Id,
+            Result = AuditLogResult.Succeeded,
+            Details = $"Cấu hình mã PIN mới cho ngăn '{compartment.Code}' thuộc tủ '{compartment.Locker.Code}' (Kênh {compartment.HardwareChannel})",
+            OccurredAt = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new ConfigureCompartmentPinResponse(
+            compartment.LockerId,
+            compartment.Id,
+            compartment.Locker.DeviceIdentifier,
+            compartment.HardwareChannel,
+            pin,
+            dispatched,
+            now);
+    }
+
+    public async Task<SyncOfflineAccessResponse> SyncOfflineEventsAsync(
+        SyncOfflineAccessRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        int total = request.Events.Count;
+        int success = 0;
+        var details = new List<string>();
+
+        if (total == 0)
+        {
+            return new SyncOfflineAccessResponse(0, 0, details);
+        }
+
+        DateTimeOffset now = timeProvider.GetUtcNow();
+
+        foreach (var ev in request.Events)
+        {
+            var locker = await dbContext.Lockers
+                .Include(l => l.Compartments)
+                .FirstOrDefaultAsync(l => l.DeviceIdentifier == ev.DeviceIdentifier, cancellationToken);
+
+            if (locker is null)
+            {
+                details.Add($"Không tìm thấy tủ với DeviceIdentifier '{ev.DeviceIdentifier}'.");
+                continue;
+            }
+
+            var compartment = locker.Compartments.FirstOrDefault(c => c.HardwareChannel == ev.HardwareChannel);
+            if (compartment is null)
+            {
+                details.Add($"Không tìm thấy ngăn kênh {ev.HardwareChannel} trên tủ '{locker.Code}'.");
+                continue;
+            }
+
+            var accessEvent = new LockerAccessEvent
+            {
+                Id = Guid.NewGuid(),
+                LockerId = locker.Id,
+                LockerCompartmentId = compartment.Id,
+                AccessType = LockerAccessType.ResidentPickup,
+                AccessMethod = LockerAccessMethod.Bluetooth,
+                Result = LockerAccessResult.Succeeded,
+                DeviceContext = $"Offline BLE Sync (PIN: {ev.PinUsed})",
+                OccurredAt = ev.OccurredAt
+            };
+            dbContext.LockerAccessEvents.Add(accessEvent);
+
+            dbContext.AuditLogs.Add(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                ActorUserId = null,
+                Action = "OfflineUnlock.Bluetooth.Sync",
+                EntityType = "LockerCompartment",
+                EntityId = compartment.Id,
+                Result = AuditLogResult.Succeeded,
+                Details = $"Đồng bộ sự kiện mở tủ ngoại tuyến qua Bluetooth: Ngăn '{compartment.Code}', PIN: {ev.PinUsed}",
+                OccurredAt = now
+            });
+
+            success++;
+            details.Add($"Đã đồng bộ thành công sự kiện cho ngăn '{compartment.Code}' thuộc tủ '{locker.Code}'.");
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new SyncOfflineAccessResponse(total, success, details);
+    }
+
     private static string? GetBlockedReason(LockerCompartment compartment)
     {
         if (compartment.Locker.OperationalStatus != LockerOperationalStatus.Operational)

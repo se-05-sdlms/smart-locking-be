@@ -86,6 +86,61 @@ public sealed class LockerAccessServiceTests
         null,
         null);
 
+    [Fact]
+    public async Task ConfigurePinAsync_OnlineLocker_DispatchesCommandAndCreatesAuditLog()
+    {
+        using var dbContext = CreateDbContext();
+        var (locker, compartment) = await SeedLockerAsync(dbContext, LockerConnectionStatus.Online);
+        var dispatcher = new RecordingDispatcher();
+        var service = new LockerAccessService(dbContext, dispatcher, new FixedTimeProvider(Now));
+
+        var response = await service.ConfigurePinAsync(
+            locker.Id,
+            compartment.Id,
+            new ConfigureCompartmentPinRequest("849201"));
+
+        Assert.True(response.Dispatched);
+        Assert.Equal("849201", response.PinCode);
+        Assert.Single(dispatcher.PinCommands);
+        Assert.Equal("849201", dispatcher.PinCommands[0].PinCode);
+        Assert.Equal(compartment.HardwareChannel, dispatcher.PinCommands[0].HardwareChannel);
+
+        var auditLog = await dbContext.AuditLogs.SingleAsync();
+        Assert.Equal("LockerCompartment.ConfigurePin", auditLog.Action);
+    }
+
+    [Fact]
+    public async Task SyncOfflineEventsAsync_ValidEvent_CreatesLockerAccessEventAndAuditLog()
+    {
+        using var dbContext = CreateDbContext();
+        var (locker, compartment) = await SeedLockerAsync(dbContext, LockerConnectionStatus.Offline);
+        var dispatcher = new RecordingDispatcher();
+        var service = new LockerAccessService(dbContext, dispatcher, new FixedTimeProvider(Now));
+
+        var syncRequest = new SyncOfflineAccessRequest(
+        [
+            new SyncOfflineAccessItem(
+                locker.DeviceIdentifier,
+                compartment.HardwareChannel,
+                "606748",
+                Now.AddMinutes(-10),
+                "Bluetooth")
+        ]);
+
+        var response = await service.SyncOfflineEventsAsync(syncRequest);
+
+        Assert.Equal(1, response.TotalProcessed);
+        Assert.Equal(1, response.SuccessCount);
+
+        var accessEvent = await dbContext.LockerAccessEvents.SingleAsync();
+        Assert.Equal(LockerAccessMethod.Bluetooth, accessEvent.AccessMethod);
+        Assert.Equal(LockerAccessResult.Succeeded, accessEvent.Result);
+        Assert.Equal(compartment.Id, accessEvent.LockerCompartmentId);
+
+        var auditLog = await dbContext.AuditLogs.SingleAsync();
+        Assert.Equal("OfflineUnlock.Bluetooth.Sync", auditLog.Action);
+    }
+
     private static ApplicationDbContext CreateDbContext() => new(
         new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -128,6 +183,7 @@ public sealed class LockerAccessServiceTests
     private sealed class RecordingDispatcher : ILockerCommandDispatcher
     {
         public List<LockerUnlockCommand> Commands { get; } = [];
+        public List<LockerPinConfigCommand> PinCommands { get; } = [];
 
         public Task DispatchUnlockAsync(
             LockerUnlockCommand command,
@@ -136,12 +192,25 @@ public sealed class LockerAccessServiceTests
             Commands.Add(command);
             return Task.CompletedTask;
         }
+
+        public Task DispatchPinConfigAsync(
+            LockerPinConfigCommand command,
+            CancellationToken cancellationToken = default)
+        {
+            PinCommands.Add(command);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FailingDispatcher : ILockerCommandDispatcher
     {
         public Task DispatchUnlockAsync(
             LockerUnlockCommand command,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Broker unavailable");
+
+        public Task DispatchPinConfigAsync(
+            LockerPinConfigCommand command,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Broker unavailable");
     }
