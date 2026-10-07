@@ -78,6 +78,11 @@ public sealed class LockerAccessEvent
     public DateTimeOffset OccurredAt { get; set; }
 
     /// <summary>
+    /// Thời điểm cửa ngăn được xác nhận đóng hoặc lệnh mở thất bại; null khi còn chờ xác nhận.
+    /// </summary>
+    public DateTimeOffset? CompletedAt { get; set; }
+
+    /// <summary>
     /// Tủ locker chịu tác động.
     /// </summary>
     public Locker Locker { get; set; } = null!;

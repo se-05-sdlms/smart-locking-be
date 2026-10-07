@@ -40,17 +40,19 @@ public interface IDeliveryRequestService
 
     Task<int> ExpirePendingApprovalsAsync(CancellationToken cancellationToken = default);
 
-    // Issue #21: Compartment Reservation Flow
-    Task<CompartmentReservationResponse> ReserveCompartmentAsync(
+    // Shipper compartment access
+    Task<OpenCompartmentResponse> OpenCompartmentAsync(
         Guid requestId,
         string guestSessionToken,
+        string? ipAddress,
+        string? deviceContext,
         CancellationToken cancellationToken = default);
 
     Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default);
 
-    // Issue #22: Shipper Drop-off / Confirm Parcel Deposited Flow
-    Task<DropOffConfirmationResponse> ConfirmDropOffAsync(
+    // Sensor-driven finalization; the caller saves all changes atomically.
+    Task FinalizeDropOffAsync(
         Guid requestId,
-        string guestSessionToken,
+        DateTimeOffset at,
         CancellationToken cancellationToken = default);
 }

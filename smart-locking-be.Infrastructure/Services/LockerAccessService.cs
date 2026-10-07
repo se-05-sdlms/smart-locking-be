@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -17,6 +18,28 @@ public sealed class LockerAccessService(
         CancellationToken cancellationToken = default)
     {
         ValidateContext(request);
+
+        await using IDbContextTransaction? transaction = request.AccessType == LockerAccessType.ShipperDropOff &&
+            dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+        if (request.AccessType == LockerAccessType.ShipperDropOff)
+        {
+            if (transaction is not null)
+            {
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT 1 FROM \"DeliveryRequest\" WHERE \"Id\" = {request.DeliveryRequestId!.Value} FOR UPDATE",
+                    cancellationToken);
+            }
+            DeliveryRequest? delivery = await dbContext.DeliveryRequests.AsNoTracking()
+                .SingleOrDefaultAsync(r => r.Id == request.DeliveryRequestId, cancellationToken);
+            if (delivery is null || delivery.Status != DeliveryRequestStatus.Allocated ||
+                delivery.AllocatedCompartmentId != request.LockerCompartmentId ||
+                delivery.ReservationExpiresAt is null || delivery.ReservationExpiresAt <= timeProvider.GetUtcNow())
+            {
+                throw new InvalidOperationException("Yêu cầu không còn giữ ngăn tủ hợp lệ.");
+            }
+        }
 
         LockerCompartment compartment = await dbContext.LockerCompartments
             .Include(item => item.Locker)
@@ -43,6 +66,7 @@ public sealed class LockerAccessService(
             IpAddress = TrimToNull(request.IpAddress),
             DeviceContext = TrimToNull(request.DeviceContext),
             OccurredAt = now,
+            Result = LockerAccessResult.Succeeded,
         };
 
         string? blockedReason = GetBlockedReason(compartment);
@@ -50,8 +74,14 @@ public sealed class LockerAccessService(
         {
             accessEvent.Result = LockerAccessResult.Blocked;
             accessEvent.FailureReason = blockedReason;
+            accessEvent.CompletedAt = now;
         }
-        else
+
+        // Persist before publishing: the device can acknowledge or close the door immediately.
+        dbContext.LockerAccessEvents.Add(accessEvent);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        if (blockedReason is null)
         {
             try
             {
@@ -61,17 +91,36 @@ public sealed class LockerAccessService(
                         compartment.Locker.DeviceIdentifier,
                         compartment.HardwareChannel),
                     cancellationToken);
-                accessEvent.Result = LockerAccessResult.Succeeded;
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            catch (LockerCommandDeliveryUnknownException exception)
             {
-                accessEvent.Result = LockerAccessResult.Failed;
-                accessEvent.FailureReason = "Không thể gửi lệnh mở ngăn tới locker.";
+                // Delivery may have happened; only the device can settle this access safely.
+                return Map(accessEvent, compartment) with { FailureReason = exception.Message };
+            }
+            catch (Exception exception)
+            {
+                if (dbContext.Database.IsRelational())
+                {
+                    DateTimeOffset failedAt = timeProvider.GetUtcNow();
+                    await dbContext.LockerAccessEvents
+                        .Where(e => e.Id == accessEvent.Id && e.CompletedAt == null)
+                        .ExecuteUpdateAsync(update => update
+                            .SetProperty(e => e.Result, LockerAccessResult.Failed)
+                            .SetProperty(e => e.FailureReason, "Không thể gửi lệnh mở ngăn tới locker.")
+                            .SetProperty(e => e.CompletedAt, failedAt), CancellationToken.None);
+                    await dbContext.Entry(accessEvent).ReloadAsync(CancellationToken.None);
+                }
+                else
+                {
+                    accessEvent.Result = LockerAccessResult.Failed;
+                    accessEvent.FailureReason = "Không thể gửi lệnh mở ngăn tới locker.";
+                    accessEvent.CompletedAt = timeProvider.GetUtcNow();
+                    await dbContext.SaveChangesAsync(CancellationToken.None);
+                }
+                if (exception is OperationCanceledException) throw;
             }
         }
 
-        dbContext.LockerAccessEvents.Add(accessEvent);
-        await dbContext.SaveChangesAsync(cancellationToken);
         return Map(accessEvent, compartment);
     }
 

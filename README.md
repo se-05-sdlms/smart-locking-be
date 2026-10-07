@@ -399,3 +399,20 @@ smart-locking-be/
 | DE181072   | Trương Hà Thùy Trang | Member      | [trangthtde181072@fpt.edu.vn](mailto:trangthtde181072@fpt.edu.vn) |
 
 </details>
+
+## Locker door flow and MQTT contract
+
+Shippers call `POST /api/delivery-requests/{id}/open-compartment` with `X-Guest-Session-Token`. This replaces `reserve-compartment` and `confirm-drop-off` (breaking change). It allocates and opens a compartment; a retry reopens the same compartment while its reservation is valid. Responses: `202` dispatched, `409` blocked, `503` dispatch failed. Residents continue using `POST /api/parcels/{id}/unlock-pickup`.
+
+A `202` response accepts the command for sensor confirmation. If the connection fails while publishing, delivery may already have happened: the access stays pending and the response includes a warning in `failureReason`. Only definite dispatch rejection or a negative device ACK marks access failed. Drop-off/pickup completes only on a sensor-reported `open` → `closed` transition, with a close timestamp at or after the pending access. Repeated closed reports and closed reports after a reboot while the stored state is Closed/Unknown do not finalize access. Pending successful access prevents reservation expiry; a late close still completes the drop-off.
+
+| Direction | Topic | JSON payload |
+|---|---|---|
+| BE → ESP32 | `boxora/lockers/{deviceId}/commands/unlock` | `{ "commandId": "<UUID>", "hardwareChannel": 1 }` |
+| ESP32 → BE | `boxora/lockers/{deviceId}/events/command-ack` | `{ "commandId": "<UUID>", "ok": true }` |
+| ESP32 → BE | `boxora/lockers/{deviceId}/events/door` | `{ "hardwareChannel": 1, "state": "open", "at": "2026-10-06T08:00:00Z" }` |
+| ESP32 → BE | `boxora/lockers/{deviceId}/events/status` | `{ "online": true }` |
+
+`commandId` is `LockerAccessEvent.Id`; `deviceId` is `Locker.DeviceIdentifier`. Door state is `open` or `closed`; devices should send UTC timestamps (`at` omitted: backend receipt time). Commands and event subscriptions use QoS 1. ESP32 should publish events with QoS 1 and use `{ "online": false }` as its last will on the status topic. An `ok: false` ACK marks access failed and retains the reservation for retry.
+
+The backend maintains one MQTT connection and reconnects after 5 seconds. Configure `Mqtt:Host`, `Mqtt:Port` (default `8883`), `Mqtt:Username`, `Mqtt:Password`, and `Mqtt:UseTls` (default `true`). Without a host, the gateway idles and unlock dispatch fails. Apply the `AddLockerAccessEventCompletedAt` migration before running this version. Return flows and door-not-closed timeout handling are outside this change.

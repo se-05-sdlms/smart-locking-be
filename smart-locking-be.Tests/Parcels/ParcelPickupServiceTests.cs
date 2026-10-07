@@ -18,9 +18,9 @@ public sealed class ParcelPickupServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         (User resident, Parcel parcel, LockerCompartment compartment) = await SeedParcelAsync(dbContext);
         var lockerAccess = new RecordingLockerAccessService();
-        var service = new ParcelPickupService(dbContext, lockerAccess, new FixedTimeProvider(Now));
+        var service = new ParcelService(dbContext, lockerAccess);
 
-        var response = await service.UnlockAsync(
+        var response = await service.UnlockPickupAsync(
             resident.Id,
             parcel.Id,
             "127.0.0.1",
@@ -40,10 +40,10 @@ public sealed class ParcelPickupServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         (User resident, Parcel parcel, _) = await SeedParcelAsync(dbContext, outstandingCharge: true);
         var lockerAccess = new RecordingLockerAccessService();
-        var service = new ParcelPickupService(dbContext, lockerAccess, TimeProvider.System);
+        var service = new ParcelService(dbContext, lockerAccess);
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.UnlockAsync(resident.Id, parcel.Id, null, null));
+            service.UnlockPickupAsync(resident.Id, parcel.Id, null, null));
 
         Assert.Contains("phí quá hạn", exception.Message);
         Assert.Empty(lockerAccess.Requests);
@@ -54,48 +54,12 @@ public sealed class ParcelPickupServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (_, Parcel parcel, _) = await SeedParcelAsync(dbContext);
-        var service = new ParcelPickupService(
+        var service = new ParcelService(
             dbContext,
-            new RecordingLockerAccessService(),
-            TimeProvider.System);
+            new RecordingLockerAccessService());
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-            service.UnlockAsync(Guid.NewGuid(), parcel.Id, null, null));
-    }
-
-    [Fact]
-    public async Task ConfirmPickupAsync_ValidAccess_MarksParcelRetrieved()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (User resident, Parcel parcel, LockerCompartment compartment) = await SeedParcelAsync(dbContext);
-        LockerAccessEvent accessEvent = new()
-        {
-            Id = Guid.NewGuid(),
-            LockerId = compartment.LockerId,
-            LockerCompartmentId = compartment.Id,
-            UserId = resident.Id,
-            ParcelId = parcel.Id,
-            AccessType = LockerAccessType.ResidentPickup,
-            AccessMethod = LockerAccessMethod.RemoteApp,
-            Result = LockerAccessResult.Succeeded,
-            OccurredAt = Now.AddMinutes(-1),
-        };
-        dbContext.LockerAccessEvents.Add(accessEvent);
-        await dbContext.SaveChangesAsync();
-        var service = new ParcelPickupService(
-            dbContext,
-            new RecordingLockerAccessService(),
-            new FixedTimeProvider(Now));
-
-        var response = await service.ConfirmPickupAsync(accessEvent.Id);
-
-        Assert.Equal(ParcelStatus.Retrieved, response.Status);
-        Assert.Equal(Now, response.RetrievedAt);
-        Assert.Equal(Now, parcel.RetrievedAt);
-        ParcelStatusHistory history = await dbContext.ParcelStatusHistories.SingleAsync();
-        Assert.Equal(ParcelStatus.Stored, history.FromStatus);
-        Assert.Equal(ParcelStatus.Retrieved, history.ToStatus);
-        Assert.Equal(resident.Id, history.ChangedByUserId);
+            service.UnlockPickupAsync(Guid.NewGuid(), parcel.Id, null, null));
     }
 
     private static ApplicationDbContext CreateDbContext() => new(

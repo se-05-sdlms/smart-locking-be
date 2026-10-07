@@ -13,9 +13,7 @@ namespace smart_locking_be.API.Controllers;
 [ApiController]
 [Route("api/parcels")]
 [Authorize(Roles = "Resident,LockerOperator")]
-public sealed class ParcelsController(
-    IParcelService parcelService,
-    IParcelPickupService parcelPickupService) : ControllerBase
+public sealed class ParcelsController(IParcelService parcelService) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetParcels(
@@ -50,7 +48,7 @@ public sealed class ParcelsController(
 
         try
         {
-            PickupUnlockResponse response = await parcelPickupService.UnlockAsync(
+            PickupUnlockResponse response = await parcelService.UnlockPickupAsync(
                 userId,
                 id,
                 HttpContext.Connection.RemoteIpAddress?.ToString(),

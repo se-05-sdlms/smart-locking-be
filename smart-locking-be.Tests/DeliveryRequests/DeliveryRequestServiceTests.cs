@@ -273,73 +273,6 @@ public sealed class DeliveryRequestServiceTests
     }
 
     [Fact]
-    public async Task ReserveCompartmentAsync_WithAvailableCompartment_AllocatesCompartmentAndCreatesReservation()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
-        LockerCompartment compartment = SeedCompartment(dbContext, locker.Id, 1);
-        string token = "valid-token";
-        var tokenService = new Sha256TokenHashService();
-        DeliveryRequest request = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(token), DeliveryRequestStatus.Approved, DateTimeOffset.UtcNow.AddMinutes(10));
-        dbContext.DeliveryRequests.Add(request);
-        await dbContext.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(dbContext, tokenService);
-
-        CompartmentReservationResponse response = await service.ReserveCompartmentAsync(request.Id, token);
-
-        Assert.Equal(request.Id, response.RequestId);
-        Assert.Equal(compartment.Id, response.CompartmentId);
-        Assert.Equal(compartment.Code, response.CompartmentCode);
-        Assert.Equal(DeliveryRequestStatus.Allocated, request.Status);
-        Assert.Equal(compartment.Id, request.AllocatedCompartmentId);
-        Assert.Single(dbContext.CompartmentReservations);
-    }
-
-    [Fact]
-    public async Task ConfirmDropOffAsync_WhenAllocated_CreatesParcelAndSetsDeposited()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
-        LockerCompartment compartment = SeedCompartment(dbContext, locker.Id, 1);
-        ResidentProfile resident = await SeedResidentAsync(dbContext, "0909999999");
-        string token = "valid-token";
-        var tokenService = new Sha256TokenHashService();
-        DeliveryRequest request = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(token), DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(10));
-        request.ResidentProfileId = resident.Id;
-        request.AllocatedCompartmentId = compartment.Id;
-        request.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
-        request.ParcelImageUrl = "https://cdn.example.com/parcel.jpg";
-        dbContext.DeliveryRequests.Add(request);
-
-        CompartmentReservation reservation = new()
-        {
-            Id = Guid.NewGuid(),
-            LockerCompartmentId = compartment.Id,
-            DeliveryRequestId = request.Id,
-            ReservedAt = DateTimeOffset.UtcNow,
-            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10),
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-        dbContext.CompartmentReservations.Add(reservation);
-        await dbContext.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(dbContext, tokenService);
-
-        DropOffConfirmationResponse response = await service.ConfirmDropOffAsync(request.Id, token);
-
-        Assert.Equal(DeliveryRequestStatus.Deposited, response.Status);
-        Assert.Equal(DeliveryRequestStatus.Deposited, request.Status);
-        Assert.NotNull(reservation.ReleasedAt);
-
-        Parcel parcel = await dbContext.Parcels.SingleAsync();
-        Assert.Equal(ParcelStatus.Stored, parcel.Status);
-        Assert.Equal(request.Id, parcel.DeliveryRequestId);
-
-        ParcelStatusHistory history = await dbContext.ParcelStatusHistories.SingleAsync();
-        Assert.Equal(parcel.Id, history.ParcelId);
-        Assert.Equal(ParcelStatus.Stored, history.ToStatus);
-    }
-
-    [Fact]
     public async Task ExpireStartedSessionsAsync_ExpiresOnlyStartedRequests()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
@@ -376,7 +309,8 @@ public sealed class DeliveryRequestServiceTests
             dbContext,
             tokenHashService ?? new Sha256TokenHashService(),
             pushNotificationService ?? new RecordingPushNotificationService(),
-            timeProvider ?? TimeProvider.System);
+            timeProvider ?? TimeProvider.System,
+            null!);
 
     private static async Task<(Locker Locker, SystemPolicy Policy)> SeedLockerAndPolicyAsync(ApplicationDbContext dbContext)
     {

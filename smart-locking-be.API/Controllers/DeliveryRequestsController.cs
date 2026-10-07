@@ -7,6 +7,7 @@ using smart_locking_be.API.Authorization;
 using smart_locking_be.API.Constants;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 using smart_locking_be.Application.Interfaces.Services;
+using smart_locking_be.Domain.Enums;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -103,36 +104,29 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
         return await ExecuteAsync(() => deliveryRequestService.RejectDeliveryRequestAsync(userId, id, cancellationToken));
     }
 
-    // ==========================================
-    // Issue #21: Compartment Reservation Endpoint
-    // ==========================================
-
-    [HttpPost("{id:guid}/reserve-compartment")]
+    [HttpPost("{id:guid}/open-compartment")]
     [AllowAnonymous]
-    public async Task<IActionResult> ReserveCompartment(Guid id, CancellationToken cancellationToken)
+    [EnableRateLimiting(RateLimitPolicyNames.DeviceCommand)]
+    [RequestTimeout(RequestTimeoutPolicyNames.DeviceCommand)]
+    public async Task<IActionResult> OpenCompartment(Guid id, CancellationToken cancellationToken)
     {
         if (!TryGetGuestSessionToken(out string token))
         {
             return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
         }
 
-        return await ExecuteAsync(() => deliveryRequestService.ReserveCompartmentAsync(id, token, cancellationToken));
-    }
-
-    // ==========================================
-    // Issue #22: Confirm Drop-off Endpoint
-    // ==========================================
-
-    [HttpPost("{id:guid}/confirm-drop-off")]
-    [AllowAnonymous]
-    public async Task<IActionResult> ConfirmDropOff(Guid id, CancellationToken cancellationToken)
-    {
-        if (!TryGetGuestSessionToken(out string token))
+        return await ExecuteAsync<IActionResult>(async () =>
         {
-            return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
-        }
-
-        return await ExecuteAsync(() => deliveryRequestService.ConfirmDropOffAsync(id, token, cancellationToken));
+            OpenCompartmentResponse response = await deliveryRequestService.OpenCompartmentAsync(
+                id, token, HttpContext.Connection.RemoteIpAddress?.ToString(),
+                Request.Headers.UserAgent.ToString(), cancellationToken);
+            return response.Result switch
+            {
+                LockerAccessResult.Succeeded => Accepted(response),
+                LockerAccessResult.Blocked => Conflict(response),
+                _ => StatusCode(StatusCodes.Status503ServiceUnavailable, response),
+            };
+        });
     }
 
     // ==========================================

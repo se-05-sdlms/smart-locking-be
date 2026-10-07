@@ -399,3 +399,20 @@ smart-locking-be/
 | DE181072 | Trương Hà Thùy Trang | Thành viên  | [trangthtde181072@fpt.edu.vn](mailto:trangthtde181072@fpt.edu.vn) |
 
 </details>
+
+## Luồng cửa locker và hợp đồng MQTT
+
+Shipper gọi `POST /api/delivery-requests/{id}/open-compartment` với header `X-Guest-Session-Token`. API này thay thế `reserve-compartment` và `confirm-drop-off` (**thay đổi không tương thích với client cũ**), vừa phân bổ vừa mở ngăn. Gọi lại khi reservation còn hạn sẽ mở lại đúng ngăn đó. Phản hồi: `202` đã gửi lệnh, `409` bị chặn, `503` gửi lệnh thất bại. Cư dân tiếp tục dùng `POST /api/parcels/{id}/unlock-pickup`.
+
+Phản hồi `202` tiếp nhận lệnh và chờ cảm biến xác nhận. Nếu mất kết nối trong lúc publish, thiết bị có thể đã nhận lệnh: lượt truy cập vẫn chờ đóng và phản hồi có cảnh báo trong `failureReason`. Chỉ lỗi từ chối gửi chắc chắn hoặc ACK âm từ thiết bị mới đánh dấu thất bại. Giao/nhận chỉ hoàn tất khi cảm biến báo chuyển từ `open` sang `closed`, với thời điểm đóng không sớm hơn lượt truy cập đang chờ. Bản tin closed lặp lại hoặc sau reboot khi trạng thái đã là Closed/Unknown không hoàn tất nghiệp vụ. Reservation không hết hạn trong lúc có lượt mở thành công đang chờ đóng; đóng cửa muộn vẫn hoàn tất giao hàng.
+
+| Chiều | Topic | JSON payload |
+|---|---|---|
+| BE → ESP32 | `boxora/lockers/{deviceId}/commands/unlock` | `{ "commandId": "<UUID>", "hardwareChannel": 1 }` |
+| ESP32 → BE | `boxora/lockers/{deviceId}/events/command-ack` | `{ "commandId": "<UUID>", "ok": true }` |
+| ESP32 → BE | `boxora/lockers/{deviceId}/events/door` | `{ "hardwareChannel": 1, "state": "open", "at": "2026-10-06T08:00:00Z" }` |
+| ESP32 → BE | `boxora/lockers/{deviceId}/events/status` | `{ "online": true }` |
+
+`commandId` là `LockerAccessEvent.Id`; `deviceId` là `Locker.DeviceIdentifier`. Trạng thái cửa là `open` hoặc `closed`; thiết bị nên gửi timestamp UTC (thiếu `at`: dùng thời gian backend nhận). Lệnh và subscription dùng QoS 1. ESP32 nên gửi event với QoS 1 và cấu hình last will `{ "online": false }` trên topic status. ACK `ok: false` đánh dấu lượt mở thất bại nhưng giữ reservation để thử lại.
+
+Backend duy trì một kết nối MQTT và kết nối lại sau 5 giây. Cấu hình: `Mqtt:Host`, `Mqtt:Port` (mặc định `8883`), `Mqtt:Username`, `Mqtt:Password`, `Mqtt:UseTls` (mặc định `true`). Thiếu host thì gateway không kết nối và gửi lệnh mở thất bại. Cần áp dụng migration `AddLockerAccessEventCompletedAt` trước khi chạy phiên bản này. Luồng trả hàng và worker xử lý cửa mở quá lâu nằm ngoài phạm vi thay đổi.

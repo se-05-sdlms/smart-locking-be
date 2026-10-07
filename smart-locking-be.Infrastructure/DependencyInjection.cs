@@ -34,10 +34,12 @@ public static class DependencyInjection
         services.AddScoped<IResidentService, ResidentService>();
         services.AddScoped<ILockerService, LockerService>();
         services.AddScoped<ILockerAccessService, LockerAccessService>();
-        services.AddScoped<ILockerCommandDispatcher, MqttLockerCommandDispatcher>();
+        services.AddSingleton<LockerMqttGateway>();
+        services.AddSingleton<ILockerCommandDispatcher>(sp => sp.GetRequiredService<LockerMqttGateway>());
+        services.AddHostedService(sp => sp.GetRequiredService<LockerMqttGateway>());
+        services.AddScoped<ILockerDeviceEventHandler, LockerDeviceEventHandler>();
         services.AddScoped<IDeliveryRequestService, DeliveryRequestService>();
         services.AddScoped<IParcelService, ParcelService>();
-        services.AddScoped<IParcelPickupService, ParcelPickupService>();
         services.AddScoped<IOverdueChargeService, OverdueChargeService>();
         services.AddScoped<IIncidentService, IncidentService>();
         services.AddScoped<INotificationService, NotificationService>();

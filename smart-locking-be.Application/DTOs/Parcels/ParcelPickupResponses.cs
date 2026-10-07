@@ -9,8 +9,3 @@ public sealed record PickupUnlockResponse(
     [property: JsonConverter(typeof(JsonStringEnumConverter))] LockerAccessResult Result,
     string? FailureReason,
     DateTimeOffset RequestedAt);
-
-public sealed record PickupConfirmationResponse(
-    Guid ParcelId,
-    [property: JsonConverter(typeof(JsonStringEnumConverter))] ParcelStatus Status,
-    DateTimeOffset RetrievedAt);

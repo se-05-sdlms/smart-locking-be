@@ -4,6 +4,19 @@ namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface IParcelService
 {
+    Task<PickupUnlockResponse> UnlockPickupAsync(
+        Guid residentUserId,
+        Guid parcelId,
+        string? ipAddress,
+        string? deviceContext,
+        CancellationToken cancellationToken = default);
+
+    Task FinalizeRetrievalAsync(
+        Guid parcelId,
+        Guid? userId,
+        DateTimeOffset at,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyCollection<ParcelListItemResponse>> GetParcelsAsync(
         Guid userId,
         string role,

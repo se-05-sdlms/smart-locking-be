@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
+using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -11,7 +12,8 @@ public sealed class DeliveryRequestService(
     ApplicationDbContext dbContext,
     ITokenHashService tokenHashService,
     IPushNotificationService pushNotificationService,
-    TimeProvider timeProvider) : IDeliveryRequestService
+    TimeProvider timeProvider,
+    ILockerAccessService lockerAccessService) : IDeliveryRequestService
 {
     // ==========================================
     // Issue #19: Guest Shipper Initiate & Submit
@@ -300,148 +302,168 @@ public sealed class DeliveryRequestService(
     }
 
     // ==========================================
-    // Issue #21: Compartment Reservation
+    // Shipper: reserve and open a compartment
     // ==========================================
 
-    public async Task<CompartmentReservationResponse> ReserveCompartmentAsync(
+    public async Task<OpenCompartmentResponse> OpenCompartmentAsync(
         Guid requestId,
         string guestSessionToken,
+        string? ipAddress,
+        string? deviceContext,
         CancellationToken cancellationToken = default)
     {
         DeliveryRequest deliveryRequest = await FindValidSessionAsync(requestId, guestSessionToken, cancellationToken);
-        if (deliveryRequest.Status != DeliveryRequestStatus.Approved)
-        {
-            throw new InvalidOperationException($"Chưa thể phân bổ ngăn tủ cho yêu cầu ở trạng thái {deliveryRequest.Status}.");
-        }
-
         DateTimeOffset now = timeProvider.GetUtcNow();
-
-        List<LockerCompartment> compartments = await dbContext.LockerCompartments
-            .Where(c => c.LockerId == deliveryRequest.LockerId &&
-                        c.OperationalStatus == LockerCompartmentOperationalStatus.Operational)
-            .OrderBy(c => c.Code)
-            .ToListAsync(cancellationToken);
-
-        LockerCompartment? availableCompartment = null;
-        foreach (LockerCompartment compartment in compartments)
+        LockerCompartment compartment;
+        if (deliveryRequest.Status == DeliveryRequestStatus.Approved)
         {
-            bool hasStoredParcel = await dbContext.Parcels.AnyAsync(
-                p => p.DeliveryRequest.AllocatedCompartmentId == compartment.Id && p.Status == ParcelStatus.Stored,
-                cancellationToken);
-            if (hasStoredParcel) continue;
+            LockerCompartment? available = await dbContext.LockerCompartments
+                .Where(c => c.LockerId == deliveryRequest.LockerId &&
+                            c.OperationalStatus == LockerCompartmentOperationalStatus.Operational &&
+                            !dbContext.Parcels.Any(p => p.DeliveryRequest.AllocatedCompartmentId == c.Id &&
+                                (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue)) &&
+                            !dbContext.CompartmentReservations.Any(r =>
+                                r.LockerCompartmentId == c.Id && r.ReleasedAt == null))
+                .OrderBy(c => c.Code)
+                .FirstOrDefaultAsync(cancellationToken);
 
-            bool hasActiveReservation = await dbContext.CompartmentReservations.AnyAsync(
-                r => r.LockerCompartmentId == compartment.Id && r.ReleasedAt == null && r.ExpiresAt > now,
-                cancellationToken);
-            if (hasActiveReservation) continue;
+            if (available is null)
+            {
+                deliveryRequest.Status = DeliveryRequestStatus.Failed;
+                deliveryRequest.FailureCode = DeliveryRequestFailureCode.NoCompartment;
+                deliveryRequest.FailureDetail = "Không có ngăn locker trống khả dụng.";
+                deliveryRequest.UpdatedAt = now;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                throw new InvalidOperationException("Không tìm thấy ngăn tủ trống khả dụng tại locker này.");
+            }
 
-            availableCompartment = compartment;
-            break;
-        }
-
-        if (availableCompartment is null)
-        {
-            deliveryRequest.Status = DeliveryRequestStatus.Failed;
-            deliveryRequest.FailureCode = DeliveryRequestFailureCode.NoCompartment;
-            deliveryRequest.FailureDetail = "Không có ngăn locker trống khả dụng.";
+            compartment = available;
+            deliveryRequest.AllocatedCompartmentId = compartment.Id;
+            deliveryRequest.Status = DeliveryRequestStatus.Allocated;
+            deliveryRequest.AllocatedAt = now;
+            deliveryRequest.ReservationExpiresAt = now.AddMinutes(deliveryRequest.SystemPolicy.CompartmentReservationMinutes);
+            deliveryRequest.LastActivityAt = now;
             deliveryRequest.UpdatedAt = now;
+            dbContext.CompartmentReservations.Add(new CompartmentReservation
+            {
+                Id = Guid.NewGuid(),
+                LockerCompartmentId = compartment.Id,
+                DeliveryRequestId = deliveryRequest.Id,
+                ReservedAt = now,
+                ExpiresAt = deliveryRequest.ReservationExpiresAt.Value,
+                CreatedAt = now,
+            });
             await dbContext.SaveChangesAsync(cancellationToken);
-
-            throw new InvalidOperationException("Không tìm thấy ngăn tủ trống khả dụng tại locker này.");
+        }
+        else if (deliveryRequest.Status == DeliveryRequestStatus.Allocated &&
+                 deliveryRequest.ReservationExpiresAt > now &&
+                 deliveryRequest.AllocatedCompartmentId.HasValue)
+        {
+            compartment = await dbContext.LockerCompartments.SingleAsync(
+                c => c.Id == deliveryRequest.AllocatedCompartmentId.Value &&
+                     dbContext.CompartmentReservations.Any(r => r.DeliveryRequestId == requestId &&
+                         r.LockerCompartmentId == c.Id && r.ReleasedAt == null && r.ExpiresAt > now),
+                cancellationToken);
+        }
+        else
+        {
+            throw new InvalidOperationException($"Không thể mở ngăn tủ cho yêu cầu ở trạng thái {deliveryRequest.Status} hoặc đã hết hạn giữ ngăn.");
         }
 
-        DateTimeOffset reservationExpiresAt = now.AddMinutes(deliveryRequest.SystemPolicy.CompartmentReservationMinutes);
-        CompartmentReservation reservation = new()
-        {
-            Id = Guid.NewGuid(),
-            LockerCompartmentId = availableCompartment.Id,
-            DeliveryRequestId = deliveryRequest.Id,
-            ReservedAt = now,
-            ExpiresAt = reservationExpiresAt,
-            CreatedAt = now
-        };
-
-        deliveryRequest.AllocatedCompartmentId = availableCompartment.Id;
-        deliveryRequest.Status = DeliveryRequestStatus.Allocated;
-        deliveryRequest.AllocatedAt = now;
-        deliveryRequest.ReservationExpiresAt = reservationExpiresAt;
-        deliveryRequest.LastActivityAt = now;
-        deliveryRequest.UpdatedAt = now;
-
-        dbContext.CompartmentReservations.Add(reservation);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return new CompartmentReservationResponse(
+        OpenLockerResponse access = await lockerAccessService.OpenAsync(new OpenLockerRequest(
+            deliveryRequest.LockerId,
+            compartment.Id,
+            null,
             deliveryRequest.Id,
-            reservation.Id,
-            availableCompartment.Id,
-            availableCompartment.Code,
-            reservation.ReservedAt,
-            reservation.ExpiresAt);
+            null,
+            null,
+            LockerAccessType.ShipperDropOff,
+            LockerAccessMethod.GuestSession,
+            ipAddress,
+            deviceContext), cancellationToken);
+
+        return new OpenCompartmentResponse(
+            deliveryRequest.Id,
+            compartment.Id,
+            compartment.Code,
+            access.AccessEventId,
+            access.Result,
+            access.FailureReason,
+            deliveryRequest.ReservationExpiresAt!.Value);
     }
 
     public async Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
-        List<DeliveryRequest> expiredReservations = await dbContext.DeliveryRequests
+        List<Guid> candidateIds = await dbContext.DeliveryRequests
             .Where(r => r.Status == DeliveryRequestStatus.Allocated &&
-                        r.ReservationExpiresAt != null &&
-                        r.ReservationExpiresAt <= now)
+                        r.ReservationExpiresAt != null && r.ReservationExpiresAt <= now &&
+                        !dbContext.LockerAccessEvents.Any(e => e.DeliveryRequestId == r.Id &&
+                            e.Result == LockerAccessResult.Succeeded && e.CompletedAt == null))
+            .Select(r => r.Id)
             .ToListAsync(cancellationToken);
 
-        foreach (DeliveryRequest request in expiredReservations)
+        int expiredCount = 0;
+        foreach (Guid requestId in candidateIds)
         {
+            await using var transaction = dbContext.Database.IsRelational()
+                ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+                : null;
+            if (transaction is not null)
+            {
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT 1 FROM \"DeliveryRequest\" WHERE \"Id\" = {requestId} FOR UPDATE", cancellationToken);
+            }
+
+            // Recheck under the same row lock used when a shipper's pending access is created.
+            DeliveryRequest request = await dbContext.DeliveryRequests.SingleAsync(r => r.Id == requestId, cancellationToken);
+            await dbContext.Entry(request).ReloadAsync(cancellationToken);
+            if (request.Status != DeliveryRequestStatus.Allocated || request.ReservationExpiresAt is null ||
+                request.ReservationExpiresAt > now ||
+                await dbContext.LockerAccessEvents.AnyAsync(e => e.DeliveryRequestId == requestId &&
+                    e.Result == LockerAccessResult.Succeeded && e.CompletedAt == null, cancellationToken))
+            {
+                continue;
+            }
+
             request.Status = DeliveryRequestStatus.Expired;
             request.FailureCode = DeliveryRequestFailureCode.ReservationExpired;
             request.UpdatedAt = now;
-
-            List<CompartmentReservation> activeReservations = await dbContext.CompartmentReservations
-                .Where(cr => cr.DeliveryRequestId == request.Id && cr.ReleasedAt == null)
+            List<CompartmentReservation> reservations = await dbContext.CompartmentReservations
+                .Where(r => r.DeliveryRequestId == requestId && r.ReleasedAt == null)
                 .ToListAsync(cancellationToken);
-
-            foreach (CompartmentReservation res in activeReservations)
+            foreach (CompartmentReservation reservation in reservations)
             {
-                res.ReleasedAt = now;
+                reservation.ReleasedAt = now;
             }
-        }
 
-        if (expiredReservations.Count > 0)
-        {
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            expiredCount++;
         }
-
-        return expiredReservations.Count;
+        return expiredCount;
     }
-
     // ==========================================
-    // Issue #22: Shipper Drop-off / Confirm Deposited
+    // Sensor-confirmed shipper drop-off
     // ==========================================
 
-    public async Task<DropOffConfirmationResponse> ConfirmDropOffAsync(
+    public async Task FinalizeDropOffAsync(
         Guid requestId,
-        string guestSessionToken,
+        DateTimeOffset at,
         CancellationToken cancellationToken = default)
     {
-        DeliveryRequest deliveryRequest = await FindValidSessionAsync(requestId, guestSessionToken, cancellationToken);
-        if (deliveryRequest.Status != DeliveryRequestStatus.Allocated)
+        DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests
+            .Include(r => r.SystemPolicy)
+            .SingleOrDefaultAsync(r => r.Id == requestId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu giao hàng.");
+        if (deliveryRequest.Status == DeliveryRequestStatus.Deposited)
         {
-            throw new InvalidOperationException($"Không thể xác nhận gửi hàng khi yêu cầu ở trạng thái {deliveryRequest.Status}.");
+            return;
         }
-
-        if (!deliveryRequest.AllocatedCompartmentId.HasValue)
+        if (deliveryRequest.Status != DeliveryRequestStatus.Allocated ||
+            !deliveryRequest.AllocatedCompartmentId.HasValue)
         {
             throw new InvalidOperationException("Yêu cầu giao hàng chưa được phân bổ ngăn tủ.");
-        }
-
-        DateTimeOffset now = timeProvider.GetUtcNow();
-
-        if (deliveryRequest.ReservationExpiresAt.HasValue && deliveryRequest.ReservationExpiresAt <= now)
-        {
-            deliveryRequest.Status = DeliveryRequestStatus.Expired;
-            deliveryRequest.FailureCode = DeliveryRequestFailureCode.ReservationExpired;
-            deliveryRequest.UpdatedAt = now;
-            await dbContext.SaveChangesAsync(cancellationToken);
-            throw new TimeoutException("Thời gian giữ ngăn tủ đã hết hạn.");
         }
 
         Parcel parcel = new()
@@ -450,11 +472,11 @@ public sealed class DeliveryRequestService(
             DeliveryRequestId = deliveryRequest.Id,
             ParcelCode = $"P-{Guid.NewGuid():N}"[..10].ToUpperInvariant(),
             Status = ParcelStatus.Stored,
-            StoredAt = now,
-            PickupDueAt = now.AddHours(deliveryRequest.SystemPolicy.OverdueStartAfterHours),
-            MaxStorageUntil = now.AddHours(deliveryRequest.SystemPolicy.MaxStorageHours),
-            CreatedAt = now,
-            UpdatedAt = now
+            StoredAt = at,
+            PickupDueAt = at.AddHours(deliveryRequest.SystemPolicy.OverdueStartAfterHours),
+            MaxStorageUntil = at.AddHours(deliveryRequest.SystemPolicy.MaxStorageHours),
+            CreatedAt = at,
+            UpdatedAt = at
         };
 
         ParcelStatusHistory history = new()
@@ -464,7 +486,7 @@ public sealed class DeliveryRequestService(
             FromStatus = null,
             ToStatus = ParcelStatus.Stored,
             Reason = "Bưu kiện đã được Shipper đặt vào ngăn tủ thành công.",
-            ChangedAt = now
+            ChangedAt = at
         };
 
         List<CompartmentReservation> reservations = await dbContext.CompartmentReservations
@@ -473,24 +495,17 @@ public sealed class DeliveryRequestService(
 
         foreach (CompartmentReservation reservation in reservations)
         {
-            reservation.ReleasedAt = now;
+            reservation.ReleasedAt = at;
         }
 
         deliveryRequest.Status = DeliveryRequestStatus.Deposited;
-        deliveryRequest.DepositedAt = now;
-        deliveryRequest.CompartmentReleasedAt = now;
-        deliveryRequest.LastActivityAt = now;
-        deliveryRequest.UpdatedAt = now;
+        deliveryRequest.DepositedAt = at;
+        deliveryRequest.CompartmentReleasedAt = null;
+        deliveryRequest.LastActivityAt = at;
+        deliveryRequest.UpdatedAt = at;
 
         dbContext.Parcels.Add(parcel);
         dbContext.ParcelStatusHistories.Add(history);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return new DropOffConfirmationResponse(
-            deliveryRequest.Id,
-            parcel.Id,
-            deliveryRequest.Status,
-            now);
     }
 
     // ==========================================
