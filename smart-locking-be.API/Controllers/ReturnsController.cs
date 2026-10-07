@@ -12,8 +12,7 @@ public sealed class ReturnsController(IReturnRequestService service) : Controlle
     [HttpPost] public Task<IActionResult> Create(CreateReturnRequest request, CancellationToken ct) => Execute(user => service.CreateAsync(user, request, ct));
     [HttpGet] public Task<IActionResult> Mine(CancellationToken ct) => Execute(user => service.GetMineAsync(user, ct));
     [HttpGet("{id:guid}")] public Task<IActionResult> Get(Guid id, CancellationToken ct) => Execute(user => service.GetAsync(user, id, ct));
-    [HttpPost("{id:guid}/allocate-open")] public Task<IActionResult> AllocateOpen(Guid id, CancellationToken ct) => Execute(user => service.AllocateAndOpenAsync(user, id, ct));
-    [HttpPost("{id:guid}/confirm-deposit")] public Task<IActionResult> ConfirmDeposit(Guid id, CancellationToken ct) => Execute(user => service.ConfirmDepositAsync(user, id, ct));
+    [HttpPost("{id:guid}:openCompartment")] public Task<IActionResult> OpenCompartment(Guid id, CancellationToken ct) => Execute(user => service.OpenCompartmentAsync(user, id, ct));
 
     private async Task<IActionResult> Execute<T>(Func<Guid, Task<T>> action)
     {

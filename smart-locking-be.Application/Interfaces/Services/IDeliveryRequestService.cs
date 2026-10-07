@@ -4,31 +4,23 @@ namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface IDeliveryRequestService
 {
-    // Issue #19: Guest Shipper Initiate & Submit Flow
-    Task<InitiateDeliveryResponse> InitiateAsync(
+    Task<InitiateDeliveryResponse> CreateAsync(
         InitiateDeliveryRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<DeliveryRequestSummaryResponse> UploadImageAsync(
+    Task<DeliveryRequestSummaryResponse> SubmitAsync(
         Guid id,
         string guestSessionToken,
-        UploadParcelImageRequest request,
+        SubmitDeliveryRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<DeliveryRequestSummaryResponse> SubmitRecipientAsync(
-        Guid id,
-        string guestSessionToken,
-        SubmitRecipientPhoneRequest request,
-        CancellationToken cancellationToken = default);
-
-    Task<GuestDeliveryStatusResponse> GetGuestStatusAsync(
+    Task<GuestDeliveryStatusResponse> GetAsync(
         Guid id,
         string guestSessionToken,
         CancellationToken cancellationToken = default);
 
     Task<int> ExpireStartedSessionsAsync(CancellationToken cancellationToken = default);
 
-    // Issue #20: Resident Delivery Approval Flow
     Task<IReadOnlyCollection<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(
         Guid residentUserId,
         CancellationToken cancellationToken = default);
@@ -45,17 +37,15 @@ public interface IDeliveryRequestService
 
     Task<int> ExpirePendingApprovalsAsync(CancellationToken cancellationToken = default);
 
-    // Issue #21: Compartment Reservation Flow
-    Task<CompartmentReservationResponse> ReserveCompartmentAsync(
+    Task<CompartmentReservationResponse> OpenCompartmentAsync(
         Guid requestId,
         string guestSessionToken,
         CancellationToken cancellationToken = default);
 
     Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default);
 
-    // Issue #22: Shipper Drop-off / Confirm Parcel Deposited Flow
-    Task<DropOffConfirmationResponse> ConfirmDropOffAsync(
+    Task FinalizeDropOffAsync(
         Guid requestId,
-        string guestSessionToken,
+        DateTimeOffset completedAt,
         CancellationToken cancellationToken = default);
 }

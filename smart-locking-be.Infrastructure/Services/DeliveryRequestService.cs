@@ -15,11 +15,7 @@ public sealed class DeliveryRequestService(
     ILockerAccessService lockerAccessService,
     TimeProvider timeProvider) : IDeliveryRequestService
 {
-    // ==========================================
-    // Issue #19: Guest Shipper Initiate & Submit
-    // ==========================================
-
-    public async Task<InitiateDeliveryResponse> InitiateAsync(
+    public async Task<InitiateDeliveryResponse> CreateAsync(
         InitiateDeliveryRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -67,37 +63,16 @@ public sealed class DeliveryRequestService(
             deliveryRequest.SessionExpiresAt);
     }
 
-    public async Task<DeliveryRequestSummaryResponse> UploadImageAsync(
+    public async Task<DeliveryRequestSummaryResponse> SubmitAsync(
         Guid id,
         string guestSessionToken,
-        UploadParcelImageRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
-        string parcelImageUrl = ValidateImageUrl(request.ParcelImageUrl);
-        DateTimeOffset now = timeProvider.GetUtcNow();
-
-        deliveryRequest.ParcelImageUrl = parcelImageUrl;
-        RefreshSession(deliveryRequest, now);
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return MapSummary(deliveryRequest);
-    }
-
-    public async Task<DeliveryRequestSummaryResponse> SubmitRecipientAsync(
-        Guid id,
-        string guestSessionToken,
-        SubmitRecipientPhoneRequest request,
+        SubmitDeliveryRequest request,
         CancellationToken cancellationToken = default)
     {
         DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
         string recipientPhone = RequireValue(request.RecipientPhone, nameof(request.RecipientPhone), 20);
+        string parcelImageUrl = ValidateImageUrl(request.ParcelImageUrl);
         DateTimeOffset now = timeProvider.GetUtcNow();
-
-        if (deliveryRequest.ParcelImageUrl is null)
-        {
-            throw new InvalidOperationException("Phải cung cấp URL ảnh bưu kiện trước khi gửi thông tin người nhận.");
-        }
 
         ResidentProfile resident = await dbContext.ResidentProfiles
             .Include(profile => profile.User)
@@ -114,6 +89,7 @@ public sealed class DeliveryRequestService(
         }
 
         deliveryRequest.ResidentProfileId = resident.Id;
+        deliveryRequest.ParcelImageUrl = parcelImageUrl;
         deliveryRequest.RecipientPhoneSnapshot = recipientPhone;
         deliveryRequest.ApprovalModeSnapshot = resident.DeliveryApprovalMode;
         deliveryRequest.Status = resident.DeliveryApprovalMode == DeliveryApprovalMode.Auto
@@ -144,7 +120,7 @@ public sealed class DeliveryRequestService(
         return MapSummary(deliveryRequest);
     }
 
-    public async Task<GuestDeliveryStatusResponse> GetGuestStatusAsync(
+    public async Task<GuestDeliveryStatusResponse> GetAsync(
         Guid id,
         string guestSessionToken,
         CancellationToken cancellationToken = default)
@@ -344,11 +320,7 @@ public sealed class DeliveryRequestService(
         return expiredRequests.Count;
     }
 
-    // ==========================================
-    // Issue #21: Compartment Reservation
-    // ==========================================
-
-    public async Task<CompartmentReservationResponse> ReserveCompartmentAsync(
+    public async Task<CompartmentReservationResponse> OpenCompartmentAsync(
         Guid requestId,
         string guestSessionToken,
         CancellationToken cancellationToken = default)
@@ -480,16 +452,20 @@ public sealed class DeliveryRequestService(
         return expiredReservations.Count;
     }
 
-    // ==========================================
-    // Issue #22: Shipper Drop-off / Confirm Deposited
-    // ==========================================
-
-    public async Task<DropOffConfirmationResponse> ConfirmDropOffAsync(
+    public async Task FinalizeDropOffAsync(
         Guid requestId,
-        string guestSessionToken,
+        DateTimeOffset completedAt,
         CancellationToken cancellationToken = default)
     {
-        DeliveryRequest deliveryRequest = await FindValidSessionAsync(requestId, guestSessionToken, cancellationToken);
+        DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests
+            .Include(item => item.SystemPolicy)
+            .Include(item => item.Locker)
+            .SingleOrDefaultAsync(item => item.Id == requestId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu giao hàng.");
+        if (deliveryRequest.Status == DeliveryRequestStatus.Deposited)
+        {
+            return;
+        }
         if (deliveryRequest.Status != DeliveryRequestStatus.Allocated)
         {
             throw new InvalidOperationException($"Không thể xác nhận gửi hàng khi yêu cầu ở trạng thái {deliveryRequest.Status}.");
@@ -500,16 +476,7 @@ public sealed class DeliveryRequestService(
             throw new InvalidOperationException("Yêu cầu giao hàng chưa được phân bổ ngăn tủ.");
         }
 
-        DateTimeOffset now = timeProvider.GetUtcNow();
-
-        DoorStatus doorStatus = await dbContext.LockerCompartments
-            .Where(item => item.Id == deliveryRequest.AllocatedCompartmentId.Value)
-            .Select(item => item.DoorStatus)
-            .SingleAsync(cancellationToken);
-        if (doorStatus != DoorStatus.Closed)
-        {
-            throw new InvalidOperationException("Chưa thể hoàn tất gửi hàng vì cửa ngăn chưa đóng.");
-        }
+        DateTimeOffset now = completedAt;
 
         if (deliveryRequest.ReservationExpiresAt.HasValue && deliveryRequest.ReservationExpiresAt <= now)
         {
@@ -577,11 +544,6 @@ public sealed class DeliveryRequestService(
         await dbContext.SaveChangesAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushNotificationId, cancellationToken);
 
-        return new DropOffConfirmationResponse(
-            deliveryRequest.Id,
-            parcel.Id,
-            deliveryRequest.Status,
-            now);
     }
 
     // ==========================================

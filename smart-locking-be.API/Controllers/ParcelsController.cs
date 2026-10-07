@@ -13,9 +13,7 @@ namespace smart_locking_be.API.Controllers;
 [ApiController]
 [Route("api/parcels")]
 [Authorize(Roles = "Resident,LockerOperator")]
-public sealed class ParcelsController(
-    IParcelService parcelService,
-    IParcelPickupService parcelPickupService) : ControllerBase
+public sealed class ParcelsController(IParcelService parcelService) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetParcels(
@@ -37,11 +35,11 @@ public sealed class ParcelsController(
         await ExecuteAsync((userId, role) =>
             parcelService.GetHistoryAsync(userId, role, id, cancellationToken));
 
-    [HttpPost("{id:guid}/unlock-pickup")]
+    [HttpPost("{id:guid}:openCompartment")]
     [Authorize(Roles = "Resident")]
     [EnableRateLimiting(RateLimitPolicyNames.DeviceCommand)]
     [RequestTimeout(RequestTimeoutPolicyNames.DeviceCommand)]
-    public async Task<IActionResult> UnlockPickup(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> OpenCompartment(Guid id, CancellationToken cancellationToken)
     {
         if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
         {
@@ -50,7 +48,7 @@ public sealed class ParcelsController(
 
         try
         {
-            PickupUnlockResponse response = await parcelPickupService.UnlockAsync(
+            PickupUnlockResponse response = await parcelService.OpenCompartmentAsync(
                 userId,
                 id,
                 HttpContext.Connection.RemoteIpAddress?.ToString(),
@@ -78,42 +76,6 @@ public sealed class ParcelsController(
         catch (ArgumentException exception)
         {
             return BadRequest(new { message = exception.Message });
-        }
-    }
-
-    [HttpPost("{id:guid}/confirm-pickup")]
-    [Authorize(Roles = "Resident")]
-    public async Task<IActionResult> ConfirmPickup(
-        Guid id,
-        [FromBody] ConfirmPickupRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
-
-        try
-        {
-            PickupConfirmationResponse response = await parcelPickupService.ConfirmPickupAsync(
-                userId,
-                request.AccessEventId,
-                cancellationToken);
-            return response.ParcelId == id
-                ? Ok(response)
-                : BadRequest(new { message = "Lượt mở ngăn không thuộc bưu kiện được yêu cầu." });
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
         }
     }
 

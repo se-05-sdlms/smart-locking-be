@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using smart_locking_be.Application.DTOs.DeliveryRequests;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
@@ -130,11 +132,76 @@ public sealed class MqttLockerListenerTests
         await listener.HandleMessageAsync("lockers/UNKNOWN/doors/1/status", "OPEN", CancellationToken.None);
     }
 
-    private static IServiceProvider BuildServiceProvider(string dbName)
+    [Fact]
+    public async Task HandleMessageAsync_OpenToClosed_FinalizesDeliveryOnlyOnce()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var deliveryService = new RecordingDeliveryRequestService();
+        var serviceProvider = BuildServiceProvider(dbName, deliveryService);
+        var dbContext = serviceProvider.GetRequiredService<ApplicationDbContext>();
+        Guid requestId = Guid.NewGuid();
+        var locker = new Locker
+        {
+            Id = Guid.NewGuid(), Code = "LKR-03", Address = "Sảnh C", RecoveryAddress = "Lễ tân",
+            DeviceIdentifier = "LKR-FINALIZE", OperationalStatus = LockerOperationalStatus.Operational,
+            ConnectionStatus = LockerConnectionStatus.Online, CreatedAt = Now, UpdatedAt = Now,
+        };
+        var compartment = new LockerCompartment
+        {
+            Id = Guid.NewGuid(), LockerId = locker.Id, Locker = locker, Code = "C01", HardwareCode = "HW-01",
+            HardwareChannel = 1, OperationalStatus = LockerCompartmentOperationalStatus.Operational,
+            DoorStatus = DoorStatus.Open, CreatedAt = Now, UpdatedAt = Now,
+        };
+        dbContext.AddRange(locker, compartment, new LockerAccessEvent
+        {
+            Id = Guid.NewGuid(), LockerId = locker.Id, LockerCompartmentId = compartment.Id,
+            DeliveryRequestId = requestId, AccessType = LockerAccessType.ShipperDropOff,
+            AccessMethod = LockerAccessMethod.GuestSession, Result = LockerAccessResult.Succeeded,
+            OccurredAt = Now,
+        });
+        await dbContext.SaveChangesAsync();
+
+        var listener = new MqttLockerListenerService(
+            new ConfigurationBuilder().Build(),
+            serviceProvider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<MqttLockerListenerService>.Instance);
+
+        await listener.HandleMessageAsync("lockers/LKR-FINALIZE/doors/1/status", "CLOSED", CancellationToken.None);
+        await listener.HandleMessageAsync("lockers/LKR-FINALIZE/doors/1/status", "CLOSED", CancellationToken.None);
+
+        Assert.Equal([requestId], deliveryService.FinalizedRequestIds);
+    }
+
+    private static IServiceProvider BuildServiceProvider(
+        string dbName,
+        IDeliveryRequestService? deliveryRequestService = null)
     {
         var services = new ServiceCollection();
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseInMemoryDatabase(dbName));
+        if (deliveryRequestService is not null)
+            services.AddSingleton(deliveryRequestService);
         return services.BuildServiceProvider();
+    }
+
+    private sealed class RecordingDeliveryRequestService : IDeliveryRequestService
+    {
+        public List<Guid> FinalizedRequestIds { get; } = [];
+        public Task FinalizeDropOffAsync(Guid requestId, DateTimeOffset completedAt, CancellationToken cancellationToken = default)
+        {
+            FinalizedRequestIds.Add(requestId);
+            return Task.CompletedTask;
+        }
+
+        public Task<InitiateDeliveryResponse> CreateAsync(InitiateDeliveryRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<DeliveryRequestSummaryResponse> SubmitAsync(Guid id, string guestSessionToken, SubmitDeliveryRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<GuestDeliveryStatusResponse> GetAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<int> ExpireStartedSessionsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyCollection<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(Guid residentUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<DeliveryRequestSummaryResponse> ApproveDeliveryRequestAsync(Guid residentUserId, Guid requestId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<DeliveryRequestSummaryResponse> RejectDeliveryRequestAsync(Guid residentUserId, Guid requestId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<int> ExpirePendingApprovalsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<CompartmentReservationResponse> OpenCompartmentAsync(Guid requestId, string guestSessionToken, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

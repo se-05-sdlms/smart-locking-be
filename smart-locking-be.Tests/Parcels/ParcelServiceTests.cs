@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Parcels;
+using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
@@ -37,7 +39,7 @@ public sealed class ParcelServiceTests
         AddParcelGraph(dbContext, other, ParcelStatus.Overdue, "P-OTHER");
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelListItemResponse> result = await new ParcelService(dbContext)
+        IReadOnlyCollection<ParcelListItemResponse> result = await CreateService(dbContext)
             .GetParcelsAsync(owner.Id, nameof(UserRole.Resident), ParcelListView.Active, null, null, null, default);
 
         ParcelListItemResponse parcel = Assert.Single(result);
@@ -63,7 +65,7 @@ public sealed class ParcelServiceTests
         });
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelListItemResponse> result = await new ParcelService(dbContext)
+        IReadOnlyCollection<ParcelListItemResponse> result = await CreateService(dbContext)
             .GetParcelsAsync(operatorUser.Id, nameof(UserRole.LockerOperator), ParcelListView.All, null, null, null, default);
 
         Assert.Equal(assigned.Id, Assert.Single(result).Id);
@@ -78,7 +80,7 @@ public sealed class ParcelServiceTests
         Parcel parcel = AddParcelGraph(dbContext, owner, ParcelStatus.Stored, "P-PRIVATE");
         await dbContext.SaveChangesAsync();
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => new ParcelService(dbContext)
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => CreateService(dbContext)
             .GetParcelAsync(requester.Id, nameof(UserRole.Resident), parcel.Id, default));
     }
 
@@ -89,7 +91,7 @@ public sealed class ParcelServiceTests
         User resident = CreateUser(UserRole.Resident);
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        await Assert.ThrowsAsync<ArgumentException>(() => new ParcelService(dbContext).GetParcelsAsync(
+        await Assert.ThrowsAsync<ArgumentException>(() => CreateService(dbContext).GetParcelsAsync(
             resident.Id,
             nameof(UserRole.Resident),
             ParcelListView.History,
@@ -124,7 +126,7 @@ public sealed class ParcelServiceTests
             });
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelStatusHistoryResponse> result = await new ParcelService(dbContext)
+        IReadOnlyCollection<ParcelStatusHistoryResponse> result = await CreateService(dbContext)
             .GetHistoryAsync(owner.Id, nameof(UserRole.Resident), parcel.Id, default);
 
         Assert.Equal(ParcelStatus.Overdue, result.First().ToStatus);
@@ -137,6 +139,15 @@ public sealed class ParcelServiceTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         return new ApplicationDbContext(options);
+    }
+
+    private static ParcelService CreateService(ApplicationDbContext dbContext) =>
+        new(dbContext, new UnusedLockerAccessService());
+
+    private sealed class UnusedLockerAccessService : ILockerAccessService
+    {
+        public Task<OpenLockerResponse> OpenAsync(OpenLockerRequest request, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private static User CreateUser(UserRole role) => new()

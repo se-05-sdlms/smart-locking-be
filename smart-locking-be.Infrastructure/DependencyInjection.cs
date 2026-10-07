@@ -38,10 +38,10 @@ public static class DependencyInjection
         services.AddHostedService<MqttLockerListenerService>();
         services.AddScoped<IDeliveryRequestService, DeliveryRequestService>();
         services.AddScoped<IParcelService, ParcelService>();
-        services.AddScoped<IParcelPickupService, ParcelPickupService>();
         services.AddScoped<IOverdueChargeService, OverdueChargeService>();
         services.AddScoped<IIncidentService, IncidentService>();
         services.AddScoped<IReturnRequestService, ReturnRequestService>();
+        services.AddScoped<IReturnPickupSessionService, ReturnRequestService>();
         services.AddScoped<IOperationsService, OperationsService>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();

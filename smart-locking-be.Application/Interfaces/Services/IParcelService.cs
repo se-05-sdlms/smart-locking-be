@@ -24,4 +24,17 @@ public interface IParcelService
         string role,
         Guid parcelId,
         CancellationToken cancellationToken);
+
+    Task<PickupUnlockResponse> OpenCompartmentAsync(
+        Guid residentUserId,
+        Guid parcelId,
+        string? ipAddress,
+        string? deviceContext,
+        CancellationToken cancellationToken = default);
+
+    Task FinalizeRetrievalAsync(
+        Guid parcelId,
+        Guid? residentUserId,
+        DateTimeOffset completedAt,
+        CancellationToken cancellationToken = default);
 }

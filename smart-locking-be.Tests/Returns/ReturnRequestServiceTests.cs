@@ -26,16 +26,17 @@ public sealed class ReturnRequestServiceTests
         var service = new ReturnRequestService(db, new SuccessfulAccess(), new NoopPush(), new Sha256TokenHashService(), TimeProvider.System);
 
         ReturnRequestResponse created = await service.CreateAsync(userId, new CreateReturnRequest("https://example.com/return.jpg", null));
-        ReturnUnlockResponse opened = await service.AllocateAndOpenAsync(userId, created.Id);
-        ReturnDepositResponse deposited = await service.ConfirmDepositAsync(userId, created.Id);
-        ReturnPickupSessionResponse session = await service.ValidatePickupAsync(new ValidateReturnPickupRequest("LK-01", deposited.PickupCode));
-        await service.OpenForPickupAsync(created.Id, session.GuestSessionToken);
-        ReturnPickupCompleteResponse completed = await service.ConfirmPickupAsync(created.Id, session.GuestSessionToken);
+        ReturnUnlockResponse opened = await service.OpenCompartmentAsync(userId, created.Id);
+        await service.FinalizeDepositAsync(created.Id, now);
+        ReturnRequest deposited = await db.ReturnRequests.SingleAsync();
+        ReturnPickupSessionResponse session = await service.CreateAsync(new ValidateReturnPickupRequest("LK-01", deposited.ReturnCode));
+        await service.OpenCompartmentAsync(created.Id, session.GuestSessionToken);
+        await service.FinalizePickupAsync(created.Id, now);
 
-        Assert.Matches("^[0-9]{6}$", deposited.PickupCode);
+        Assert.Matches("^[0-9]{6}$", deposited.ReturnCode);
         Assert.Equal("A01", opened.CompartmentCode);
-        Assert.Equal(ReturnRequestStatus.Completed, completed.Status);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ValidatePickupAsync(new ValidateReturnPickupRequest("LK-01", deposited.PickupCode)));
+        Assert.Equal(ReturnRequestStatus.Completed, deposited.Status);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new ValidateReturnPickupRequest("LK-01", deposited.ReturnCode)));
     }
 
     private static ApplicationDbContext CreateDb() => new(new DbContextOptionsBuilder<ApplicationDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);

@@ -17,27 +17,23 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
 {
     private const string GuestSessionHeaderName = "X-Guest-Session-Token";
 
-    // ==========================================
-    // Issue #19: Shipper Guest Flow Endpoints
-    // ==========================================
-
-    [HttpPost("initiate")]
+    [HttpPost]
     [AllowAnonymous]
-    public async Task<IActionResult> Initiate(
+    public async Task<IActionResult> Create(
         [FromBody] InitiateDeliveryRequest request,
         CancellationToken cancellationToken) =>
         await ExecuteAsync(
             async () => StatusCode(
                 StatusCodes.Status201Created,
-                await deliveryRequestService.InitiateAsync(request, cancellationToken)));
+                await deliveryRequestService.CreateAsync(request, cancellationToken)));
 
-    [HttpPost("{id:guid}/upload-image")]
+    [HttpPost("{id:guid}:submit")]
     [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicyNames.Upload)]
     [RequestTimeout(RequestTimeoutPolicyNames.Upload)]
-    public async Task<IActionResult> UploadImage(
+    public async Task<IActionResult> Submit(
         Guid id,
-        [FromBody] UploadParcelImageRequest request,
+        [FromBody] SubmitDeliveryRequest request,
         CancellationToken cancellationToken)
     {
         if (!TryGetGuestSessionToken(out string token))
@@ -45,25 +41,10 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
             return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
         }
 
-        return await ExecuteAsync(() => deliveryRequestService.UploadImageAsync(id, token, request, cancellationToken));
+        return await ExecuteAsync(() => deliveryRequestService.SubmitAsync(id, token, request, cancellationToken));
     }
 
-    [HttpPost("{id:guid}/submit-recipient")]
-    [AllowAnonymous]
-    public async Task<IActionResult> SubmitRecipient(
-        Guid id,
-        [FromBody] SubmitRecipientPhoneRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (!TryGetGuestSessionToken(out string token))
-        {
-            return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
-        }
-
-        return await ExecuteAsync(() => deliveryRequestService.SubmitRecipientAsync(id, token, request, cancellationToken));
-    }
-
-    [HttpGet("{id:guid}/status")]
+    [HttpGet("{id:guid}")]
     [AllowAnonymous]
     public async Task<IActionResult> GetGuestStatus(Guid id, CancellationToken cancellationToken)
     {
@@ -72,17 +53,23 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
             return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
         }
 
-        return await ExecuteAsync(() => deliveryRequestService.GetGuestStatusAsync(id, token, cancellationToken));
+        return await ExecuteAsync(() => deliveryRequestService.GetAsync(id, token, cancellationToken));
     }
 
     // ==========================================
     // Issue #20: Resident Approval Flow Endpoints
     // ==========================================
 
-    [HttpGet("pending")]
+    [HttpGet]
     [Authorize(Policy = ApiPolicies.Resident)]
-    public async Task<IActionResult> GetPendingRequests(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetPendingRequests(
+        [FromQuery] string status = "pending",
+        CancellationToken cancellationToken = default)
     {
+        if (!string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { message = "Hiện chỉ hỗ trợ lọc status=pending." });
+        }
         if (!TryGetUserId(out Guid userId))
         {
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
@@ -91,7 +78,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
         return await ExecuteAsync(() => deliveryRequestService.GetPendingRequestsForResidentAsync(userId, cancellationToken));
     }
 
-    [HttpPost("{id:guid}/approve")]
+    [HttpPost("{id:guid}:approve")]
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> ApproveRequest(Guid id, CancellationToken cancellationToken)
     {
@@ -103,7 +90,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
         return await ExecuteAsync(() => deliveryRequestService.ApproveDeliveryRequestAsync(userId, id, cancellationToken));
     }
 
-    [HttpPost("{id:guid}/reject")]
+    [HttpPost("{id:guid}:reject")]
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> RejectRequest(Guid id, CancellationToken cancellationToken)
     {
@@ -115,41 +102,17 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
         return await ExecuteAsync(() => deliveryRequestService.RejectDeliveryRequestAsync(userId, id, cancellationToken));
     }
 
-    // ==========================================
-    // Issue #21: Compartment Reservation Endpoint
-    // ==========================================
-
-    [HttpPost("{id:guid}/reserve-compartment")]
+    [HttpPost("{id:guid}:openCompartment")]
     [AllowAnonymous]
-    public async Task<IActionResult> ReserveCompartment(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> OpenCompartment(Guid id, CancellationToken cancellationToken)
     {
         if (!TryGetGuestSessionToken(out string token))
         {
             return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
         }
 
-        return await ExecuteAsync(() => deliveryRequestService.ReserveCompartmentAsync(id, token, cancellationToken));
+        return await ExecuteAsync(() => deliveryRequestService.OpenCompartmentAsync(id, token, cancellationToken));
     }
-
-    // ==========================================
-    // Issue #22: Confirm Drop-off Endpoint
-    // ==========================================
-
-    [HttpPost("{id:guid}/confirm-drop-off")]
-    [AllowAnonymous]
-    public async Task<IActionResult> ConfirmDropOff(Guid id, CancellationToken cancellationToken)
-    {
-        if (!TryGetGuestSessionToken(out string token))
-        {
-            return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
-        }
-
-        return await ExecuteAsync(() => deliveryRequestService.ConfirmDropOffAsync(id, token, cancellationToken));
-    }
-
-    // ==========================================
-    // Helpers
-    // ==========================================
 
     private bool TryGetGuestSessionToken(out string token)
     {
