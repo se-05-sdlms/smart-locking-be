@@ -144,6 +144,37 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         });
     }
 
+    [HttpPatch("{id:guid}/compartments/{compartmentId:guid}")]
+    [Authorize(Roles = "Administrator")]
+    public async Task<IActionResult> UpdateCompartment(
+        Guid id, Guid compartmentId, [FromBody] UpdateCompartmentRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetUserIdAndRole(out Guid userId, out _)) return Unauthorized();
+        return await ExecuteAsync(() => lockerService.UpdateCompartmentAsync(
+            userId, id, compartmentId, request, cancellationToken));
+    }
+
+    [HttpPost("{id:guid}:deactivate")]
+    [Authorize(Roles = "Administrator")]
+    public async Task<IActionResult> DeactivateLocker(
+        Guid id, [FromBody] DeactivateLockerResourceRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserIdAndRole(out Guid userId, out _)) return Unauthorized();
+        return await ExecuteAsync(() => lockerService.DeactivateLockerAsync(userId, id, request.Reason, cancellationToken));
+    }
+
+    [HttpPost("{id:guid}/compartments/{compartmentId:guid}:deactivate")]
+    [Authorize(Roles = "Administrator")]
+    public async Task<IActionResult> DeactivateCompartment(
+        Guid id, Guid compartmentId, [FromBody] DeactivateLockerResourceRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetUserIdAndRole(out Guid userId, out _)) return Unauthorized();
+        return await ExecuteAsync(() => lockerService.DeactivateCompartmentAsync(
+            userId, id, compartmentId, request.Reason, cancellationToken));
+    }
+
     /// <summary>
     /// Cập nhật trạng thái vận hành của ngăn tủ (Locker Compartment). Administrator hoặc LockerOperator được phân công.
     /// </summary>

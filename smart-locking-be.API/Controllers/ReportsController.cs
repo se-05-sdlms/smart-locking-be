@@ -13,11 +13,12 @@ public sealed class ReportsController(IReportService service, TimeProvider timeP
     public async Task<IActionResult> Summary(
         [FromQuery] DateTimeOffset? from,
         [FromQuery] DateTimeOffset? to,
+        [FromQuery] Guid? lockerId,
         CancellationToken cancellationToken)
     {
         DateTimeOffset end = to ?? timeProvider.GetUtcNow();
         DateTimeOffset start = from ?? end.AddDays(-30);
-        OperationsReportResponse report = await service.GetSummaryAsync(start, end, cancellationToken);
+        OperationsReportResponse report = await service.GetSummaryAsync(start, end, lockerId, cancellationToken);
         if (!Request.Headers.Accept.Any(value => value?.Contains("text/csv", StringComparison.OrdinalIgnoreCase) == true))
             return Ok(report);
         string csv = "From,To,Deliveries,Returns,RetrievedParcels,OpenIncidents,MaintenanceRequests,EmergencyUnlocks\n" +

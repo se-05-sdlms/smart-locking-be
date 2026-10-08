@@ -186,6 +186,7 @@ public sealed class ParcelServiceTests
         public Guid EnqueueParcelStored(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, string compartmentCode) => throw new NotSupportedException();
         public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => throw new NotSupportedException();
         public Guid EnqueueParcelTransferred(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string collectionAddress) => throw new NotSupportedException();
+        public Guid EnqueueParcelPickupReminder(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, int daysUntilTransfer, bool isOverdue) => throw new NotSupportedException();
         public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
@@ -202,6 +203,8 @@ public sealed class ParcelServiceTests
             ResidentUserId = residentUserId;
             return notificationId;
         }
+
+        public Guid EnqueueParcelPickupReminder(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, int daysUntilTransfer, bool isOverdue) => notificationId;
 
         public Task TrySendAsync(Guid id, CancellationToken cancellationToken = default)
         {

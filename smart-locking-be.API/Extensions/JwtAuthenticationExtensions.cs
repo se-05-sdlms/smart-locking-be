@@ -41,6 +41,16 @@ public static class JwtAuthenticationExtensions
                     // Ánh ánh claim chứa vai trò trong token với System.Security.Claims.ClaimTypes.Role
                     RoleClaimType = ClaimTypes.Role
                 };
+                options.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        string? accessToken = context.Request.Query["access_token"].FirstOrDefault();
+                        if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs/operations"))
+                            context.Token = accessToken;
+                        return Task.CompletedTask;
+                    }
+                };
             });
 
         // 2. Đăng ký Authorization Policies theo vai trò (Role-based policies)

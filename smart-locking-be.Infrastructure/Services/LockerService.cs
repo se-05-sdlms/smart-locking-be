@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -8,7 +9,9 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class LockerService(ApplicationDbContext dbContext) : ILockerService
+public sealed class LockerService(
+    ApplicationDbContext dbContext,
+    IOperationsRealtimeNotifier? realtimeNotifier = null) : ILockerService
 {
     public async Task<IReadOnlyCollection<RegistrationLockerResponse>> GetRegistrationOptionsAsync(
         CancellationToken cancellationToken = default) =>
@@ -183,6 +186,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
 
         dbContext.Lockers.Add(locker);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishLockerAsync(locker.Id, locker.OperationalStatus.ToString(), "Locker created.", cancellationToken);
 
         return MapToDetailResponse(locker);
     }
@@ -222,6 +226,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         locker.UpdatedAt = now;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishLockerAsync(locker.Id, locker.OperationalStatus.ToString(), "Locker updated.", cancellationToken);
 
         return MapToDetailResponse(locker);
     }
@@ -303,7 +308,87 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
 
         dbContext.LockerCompartments.Add(compartment);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishLockerAsync(lockerId, compartment.OperationalStatus.ToString(), "Compartment created.", cancellationToken, compartment.Id);
 
+        return MapCompartmentToResponse(compartment);
+    }
+
+    public async Task<LockerCompartmentResponse> UpdateCompartmentAsync(
+        Guid userId, Guid lockerId, Guid compartmentId, UpdateCompartmentRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        (string code, string hardwareCode) = ValidateAndTrimCompartmentInput(
+            request.Code, request.HardwareCode, request.HardwareChannel);
+        LockerCompartment compartment = await dbContext.LockerCompartments
+            .SingleOrDefaultAsync(item => item.Id == compartmentId && item.LockerId == lockerId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy ngăn tủ.");
+        bool duplicate = await dbContext.LockerCompartments.AnyAsync(item =>
+            item.LockerId == lockerId && item.Id != compartmentId &&
+            (item.Code == code || item.HardwareCode == hardwareCode || item.HardwareChannel == request.HardwareChannel),
+            cancellationToken);
+        if (duplicate) throw new InvalidOperationException("Mã ngăn, mã phần cứng hoặc kênh phần cứng đã được sử dụng.");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        compartment.Code = code;
+        compartment.HardwareCode = hardwareCode;
+        compartment.HardwareChannel = request.HardwareChannel;
+        compartment.UpdatedAt = now;
+        AddAudit(userId, "Compartment.Updated", nameof(LockerCompartment), compartment.Id,
+            $"Code={code};HardwareCode={hardwareCode};HardwareChannel={request.HardwareChannel}", now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishLockerAsync(lockerId, compartment.OperationalStatus.ToString(), "Compartment updated.", cancellationToken, compartment.Id);
+        return MapCompartmentToResponse(compartment);
+    }
+
+    public async Task<LockerDetailResponse> DeactivateLockerAsync(
+        Guid userId, Guid lockerId, string reason, CancellationToken cancellationToken = default)
+    {
+        string normalizedReason = RequireReason(reason);
+        Locker locker = await dbContext.Lockers.Include(item => item.Compartments)
+            .SingleOrDefaultAsync(item => item.Id == lockerId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy locker.");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        bool hasActiveWork = await dbContext.Parcels.AnyAsync(item =>
+                item.DeliveryRequest.LockerId == lockerId &&
+                (item.Status == ParcelStatus.Stored || item.Status == ParcelStatus.Overdue), cancellationToken) ||
+            await dbContext.ReturnRequests.AnyAsync(item => item.LockerId == lockerId &&
+                (item.Status == ReturnRequestStatus.Created || item.Status == ReturnRequestStatus.Allocated || item.Status == ReturnRequestStatus.Deposited), cancellationToken) ||
+            await dbContext.CompartmentReservations.AnyAsync(item => item.LockerCompartment.LockerId == lockerId &&
+                item.ReleasedAt == null && item.ExpiresAt > now, cancellationToken);
+        if (hasActiveWork) throw new InvalidOperationException("Locker còn parcel, return hoặc reservation đang hoạt động.");
+        string previous = locker.OperationalStatus.ToString();
+        locker.OperationalStatus = LockerOperationalStatus.Inactive;
+        locker.UpdatedAt = now;
+        AddStatusEvent(lockerId, null, userId, previous, LockerOperationalStatus.Inactive.ToString(), normalizedReason, now);
+        AddAudit(userId, "Locker.Deactivated", nameof(Locker), lockerId, normalizedReason, now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishLockerAsync(lockerId, locker.OperationalStatus.ToString(), normalizedReason, cancellationToken);
+        return MapToDetailResponse(locker);
+    }
+
+    public async Task<LockerCompartmentResponse> DeactivateCompartmentAsync(
+        Guid userId, Guid lockerId, Guid compartmentId, string reason,
+        CancellationToken cancellationToken = default)
+    {
+        string normalizedReason = RequireReason(reason);
+        LockerCompartment compartment = await dbContext.LockerCompartments
+            .SingleOrDefaultAsync(item => item.Id == compartmentId && item.LockerId == lockerId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy ngăn tủ.");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        bool hasActiveWork = await dbContext.Parcels.AnyAsync(item =>
+                item.DeliveryRequest.AllocatedCompartmentId == compartmentId &&
+                (item.Status == ParcelStatus.Stored || item.Status == ParcelStatus.Overdue), cancellationToken) ||
+            await dbContext.ReturnRequests.AnyAsync(item => item.AllocatedCompartmentId == compartmentId &&
+                (item.Status == ReturnRequestStatus.Created || item.Status == ReturnRequestStatus.Allocated || item.Status == ReturnRequestStatus.Deposited), cancellationToken) ||
+            await dbContext.CompartmentReservations.AnyAsync(item => item.LockerCompartmentId == compartmentId &&
+                item.ReleasedAt == null && item.ExpiresAt > now, cancellationToken);
+        if (hasActiveWork) throw new InvalidOperationException("Ngăn tủ còn parcel, return hoặc reservation đang hoạt động.");
+        string previous = compartment.OperationalStatus.ToString();
+        compartment.OperationalStatus = LockerCompartmentOperationalStatus.Inactive;
+        compartment.UpdatedAt = now;
+        AddStatusEvent(lockerId, compartmentId, userId, previous, LockerCompartmentOperationalStatus.Inactive.ToString(), normalizedReason, now);
+        AddAudit(userId, "Compartment.Deactivated", nameof(LockerCompartment), compartmentId, normalizedReason, now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishLockerAsync(lockerId, compartment.OperationalStatus.ToString(), normalizedReason, cancellationToken, compartment.Id);
         return MapCompartmentToResponse(compartment);
     }
 
@@ -330,6 +415,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         AddStatusEvent(lockerId, null, userId, previous, status.ToString(), request.Reason, now);
         AddAudit(userId, "Locker.StatusChanged", nameof(Locker), lockerId, $"{previous} -> {status}: {request.Reason}", now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishLockerAsync(lockerId, locker.OperationalStatus.ToString(), request.Reason, cancellationToken);
         return MapToDetailResponse(locker);
     }
 
@@ -366,9 +452,20 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         AddAudit(userId, "Compartment.StatusChanged", nameof(LockerCompartment), compartment.Id, $"{previous} -> {status}: {request.Reason}", now);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishLockerAsync(lockerId, compartment.OperationalStatus.ToString(), request.Reason, cancellationToken, compartment.Id);
 
         return MapCompartmentToResponse(compartment);
     }
+
+    private Task PublishLockerAsync(
+        Guid lockerId, string status, string? message, CancellationToken cancellationToken, Guid? entityId = null) =>
+        realtimeNotifier?.PublishToLockerAsync(lockerId, new RealtimeEvent(
+            entityId.HasValue ? "CompartmentUpdated" : "LockerUpdated",
+            entityId ?? lockerId,
+            lockerId,
+            status,
+            message,
+            DateTimeOffset.UtcNow), cancellationToken) ?? Task.CompletedTask;
 
     private async Task EnsureAccessAsync(Guid userId, string userRole, Guid lockerId, CancellationToken cancellationToken)
     {
@@ -400,17 +497,30 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     private void AddStatusEvent(Guid lockerId, Guid? compartmentId, Guid userId, string previous, string next, string reason, DateTimeOffset now) =>
         dbContext.LockerEvents.Add(new LockerEvent
         {
-            Id = Guid.NewGuid(), LockerId = lockerId, LockerCompartmentId = compartmentId, ActorUserId = userId,
-            EventType = LockerEventType.OperationalStatusChanged, PreviousValue = previous, NewValue = next,
+            Id = Guid.NewGuid(),
+            LockerId = lockerId,
+            LockerCompartmentId = compartmentId,
+            ActorUserId = userId,
+            EventType = LockerEventType.OperationalStatusChanged,
+            PreviousValue = previous,
+            NewValue = next,
             Severity = next == "Operational" ? LockerEventSeverity.Info : LockerEventSeverity.Warning,
-            Reason = reason?.Trim(), OccurredAt = now, ReceivedAt = now
+            Reason = reason?.Trim(),
+            OccurredAt = now,
+            ReceivedAt = now
         });
 
     private void AddAudit(Guid userId, string action, string entityType, Guid entityId, string details, DateTimeOffset now) =>
         dbContext.AuditLogs.Add(new AuditLog
         {
-            Id = Guid.NewGuid(), ActorUserId = userId, Action = action, EntityType = entityType,
-            EntityId = entityId, Result = AuditLogResult.Succeeded, Details = details, OccurredAt = now
+            Id = Guid.NewGuid(),
+            ActorUserId = userId,
+            Action = action,
+            EntityType = entityType,
+            EntityId = entityId,
+            Result = AuditLogResult.Succeeded,
+            Details = details,
+            OccurredAt = now
         });
 
     private static (string Code, string Address, string RecoveryAddress, string DeviceIdentifier) ValidateAndTrimLockerInput(
@@ -487,6 +597,13 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         }
 
         return (trimmedCode, trimmedHardwareCode);
+    }
+
+    private static string RequireReason(string reason)
+    {
+        string value = reason?.Trim() ?? string.Empty;
+        if (value.Length is < 1 or > 1000) throw new ArgumentException("Lý do phải có từ 1 đến 1000 ký tự.", nameof(reason));
+        return value;
     }
 
     private static LockerDetailResponse MapToDetailResponse(Locker locker)

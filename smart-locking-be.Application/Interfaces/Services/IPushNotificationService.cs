@@ -27,6 +27,14 @@ public interface IPushNotificationService
         Guid parcelId,
         string collectionAddress);
 
+    Guid EnqueueParcelPickupReminder(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string lockerCode,
+        int daysUntilTransfer,
+        bool isOverdue);
+
     Task TrySendAsync(
         Guid notificationId,
         CancellationToken cancellationToken = default);

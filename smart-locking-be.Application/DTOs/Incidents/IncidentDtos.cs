@@ -13,6 +13,21 @@ public sealed record CreateIncidentRequest(
     Guid? LockerCompartmentId = null,
     string? EvidenceUrl = null);
 
+public sealed record CreateGuestIncidentRequest(
+    string LockerCode,
+    string Type,
+    string Title,
+    string Description,
+    Guid? DeliveryRequestId = null,
+    Guid? ReturnRequestId = null,
+    Guid? LockerCompartmentId = null);
+
+public sealed record GuestIncidentResponse(
+    Guid Id,
+    string ReferenceCode,
+    IncidentStatus Status,
+    DateTimeOffset CreatedAt);
+
 public sealed record UpdateIncidentStatusRequest(
     IncidentStatus Status,
     string? Notes = null,

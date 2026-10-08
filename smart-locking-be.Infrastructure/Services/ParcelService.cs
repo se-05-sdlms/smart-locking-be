@@ -107,8 +107,6 @@ public sealed class ParcelService(
                 parcel.DeliveryRequest.AllocatedCompartmentId!.Value,
                 parcel.DeliveryRequest.AllocatedCompartment!.Code,
                 parcel.DeliveryRequest.ParcelImageUrl,
-                parcel.DeliveryRequest.ShipperName,
-                parcel.DeliveryRequest.ShipperPhone,
                 parcel.StoredAt,
                 parcel.PickupDueAt,
                 parcel.MaxStorageUntil,
@@ -260,9 +258,14 @@ public sealed class ParcelService(
             parcel.DeliveryRequest.Locker.RecoveryAddress);
         dbContext.AuditLogs.Add(new AuditLog
         {
-            Id = Guid.NewGuid(), ActorUserId = userId, Action = "Parcel.Transferred",
-            EntityType = nameof(Parcel), EntityId = parcel.Id, Result = AuditLogResult.Succeeded,
-            Details = parcel.DeliveryRequest.Locker.RecoveryAddress, OccurredAt = now
+            Id = Guid.NewGuid(),
+            ActorUserId = userId,
+            Action = "Parcel.Transferred",
+            EntityType = nameof(Parcel),
+            EntityId = parcel.Id,
+            Result = AuditLogResult.Succeeded,
+            Details = parcel.DeliveryRequest.Locker.RecoveryAddress,
+            OccurredAt = now
         });
         await dbContext.SaveChangesAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushId, cancellationToken);

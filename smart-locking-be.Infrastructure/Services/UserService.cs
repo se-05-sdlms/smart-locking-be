@@ -351,6 +351,47 @@ public sealed class UserService(
         return await GetUserByIdAsync(id, cancellationToken);
     }
 
+    public async Task<ResetUserCredentialsResponse> ResetCredentialsAsync(
+        Guid actorAdminId,
+        Guid id,
+        string? ipAddress = null,
+        CancellationToken cancellationToken = default)
+    {
+        User user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy người dùng.");
+        if (user.Role != UserRole.LockerOperator)
+            throw new InvalidOperationException("Chỉ được đặt lại thông tin đăng nhập cho nhân viên vận hành.");
+
+        string temporaryPassword = GenerateTemporaryPassword();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        user.PasswordHash = passwordHashService.HashPassword(temporaryPassword);
+        user.MustChangePassword = true;
+        user.UpdatedAt = now;
+        List<RefreshToken> tokens = await dbContext.RefreshTokens
+            .Where(item => item.UserId == id && item.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+        foreach (RefreshToken token in tokens)
+        {
+            token.RevokedAt = now;
+            token.RevokedByIp = ipAddress;
+        }
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = actorAdminId,
+            Action = "ResetUserCredentials",
+            EntityType = nameof(User),
+            EntityId = id,
+            Result = AuditLogResult.Succeeded,
+            IpAddress = ipAddress,
+            Details = "Đặt lại mật khẩu tạm thời và thu hồi toàn bộ phiên đăng nhập.",
+            OccurredAt = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new ResetUserCredentialsResponse(id, temporaryPassword, true);
+    }
+
     public async Task<OperatorAssignmentResponse> AssignOperatorScopeAsync(
         Guid actorAdminId,
         Guid operatorId,

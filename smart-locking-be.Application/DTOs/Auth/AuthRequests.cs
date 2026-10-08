@@ -24,3 +24,7 @@ public sealed record ResetPasswordRequest(
     string LoginIdentifier,
     string OtpCode,
     string NewPassword);
+
+public sealed record ChangePasswordRequest(
+    string CurrentPassword,
+    string NewPassword);

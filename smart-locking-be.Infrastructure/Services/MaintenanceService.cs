@@ -10,11 +10,21 @@ namespace smart_locking_be.Infrastructure.Services;
 
 public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvider timeProvider) : IMaintenanceService
 {
-    public async Task<PagedResult<MaintenanceResponse>> GetAsync(Guid userId, string role, CancellationToken cancellationToken = default, int pageNumber = 1, int pageSize = 20)
+    public async Task<PagedResult<MaintenanceResponse>> GetAsync(
+        Guid userId, string role, Guid? lockerId = null, Guid? compartmentId = null,
+        MaintenanceStatus? status = null, MaintenancePriority? priority = null,
+        DateTimeOffset? from = null, DateTimeOffset? to = null,
+        CancellationToken cancellationToken = default, int pageNumber = 1, int pageSize = 20)
     {
         IQueryable<MaintenanceRequest> query = Scope(userId, role)
             .Include(item => item.Locker)
             .Include(item => item.LockerCompartment);
+        if (lockerId.HasValue) query = query.Where(item => item.LockerId == lockerId);
+        if (compartmentId.HasValue) query = query.Where(item => item.LockerCompartmentId == compartmentId);
+        if (status.HasValue) query = query.Where(item => item.Status == status);
+        if (priority.HasValue) query = query.Where(item => item.Priority == priority);
+        if (from.HasValue) query = query.Where(item => item.CreatedAt >= from);
+        if (to.HasValue) query = query.Where(item => item.CreatedAt < to);
         pageNumber = Math.Max(pageNumber, 1);
         pageSize = Math.Clamp(pageSize, 1, 100);
         int totalCount = await query.CountAsync(cancellationToken);
@@ -22,6 +32,23 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
             .Skip((pageNumber - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken))
             .Select(Map).ToArray();
         return new PagedResult<MaintenanceResponse>(items, totalCount, pageNumber, pageSize);
+    }
+
+    public async Task<MaintenanceDetailResponse> GetByIdAsync(
+        Guid userId, string role, Guid id, CancellationToken cancellationToken = default)
+    {
+        MaintenanceRequest item = await Scope(userId, role)
+            .Include(candidate => candidate.Locker)
+            .Include(candidate => candidate.LockerCompartment)
+            .Include(candidate => candidate.Activities)
+            .SingleOrDefaultAsync(candidate => candidate.Id == id, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu bảo trì.");
+        return new MaintenanceDetailResponse(Map(item), item.Activities
+            .OrderBy(activity => activity.CreatedAt)
+            .Select(activity => new MaintenanceActivityResponse(
+                activity.Id, activity.ActionByUserId, activity.ActionType,
+                activity.FromStatus, activity.ToStatus, activity.Notes, activity.CreatedAt))
+            .ToList());
     }
 
     public async Task<MaintenanceResponse> CreateAsync(Guid userId, string role, CreateMaintenanceRequest request, CancellationToken cancellationToken = default)
@@ -41,16 +68,24 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         DateTimeOffset now = timeProvider.GetUtcNow();
         MaintenanceRequest entity = new()
         {
-            Id = Guid.NewGuid(), LockerId = request.LockerId,
-            LockerCompartmentId = request.CompartmentId, CreatedByUserId = userId,
-            IncidentId = request.IncidentId, Priority = request.Priority,
-            Status = MaintenanceStatus.Open, Description = request.Description.Trim(),
-            CreatedAt = now, UpdatedAt = now
+            Id = Guid.NewGuid(),
+            LockerId = request.LockerId,
+            LockerCompartmentId = request.CompartmentId,
+            CreatedByUserId = userId,
+            IncidentId = request.IncidentId,
+            Priority = request.Priority,
+            Status = MaintenanceStatus.Open,
+            Description = request.Description.Trim(),
+            CreatedAt = now,
+            UpdatedAt = now
         };
         entity.Activities.Add(new MaintenanceActivity
         {
-            Id = Guid.NewGuid(), ActionByUserId = userId, ActionType = "Created",
-            ToStatus = MaintenanceStatus.Open, CreatedAt = now
+            Id = Guid.NewGuid(),
+            ActionByUserId = userId,
+            ActionType = "Created",
+            ToStatus = MaintenanceStatus.Open,
+            CreatedAt = now
         });
         dbContext.MaintenanceRequests.Add(entity);
         AddAudit(userId, "Maintenance.Created", entity.Id, entity.Description, now);
@@ -74,9 +109,14 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         entity.ClosedAt = request.Status == MaintenanceStatus.Closed ? now : null;
         dbContext.MaintenanceActivities.Add(new MaintenanceActivity
         {
-            Id = Guid.NewGuid(), MaintenanceRequestId = id, ActionByUserId = userId,
-            ActionType = "StatusChanged", FromStatus = previous, ToStatus = request.Status,
-            Notes = request.Notes?.Trim(), CreatedAt = now
+            Id = Guid.NewGuid(),
+            MaintenanceRequestId = id,
+            ActionByUserId = userId,
+            ActionType = "StatusChanged",
+            FromStatus = previous,
+            ToStatus = request.Status,
+            Notes = request.Notes?.Trim(),
+            CreatedAt = now
         });
         AddAudit(userId, "Maintenance.StatusChanged", id, $"{previous} -> {request.Status}", now);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -104,9 +144,14 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
     private void AddAudit(Guid userId, string action, Guid id, string details, DateTimeOffset now) =>
         dbContext.AuditLogs.Add(new AuditLog
         {
-            Id = Guid.NewGuid(), ActorUserId = userId, Action = action,
-            EntityType = nameof(MaintenanceRequest), EntityId = id,
-            Result = AuditLogResult.Succeeded, Details = details, OccurredAt = now
+            Id = Guid.NewGuid(),
+            ActorUserId = userId,
+            Action = action,
+            EntityType = nameof(MaintenanceRequest),
+            EntityId = id,
+            Result = AuditLogResult.Succeeded,
+            Details = details,
+            OccurredAt = now
         });
 
     private async Task<MaintenanceResponse> LoadAsync(Guid id, CancellationToken cancellationToken) =>

@@ -38,6 +38,7 @@ public static class DependencyInjection
         services.AddScoped<IDeliveryRequestService, DeliveryRequestService>();
         services.AddScoped<IParcelService, ParcelService>();
         services.AddScoped<IOverdueChargeService, OverdueChargeService>();
+        services.AddScoped<IParcelReminderService, ParcelReminderService>();
         services.AddScoped<IIncidentService, IncidentService>();
         services.AddScoped<IReturnRequestService, ReturnRequestService>();
         services.AddScoped<IReturnPickupSessionService, ReturnRequestService>();
@@ -48,6 +49,7 @@ public static class DependencyInjection
         services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<INotificationRuleService, NotificationRuleService>();
+        services.AddScoped<ISystemPolicyService, SystemPolicyService>();
         services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(new HttpClient { Timeout = TimeSpan.FromSeconds(10) });
