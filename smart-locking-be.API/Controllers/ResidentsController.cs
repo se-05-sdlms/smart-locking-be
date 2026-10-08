@@ -43,29 +43,5 @@ public class ResidentsController(IResidentService residentService) : ControllerB
     }
 
     private async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
-    {
-        try
-        {
-            TResponse result = await action();
-            return Ok(result);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            if (exception.Message.Contains("khóa", StringComparison.OrdinalIgnoreCase) ||
-                exception.Message.Contains("vô hiệu hóa", StringComparison.OrdinalIgnoreCase))
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-            }
-
-            return BadRequest(new { message = exception.Message });
-        }
-    }
+        => Ok(await action());
 }

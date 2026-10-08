@@ -208,7 +208,7 @@ public sealed class ReturnRequestService(
         if (entity.Status != ReturnRequestStatus.Deposited || string.IsNullOrWhiteSpace(entity.ShipperSessionTokenHash))
             throw new InvalidOperationException("Phiên lấy hàng không còn hiệu lực.");
         if (!string.Equals(entity.ShipperSessionTokenHash, tokenHashService.HashToken(token.Trim()), StringComparison.Ordinal))
-            throw new UnauthorizedAccessException("Guest session token không hợp lệ.");
+            throw new System.Security.Authentication.AuthenticationException("Guest session token không hợp lệ.");
         SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
         if (entity.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes) <= timeProvider.GetUtcNow()) throw new TimeoutException("Phiên lấy hàng đã hết hạn.");
         entity.UpdatedAt = timeProvider.GetUtcNow();

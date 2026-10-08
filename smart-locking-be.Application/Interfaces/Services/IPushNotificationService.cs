@@ -21,6 +21,12 @@ public interface IPushNotificationService
         string title,
         string message);
 
+    Guid EnqueueParcelTransferred(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string collectionAddress);
+
     Task TrySendAsync(
         Guid notificationId,
         CancellationToken cancellationToken = default);

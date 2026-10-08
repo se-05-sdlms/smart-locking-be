@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Incidents;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -193,26 +194,30 @@ public sealed class IncidentService(
         return await LoadDetailAsync(incident.Id, cancellationToken);
     }
 
-    public async Task<IReadOnlyCollection<IncidentListItemResponse>> GetResidentIncidentsAsync(
+    public async Task<PagedResult<IncidentListItemResponse>> GetResidentIncidentsAsync(
         Guid residentUserId,
-        CancellationToken cancellationToken = default) =>
-        await MapList(dbContext.Incidents
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20) =>
+        await ToPageAsync(dbContext.Incidents
             .AsNoTracking()
-            .Where(incident => incident.ReporterUserId == residentUserId))
-            .ToListAsync(cancellationToken);
+            .Where(incident => incident.ReporterUserId == residentUserId),
+            pageNumber, pageSize, cancellationToken);
 
-    public async Task<IReadOnlyCollection<IncidentListItemResponse>> GetOperationalIncidentsAsync(
+    public async Task<PagedResult<IncidentListItemResponse>> GetOperationalIncidentsAsync(
         Guid userId,
         string role,
         IncidentStatus? status,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20)
     {
         IQueryable<Incident> query = ScopeOperational(userId, role).AsNoTracking();
         if (status.HasValue)
         {
             query = query.Where(incident => incident.Status == status);
         }
-        return await MapList(query).ToListAsync(cancellationToken);
+        return await ToPageAsync(query, pageNumber, pageSize, cancellationToken);
     }
 
     public async Task<IncidentDetailResponse> GetIncidentAsync(
@@ -450,6 +455,22 @@ public sealed class IncidentService(
             incident.AssignedOperatorUserId,
             incident.CreatedAt,
             incident.UpdatedAt));
+
+    private static async Task<PagedResult<IncidentListItemResponse>> ToPageAsync(
+        IQueryable<Incident> query,
+        int pageNumber,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        int totalCount = await query.CountAsync(cancellationToken);
+        List<IncidentListItemResponse> items = await MapList(query)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+        return new PagedResult<IncidentListItemResponse>(items, totalCount, pageNumber, pageSize);
+    }
 
     private static bool IsValidTransition(IncidentStatus current, IncidentStatus next, string role) =>
         current switch

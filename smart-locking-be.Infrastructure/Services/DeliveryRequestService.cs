@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
@@ -187,24 +188,32 @@ public sealed class DeliveryRequestService(
     // Issue #20: Resident Delivery Approval
     // ==========================================
 
-    public async Task<IReadOnlyCollection<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(
+    public async Task<PagedResult<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(
         Guid residentUserId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
         ResidentProfile resident = await GetActiveResidentProfileAsync(residentUserId, cancellationToken);
 
-        List<DeliveryRequest> pendingRequests = await dbContext.DeliveryRequests
+        IQueryable<DeliveryRequest> query = dbContext.DeliveryRequests
             .AsNoTracking()
             .Include(r => r.Locker)
             .Include(r => r.SystemPolicy)
             .Where(r => r.ResidentProfileId == resident.Id &&
                         r.Status == DeliveryRequestStatus.PendingApproval &&
-                        (r.ApprovalExpiresAt == null || r.ApprovalExpiresAt > now))
+                        (r.ApprovalExpiresAt == null || r.ApprovalExpiresAt > now));
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        int totalCount = await query.CountAsync(cancellationToken);
+        List<DeliveryRequest> pendingRequests = await query
             .OrderByDescending(r => r.CreatedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        return pendingRequests.Select(r => new PendingDeliveryRequestResponse(
+        List<PendingDeliveryRequestResponse> items = pendingRequests.Select(r => new PendingDeliveryRequestResponse(
             r.Id,
             r.Locker.Code,
             r.Locker.Address,
@@ -213,6 +222,7 @@ public sealed class DeliveryRequestService(
             r.CreatedAt,
             r.ApprovalExpiresAt ?? r.CreatedAt.AddMinutes(r.SystemPolicy.ManualApprovalTimeoutMinutes)
         )).ToList();
+        return new PagedResult<PendingDeliveryRequestResponse>(items, totalCount, pageNumber, pageSize);
     }
 
     public async Task<DeliveryRequestSummaryResponse> ApproveDeliveryRequestAsync(
@@ -542,7 +552,7 @@ public sealed class DeliveryRequestService(
     {
         if (string.IsNullOrWhiteSpace(guestSessionToken))
         {
-            throw new UnauthorizedAccessException("Thiếu X-Guest-Session-Token.");
+            throw new System.Security.Authentication.AuthenticationException("Thiếu X-Guest-Session-Token.");
         }
 
         string tokenHash = tokenHashService.HashToken(guestSessionToken.Trim());
@@ -554,7 +564,7 @@ public sealed class DeliveryRequestService(
 
         if (!string.Equals(deliveryRequest.GuestSessionTokenHash, tokenHash, StringComparison.Ordinal))
         {
-            throw new UnauthorizedAccessException("Guest session token không hợp lệ.");
+            throw new System.Security.Authentication.AuthenticationException("Guest session token không hợp lệ.");
         }
 
         return deliveryRequest;

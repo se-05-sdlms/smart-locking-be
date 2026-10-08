@@ -12,10 +12,11 @@ namespace smart_locking_be.API.Controllers;
 
 [ApiController]
 [Route("api/parcels")]
-[Authorize(Roles = "Resident,LockerOperator")]
+[Authorize]
 public sealed class ParcelsController(IParcelService parcelService) : ControllerBase
 {
     [HttpGet]
+    [Authorize(Roles = "Resident,LockerOperator")]
     public async Task<IActionResult> GetParcels(
         [FromQuery] ParcelListView view = ParcelListView.Active,
         [FromQuery] string? search = null,
@@ -28,14 +29,20 @@ public sealed class ParcelsController(IParcelService parcelService) : Controller
             parcelService.GetParcelsAsync(userId, role, view, search, from, to, cancellationToken, pageNumber, pageSize));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Roles = "Resident,LockerOperator")]
     public async Task<IActionResult> GetParcel(Guid id, CancellationToken cancellationToken) =>
         await ExecuteAsync((userId, role) =>
             parcelService.GetParcelAsync(userId, role, id, cancellationToken));
 
     [HttpGet("{id:guid}/history")]
-    public async Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken) =>
+    [Authorize(Roles = "Resident,LockerOperator")]
+    public async Task<IActionResult> GetHistory(
+        Guid id,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default) =>
         await ExecuteAsync((userId, role) =>
-            parcelService.GetHistoryAsync(userId, role, id, cancellationToken));
+            parcelService.GetHistoryAsync(userId, role, id, cancellationToken, pageNumber, pageSize));
 
     [HttpPost("{id:guid}:openCompartment")]
     [Authorize(Roles = "Resident")]
@@ -48,38 +55,25 @@ public sealed class ParcelsController(IParcelService parcelService) : Controller
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        try
+        PickupUnlockResponse response = await parcelService.OpenCompartmentAsync(
+            userId,
+            id,
+            HttpContext.Connection.RemoteIpAddress?.ToString(),
+            Request.Headers.UserAgent.ToString(),
+            cancellationToken);
+        return response.Result switch
         {
-            PickupUnlockResponse response = await parcelService.OpenCompartmentAsync(
-                userId,
-                id,
-                HttpContext.Connection.RemoteIpAddress?.ToString(),
-                Request.Headers.UserAgent.ToString(),
-                cancellationToken);
-            return response.Result switch
-            {
-                LockerAccessResult.Succeeded => Accepted(response),
-                LockerAccessResult.Blocked => Conflict(response),
-                _ => StatusCode(StatusCodes.Status503ServiceUnavailable, response),
-            };
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
+            LockerAccessResult.Succeeded => Accepted(response),
+            LockerAccessResult.Blocked => Conflict(response),
+            _ => StatusCode(StatusCodes.Status503ServiceUnavailable, response),
+        };
     }
+
+    [HttpPost("{id:guid}:transferToCollectionPoint")]
+    [Authorize(Roles = "Administrator,LockerOperator")]
+    public async Task<IActionResult> TransferToCollectionPoint(Guid id, CancellationToken cancellationToken) =>
+        await ExecuteAsync((userId, role) =>
+            parcelService.TransferOverdueAsync(userId, role, id, cancellationToken));
 
     private async Task<IActionResult> ExecuteAsync<TResponse>(
         Func<Guid, string, Task<TResponse>> action)
@@ -91,21 +85,6 @@ public sealed class ParcelsController(IParcelService parcelService) : Controller
             return Unauthorized(new { message = "Invalid authentication token." });
         }
 
-        try
-        {
-            return Ok(await action(userId, role));
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
+        return Ok(await action(userId, role));
     }
 }

@@ -45,17 +45,6 @@ public sealed class NotificationsController(INotificationService notificationSer
             return Unauthorized(new { message = "Invalid authentication token." });
         }
 
-        try
-        {
-            return Ok(await action(userId));
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
+        return Ok(await action(userId));
     }
 }

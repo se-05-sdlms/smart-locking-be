@@ -10,6 +10,15 @@ namespace smart_locking_be.Infrastructure.Services;
 
 public sealed class LockerService(ApplicationDbContext dbContext) : ILockerService
 {
+    public async Task<IReadOnlyCollection<RegistrationLockerResponse>> GetRegistrationOptionsAsync(
+        CancellationToken cancellationToken = default) =>
+        await dbContext.Lockers
+            .AsNoTracking()
+            .Where(locker => locker.OperationalStatus == LockerOperationalStatus.Operational)
+            .OrderBy(locker => locker.Code)
+            .Select(locker => new RegistrationLockerResponse(locker.Id, locker.Code, locker.Address))
+            .ToListAsync(cancellationToken);
+
     public async Task<PagedResult<LockerSummaryResponse>> GetLockersAsync(
         Guid userId,
         string userRole,
@@ -18,29 +27,9 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         int pageNumber = 1,
         int pageSize = 20)
     {
-        var query = dbContext.Lockers
+        IQueryable<Locker> query = ScopeLockers(userId, userRole)
             .AsNoTracking()
-            .Include(l => l.Compartments)
-            .AsQueryable();
-
-        if (userRole == nameof(UserRole.Administrator))
-        {
-            // Administrator được quyền xem tất cả tủ locker
-        }
-        else if (userRole == nameof(UserRole.LockerOperator))
-        {
-            var assignedLockerIds = await dbContext.OperatorAssignments
-                .AsNoTracking()
-                .Where(a => a.OperatorUserId == userId && a.RevokedAt == null)
-                .Select(a => a.LockerId)
-                .ToListAsync(cancellationToken);
-
-            query = query.Where(l => assignedLockerIds.Contains(l.Id));
-        }
-        else
-        {
-            throw new UnauthorizedAccessException($"Role '{userRole}' không có quyền truy cập danh sách tủ locker.");
-        }
+            .Include(l => l.Compartments);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -76,6 +65,50 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         )).ToList();
 
         return new PagedResult<LockerSummaryResponse>(items, totalCount, pageNumber, pageSize);
+    }
+
+    public async Task<PagedResult<OperationalLockerResponse>> GetOperationalSummaryAsync(
+        Guid userId,
+        string userRole,
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20)
+    {
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        IQueryable<Locker> query = ScopeLockers(userId, userRole).AsNoTracking();
+        int totalCount = await query.CountAsync(cancellationToken);
+        List<OperationalLockerResponse> items = await query
+            .OrderBy(locker => locker.Code)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .Select(locker => new OperationalLockerResponse(
+                locker.Id,
+                locker.Code,
+                locker.Address,
+                locker.OperationalStatus,
+                locker.ConnectionStatus,
+                locker.LastSeenAt,
+                locker.Compartments.Count(compartment =>
+                    compartment.OperationalStatus == LockerCompartmentOperationalStatus.Operational &&
+                    compartment.DoorStatus == DoorStatus.Closed &&
+                    !dbContext.Parcels.Any(parcel =>
+                        parcel.DeliveryRequest.AllocatedCompartmentId == compartment.Id &&
+                        (parcel.Status == ParcelStatus.Stored || parcel.Status == ParcelStatus.Overdue)) &&
+                    !dbContext.ReturnRequests.Any(request =>
+                        request.AllocatedCompartmentId == compartment.Id &&
+                        (request.Status == ReturnRequestStatus.Allocated || request.Status == ReturnRequestStatus.Deposited)) &&
+                    !dbContext.CompartmentReservations.Any(reservation =>
+                        reservation.LockerCompartmentId == compartment.Id &&
+                        reservation.ReleasedAt == null &&
+                        reservation.ExpiresAt > now)),
+                dbContext.Parcels.Count(parcel =>
+                    parcel.DeliveryRequest.LockerId == locker.Id &&
+                    (parcel.Status == ParcelStatus.Stored || parcel.Status == ParcelStatus.Overdue)),
+                locker.Incidents.Count(incident => incident.Status != IncidentStatus.Resolved)))
+            .ToListAsync(cancellationToken);
+        return new PagedResult<OperationalLockerResponse>(items, totalCount, pageNumber, pageSize);
     }
 
     public async Task<LockerDetailResponse> GetLockerByIdAsync(
@@ -193,42 +226,28 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         return MapToDetailResponse(locker);
     }
 
-    public async Task<IReadOnlyCollection<LockerCompartmentResponse>> GetCompartmentsAsync(
+    public async Task<PagedResult<LockerCompartmentResponse>> GetCompartmentsAsync(
         Guid userId,
         string userRole,
         Guid lockerId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20)
     {
-        var locker = await dbContext.Lockers
+        await EnsureAccessAsync(userId, userRole, lockerId, cancellationToken);
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        IQueryable<LockerCompartment> query = dbContext.LockerCompartments
             .AsNoTracking()
-            .Include(l => l.Compartments)
-            .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
-
-        if (userRole == nameof(UserRole.Administrator))
-        {
-            // Administrator được quyền xem tất cả các ngăn tủ
-        }
-        else if (userRole == nameof(UserRole.LockerOperator))
-        {
-            var isAssigned = await dbContext.OperatorAssignments
-                .AsNoTracking()
-                .AnyAsync(a => a.OperatorUserId == userId && a.LockerId == lockerId && a.RevokedAt == null, cancellationToken);
-
-            if (!isAssigned)
-            {
-                throw new UnauthorizedAccessException("Bạn không có quyền truy cập tủ locker này.");
-            }
-        }
-        else
-        {
-            throw new UnauthorizedAccessException($"Role '{userRole}' không có quyền truy cập danh sách ngăn tủ.");
-        }
-
-        return locker.Compartments
+            .Where(compartment => compartment.LockerId == lockerId);
+        int totalCount = await query.CountAsync(cancellationToken);
+        List<LockerCompartmentResponse> items = (await query
             .OrderBy(c => c.Code)
-            .Select(MapCompartmentToResponse)
-            .ToList();
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken))
+            .Select(MapCompartmentToResponse).ToList();
+        return new PagedResult<LockerCompartmentResponse>(items, totalCount, pageNumber, pageSize);
     }
 
     public async Task<LockerCompartmentResponse> CreateCompartmentAsync(
@@ -366,6 +385,17 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
             throw new UnauthorizedAccessException("Bạn không có quyền cập nhật trạng thái tủ locker này.");
         }
     }
+
+    private IQueryable<Locker> ScopeLockers(Guid userId, string userRole) => userRole switch
+    {
+        nameof(UserRole.Administrator) => dbContext.Lockers,
+        nameof(UserRole.LockerOperator) => dbContext.Lockers.Where(locker =>
+            dbContext.OperatorAssignments.Any(assignment =>
+                assignment.OperatorUserId == userId &&
+                assignment.LockerId == locker.Id &&
+                assignment.RevokedAt == null)),
+        _ => throw new UnauthorizedAccessException($"Role '{userRole}' không có quyền truy cập danh sách tủ locker.")
+    };
 
     private void AddStatusEvent(Guid lockerId, Guid? compartmentId, Guid userId, string previous, string next, string reason, DateTimeOffset now) =>
         dbContext.LockerEvents.Add(new LockerEvent

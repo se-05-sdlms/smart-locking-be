@@ -5,10 +5,20 @@ namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface ILockerService
 {
+    Task<IReadOnlyCollection<RegistrationLockerResponse>> GetRegistrationOptionsAsync(
+        CancellationToken cancellationToken = default);
+
     Task<PagedResult<LockerSummaryResponse>> GetLockersAsync(
         Guid userId,
         string userRole,
         string? search = null,
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20);
+
+    Task<PagedResult<OperationalLockerResponse>> GetOperationalSummaryAsync(
+        Guid userId,
+        string userRole,
         CancellationToken cancellationToken = default,
         int pageNumber = 1,
         int pageSize = 20);
@@ -19,7 +29,13 @@ public interface ILockerService
 
     Task<LockerDetailResponse> UpdateLockerAsync(Guid lockerId, UpdateLockerRequest request, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyCollection<LockerCompartmentResponse>> GetCompartmentsAsync(Guid userId, string userRole, Guid lockerId, CancellationToken cancellationToken = default);
+    Task<PagedResult<LockerCompartmentResponse>> GetCompartmentsAsync(
+        Guid userId,
+        string userRole,
+        Guid lockerId,
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20);
 
     Task<LockerCompartmentResponse> CreateCompartmentAsync(Guid lockerId, CreateCompartmentRequest request, CancellationToken cancellationToken = default);
 

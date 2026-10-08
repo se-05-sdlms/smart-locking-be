@@ -1,3 +1,4 @@
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 
 namespace smart_locking_be.Application.Interfaces.Services;
@@ -21,9 +22,11 @@ public interface IDeliveryRequestService
 
     Task<int> ExpireStartedSessionsAsync(CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyCollection<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(
+    Task<PagedResult<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(
         Guid residentUserId,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20);
 
     Task<DeliveryRequestSummaryResponse> ApproveDeliveryRequestAsync(
         Guid residentUserId,

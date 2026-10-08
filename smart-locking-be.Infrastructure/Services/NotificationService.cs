@@ -101,52 +101,6 @@ public sealed class NotificationService(
         return new MarkAllNotificationsReadResponse(notifications.Count);
     }
 
-    public async Task<NotificationRuleResponse> CreateRuleAsync(
-        CreateNotificationRuleRequest request,
-        CancellationToken cancellationToken)
-    {
-        string eventType = request.EventType.Trim();
-        if (eventType.Length is < 1 or > 100)
-        {
-            throw new ArgumentException("Event type must contain between 1 and 100 characters.");
-        }
-        if (!Enum.IsDefined(request.Channel))
-        {
-            throw new ArgumentException("Notification channel is invalid.");
-        }
-        if (request.LeadTimeMinutes < 0)
-        {
-            throw new ArgumentException("Lead time cannot be negative.");
-        }
-        if (!await dbContext.SystemPolicies.AnyAsync(
-            policy => policy.Id == request.SystemPolicyId,
-            cancellationToken))
-        {
-            throw new KeyNotFoundException("System policy not found.");
-        }
-        if (await dbContext.NotificationRules.AnyAsync(rule =>
-            rule.SystemPolicyId == request.SystemPolicyId &&
-            rule.EventType == eventType &&
-            rule.Channel == request.Channel,
-            cancellationToken))
-        {
-            throw new InvalidOperationException("Notification rule already exists.");
-        }
-
-        var rule = new NotificationRule
-        {
-            Id = Guid.NewGuid(),
-            SystemPolicyId = request.SystemPolicyId,
-            EventType = eventType,
-            Channel = request.Channel,
-            LeadTimeMinutes = request.LeadTimeMinutes,
-            IsEnabled = request.IsEnabled
-        };
-        dbContext.NotificationRules.Add(rule);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return ToResponse(rule);
-    }
-
     private static NotificationResponse ToResponse(Notification notification) => new(
         notification.Id,
         notification.Type,
@@ -161,11 +115,4 @@ public sealed class NotificationService(
         notification.ReadAt,
         notification.CreatedAt);
 
-    private static NotificationRuleResponse ToResponse(NotificationRule rule) => new(
-        rule.Id,
-        rule.SystemPolicyId,
-        rule.EventType,
-        rule.Channel,
-        rule.LeadTimeMinutes,
-        rule.IsEnabled);
 }

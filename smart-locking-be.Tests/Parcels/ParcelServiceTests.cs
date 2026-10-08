@@ -133,6 +133,36 @@ public sealed class ParcelServiceTests
         Assert.Equal(ParcelStatus.Stored, result.Last().ToStatus);
     }
 
+    [Fact]
+    public async Task TransferOverdueAsync_WhenEligible_RemovesParcelAndNotifiesResident()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        User resident = CreateUser(UserRole.Resident);
+        User administrator = CreateUser(UserRole.Administrator);
+        Parcel parcel = AddParcelGraph(dbContext, resident, ParcelStatus.Overdue, "P-OVERDUE");
+        parcel.MaxStorageUntil = DateTimeOffset.UtcNow.AddMinutes(-1);
+        dbContext.Users.Add(administrator);
+        await dbContext.SaveChangesAsync();
+        var pushNotifications = new RecordingPushNotificationService();
+        var service = new ParcelService(
+            dbContext,
+            new UnusedLockerAccessService(),
+            pushNotifications,
+            TimeProvider.System);
+
+        OverdueTransferResponse response = await service.TransferOverdueAsync(
+            administrator.Id,
+            nameof(UserRole.Administrator),
+            parcel.Id);
+
+        Assert.Equal(ParcelStatus.Removed, parcel.Status);
+        Assert.Equal("456 Nguyen Van Linh", response.CollectionAddress);
+        Assert.Equal(resident.Id, pushNotifications.ResidentUserId);
+        Assert.True(pushNotifications.WasSent);
+        Assert.Contains(dbContext.AuditLogs, log =>
+            log.EntityId == parcel.Id && log.Action == "Parcel.Transferred");
+    }
+
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -142,12 +172,47 @@ public sealed class ParcelServiceTests
     }
 
     private static ParcelService CreateService(ApplicationDbContext dbContext) =>
-        new(dbContext, new UnusedLockerAccessService());
+        new(dbContext, new UnusedLockerAccessService(), new UnusedPushNotificationService(), TimeProvider.System);
 
     private sealed class UnusedLockerAccessService : ILockerAccessService
     {
         public Task<OpenLockerResponse> OpenAsync(OpenLockerRequest request, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class UnusedPushNotificationService : IPushNotificationService
+    {
+        public Guid EnqueueDeliveryApprovalRequest(Guid residentUserId, Guid deliveryRequestId, string lockerCode) => throw new NotSupportedException();
+        public Guid EnqueueParcelStored(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, string compartmentCode) => throw new NotSupportedException();
+        public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => throw new NotSupportedException();
+        public Guid EnqueueParcelTransferred(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string collectionAddress) => throw new NotSupportedException();
+        public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingPushNotificationService : IPushNotificationService
+    {
+        private readonly Guid notificationId = Guid.NewGuid();
+
+        public Guid? ResidentUserId { get; private set; }
+        public bool WasSent { get; private set; }
+
+        public Guid EnqueueParcelTransferred(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string collectionAddress)
+        {
+            ResidentUserId = residentUserId;
+            return notificationId;
+        }
+
+        public Task TrySendAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            WasSent = id == notificationId;
+            return Task.CompletedTask;
+        }
+
+        public Guid EnqueueDeliveryApprovalRequest(Guid residentUserId, Guid deliveryRequestId, string lockerCode) => throw new NotSupportedException();
+        public Guid EnqueueParcelStored(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, string compartmentCode) => throw new NotSupportedException();
+        public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => throw new NotSupportedException();
+        public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private static User CreateUser(UserRole role) => new()

@@ -22,11 +22,13 @@ public interface IParcelService
         Guid parcelId,
         CancellationToken cancellationToken);
 
-    Task<IReadOnlyCollection<ParcelStatusHistoryResponse>> GetHistoryAsync(
+    Task<PagedResult<ParcelStatusHistoryResponse>> GetHistoryAsync(
         Guid userId,
         string role,
         Guid parcelId,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        int pageNumber = 1,
+        int pageSize = 20);
 
     Task<PickupUnlockResponse> OpenCompartmentAsync(
         Guid residentUserId,
@@ -39,5 +41,11 @@ public interface IParcelService
         Guid parcelId,
         Guid? residentUserId,
         DateTimeOffset completedAt,
+        CancellationToken cancellationToken = default);
+
+    Task<OverdueTransferResponse> TransferOverdueAsync(
+        Guid userId,
+        string role,
+        Guid parcelId,
         CancellationToken cancellationToken = default);
 }

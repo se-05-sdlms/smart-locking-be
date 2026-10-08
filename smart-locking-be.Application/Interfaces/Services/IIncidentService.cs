@@ -1,3 +1,4 @@
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Incidents;
 using smart_locking_be.Domain.Enums;
 
@@ -10,15 +11,19 @@ public interface IIncidentService
         CreateIncidentRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyCollection<IncidentListItemResponse>> GetResidentIncidentsAsync(
+    Task<PagedResult<IncidentListItemResponse>> GetResidentIncidentsAsync(
         Guid residentUserId,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20);
 
-    Task<IReadOnlyCollection<IncidentListItemResponse>> GetOperationalIncidentsAsync(
+    Task<PagedResult<IncidentListItemResponse>> GetOperationalIncidentsAsync(
         Guid userId,
         string role,
         IncidentStatus? status,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20);
 
     Task<IncidentDetailResponse> GetIncidentAsync(
         Guid userId,

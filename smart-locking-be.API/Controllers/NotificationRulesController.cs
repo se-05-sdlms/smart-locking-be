@@ -9,29 +9,14 @@ namespace smart_locking_be.API.Controllers;
 [ApiController]
 [Route("api/notification-rules")]
 [Authorize(Policy = ApiPolicies.Administrator)]
-public sealed class NotificationRulesController(INotificationService notificationService) : ControllerBase
+public sealed class NotificationRulesController(INotificationRuleService service) : ControllerBase
 {
     [HttpPost]
     public async Task<IActionResult> Create(
         CreateNotificationRuleRequest request,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            NotificationRuleResponse response = await notificationService.CreateRuleAsync(request, cancellationToken);
-            return StatusCode(StatusCodes.Status201Created, response);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
-        }
+        NotificationRuleResponse response = await service.CreateAsync(request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, response);
     }
 }

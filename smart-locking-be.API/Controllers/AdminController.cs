@@ -20,23 +20,5 @@ public class AdminController(IAdminService adminService) : ControllerBase
     }
 
     private async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
-    {
-        try
-        {
-            TResponse result = await action();
-            return Ok(result);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-    }
+        => Ok(await action());
 }

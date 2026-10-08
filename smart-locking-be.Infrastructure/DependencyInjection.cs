@@ -41,8 +41,13 @@ public static class DependencyInjection
         services.AddScoped<IIncidentService, IncidentService>();
         services.AddScoped<IReturnRequestService, ReturnRequestService>();
         services.AddScoped<IReturnPickupSessionService, ReturnRequestService>();
-        services.AddScoped<IOperationsService, OperationsService>();
+        services.AddScoped<IEmergencyUnlockService, EmergencyUnlockService>();
+        services.AddScoped<IMaintenanceService, MaintenanceService>();
+        services.AddScoped<IOperationalRecordService, OperationalRecordService>();
+        services.AddScoped<IReportService, ReportService>();
+        services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<INotificationRuleService, NotificationRuleService>();
         services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(new HttpClient { Timeout = TimeSpan.FromSeconds(10) });

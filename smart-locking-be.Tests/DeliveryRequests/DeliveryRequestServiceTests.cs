@@ -559,6 +559,12 @@ public sealed class DeliveryRequestServiceTests
             string title,
             string message) => Guid.NewGuid();
 
+        public Guid EnqueueParcelTransferred(
+            Guid residentUserId,
+            Guid deliveryRequestId,
+            Guid parcelId,
+            string collectionAddress) => Guid.NewGuid();
+
         public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;

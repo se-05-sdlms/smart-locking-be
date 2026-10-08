@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -197,7 +198,7 @@ public sealed class MqttLockerListenerTests
         public Task<DeliveryRequestSummaryResponse> SubmitAsync(Guid id, string guestSessionToken, SubmitDeliveryRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<GuestDeliveryStatusResponse> GetAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<int> ExpireStartedSessionsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<IReadOnlyCollection<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(Guid residentUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<PagedResult<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(Guid residentUserId, CancellationToken cancellationToken = default, int pageNumber = 1, int pageSize = 20) => throw new NotSupportedException();
         public Task<DeliveryRequestSummaryResponse> ApproveDeliveryRequestAsync(Guid residentUserId, Guid requestId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<DeliveryRequestSummaryResponse> RejectDeliveryRequestAsync(Guid residentUserId, Guid requestId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<int> ExpirePendingApprovalsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();

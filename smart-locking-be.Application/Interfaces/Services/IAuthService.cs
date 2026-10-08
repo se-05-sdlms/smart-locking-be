@@ -4,9 +4,6 @@ namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface IAuthService
 {
-    Task<IReadOnlyCollection<RegistrationLockerResponse>> GetRegistrationLockersAsync(
-        CancellationToken cancellationToken);
-
     Task<AuthTokenResponse> RegisterAsync(RegisterRequest request, string? ipAddress, CancellationToken cancellationToken);
 
     Task RequestRegistrationOtpAsync(RequestRegistrationOtpRequest request, CancellationToken cancellationToken);

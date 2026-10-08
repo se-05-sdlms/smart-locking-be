@@ -29,11 +29,13 @@ public sealed class IncidentsController(IIncidentService incidentService) : Cont
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] IncidentStatus? status,
-        CancellationToken cancellationToken) =>
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default) =>
         await ExecuteAsync(async (userId, role) => Ok(
             role == nameof(UserRole.Resident)
-                ? await incidentService.GetResidentIncidentsAsync(userId, cancellationToken)
-                : await incidentService.GetOperationalIncidentsAsync(userId, role, status, cancellationToken)));
+                ? await incidentService.GetResidentIncidentsAsync(userId, cancellationToken, pageNumber, pageSize)
+                : await incidentService.GetOperationalIncidentsAsync(userId, role, status, cancellationToken, pageNumber, pageSize)));
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken) =>
@@ -67,25 +69,6 @@ public sealed class IncidentsController(IIncidentService incidentService) : Cont
             return Unauthorized(new { message = "Invalid authentication token." });
         }
 
-        try
-        {
-            return await action(userId, User.FindFirstValue(ClaimTypes.Role)!);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
-        }
+        return await action(userId, User.FindFirstValue(ClaimTypes.Role)!);
     }
 }

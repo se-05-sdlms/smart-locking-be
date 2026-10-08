@@ -99,19 +99,8 @@ public class UsersController(IUserService userService) : ControllerBase
             return Unauthorized(new { message = "Không xác định được danh tính quản trị viên." });
         }
 
-        try
-        {
-            await userService.RevokeOperatorScopeAsync(adminId, id, assignmentId, reason, GetIpAddress(), cancellationToken);
-            return NoContent();
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
+        await userService.RevokeOperatorScopeAsync(adminId, id, assignmentId, reason, GetIpAddress(), cancellationToken);
+        return NoContent();
     }
 
     private bool TryGetUserId(out Guid userId)
@@ -127,27 +116,7 @@ public class UsersController(IUserService userService) : ControllerBase
         Func<Task<TResponse>> action,
         int statusCode = StatusCodes.Status200OK)
     {
-        try
-        {
-            TResponse result = await action();
-            return StatusCode(statusCode, result);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            if (exception.Message.Contains("đã được sử dụng", StringComparison.OrdinalIgnoreCase))
-            {
-                return Conflict(new { message = exception.Message });
-            }
-
-            return BadRequest(new { message = exception.Message });
-        }
+        TResponse result = await action();
+        return StatusCode(statusCode, result);
     }
 }

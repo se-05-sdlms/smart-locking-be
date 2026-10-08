@@ -21,8 +21,4 @@ public interface INotificationService
     Task<MarkAllNotificationsReadResponse> MarkAllReadAsync(
         Guid userId,
         CancellationToken cancellationToken);
-
-    Task<NotificationRuleResponse> CreateRuleAsync(
-        CreateNotificationRuleRequest request,
-        CancellationToken cancellationToken);
 }

@@ -17,10 +17,6 @@ public sealed class ReturnsController(IReturnRequestService service) : Controlle
     private async Task<IActionResult> Execute<T>(Func<Guid, Task<T>> action, int statusCode = StatusCodes.Status200OK)
     {
         if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId)) return Unauthorized();
-        try { return StatusCode(statusCode, await action(userId)); }
-        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
-        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
-        catch (TimeoutException ex) { return StatusCode(410, new { message = ex.Message }); }
-        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        return StatusCode(statusCode, await action(userId));
     }
 }

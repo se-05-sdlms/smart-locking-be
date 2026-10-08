@@ -64,6 +64,8 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> GetPendingRequests(
         [FromQuery] string status = "pending",
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
         if (!string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase))
@@ -75,7 +77,8 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => deliveryRequestService.GetPendingRequestsForResidentAsync(userId, cancellationToken));
+        return await ExecuteAsync(() => deliveryRequestService.GetPendingRequestsForResidentAsync(
+            userId, cancellationToken, pageNumber, pageSize));
     }
 
     [HttpPost("{id:guid}:approve")]
@@ -128,30 +131,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
 
     private async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
     {
-        try
-        {
-            TResponse result = await action();
-            return result is IActionResult actionResult ? actionResult : Ok(result);
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return Unauthorized(new { message = exception.Message });
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (TimeoutException exception)
-        {
-            return StatusCode(StatusCodes.Status410Gone, new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
-        }
+        TResponse result = await action();
+        return result is IActionResult actionResult ? actionResult : Ok(result);
     }
 }

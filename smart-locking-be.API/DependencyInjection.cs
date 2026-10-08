@@ -17,6 +17,8 @@ public static class DependencyInjection
     {
         // 1. Controllers & API Behavior
         services.AddControllers();
+        services.AddProblemDetails();
+        services.AddExceptionHandler<ApiExceptionHandler>();
         services.AddScoped<IImageStorageService, LocalImageStorageService>();
 
         // 2. CORS Policy Configuration
@@ -69,6 +71,8 @@ public static class DependencyInjection
 
         // 2. Log request bằng Serilog
         app.UseSerilogRequestLogging();
+
+        app.UseExceptionHandler();
 
         app.UseStaticFiles();
 

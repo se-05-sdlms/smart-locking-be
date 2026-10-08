@@ -31,12 +31,5 @@ public sealed class ReturnPickupSessionsController(IReturnPickupSessionService s
     }
 
     private static async Task<IActionResult> Execute<T>(Func<Task<T>> action, int statusCode = StatusCodes.Status200OK)
-    {
-        try { return new ObjectResult(await action()) { StatusCode = statusCode }; }
-        catch (ArgumentException ex) { return new BadRequestObjectResult(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return new UnauthorizedObjectResult(new { message = ex.Message }); }
-        catch (KeyNotFoundException ex) { return new NotFoundObjectResult(new { message = ex.Message }); }
-        catch (TimeoutException ex) { return new ObjectResult(new { message = ex.Message }) { StatusCode = 410 }; }
-        catch (InvalidOperationException ex) { return new ConflictObjectResult(new { message = ex.Message }); }
-    }
+        => new ObjectResult(await action()) { StatusCode = statusCode };
 }
