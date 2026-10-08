@@ -1,30 +1,25 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.API.Authorization;
-using smart_locking_be.Application.DTOs.Dashboards;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
 
 namespace smart_locking_be.API.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/notification-rules")]
 [Authorize(Policy = ApiPolicies.Administrator)]
-public class AdminController(IAdminService adminService) : ControllerBase
+public sealed class NotificationRulesController(INotificationService notificationService) : ControllerBase
 {
-    [HttpGet("dashboard")]
-    public async Task<IActionResult> GetDashboard(
-        [FromQuery] GetDashboardOverviewRequest? request,
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        CreateNotificationRuleRequest request,
         CancellationToken cancellationToken)
-    {
-        return await ExecuteAsync(() => adminService.GetDashboardOverviewAsync(request, cancellationToken));
-    }
-
-    private async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
     {
         try
         {
-            TResponse result = await action();
-            return Ok(result);
+            NotificationRuleResponse response = await notificationService.CreateRuleAsync(request, cancellationToken);
+            return StatusCode(StatusCodes.Status201Created, response);
         }
         catch (KeyNotFoundException exception)
         {
@@ -36,7 +31,7 @@ public class AdminController(IAdminService adminService) : ControllerBase
         }
         catch (InvalidOperationException exception)
         {
-            return BadRequest(new { message = exception.Message });
+            return Conflict(new { message = exception.Message });
         }
     }
 }

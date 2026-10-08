@@ -192,6 +192,26 @@ public sealed class UserServiceTests
     }
 
     [Fact]
+    public async Task CreateUserAsync_WhenRoleIsNotOperator_ThrowsArgumentException()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var request = new CreateUserRequest(
+                "Resident",
+                "resident.new@boxora.com",
+                null,
+                UserRole.Resident,
+                null,
+                null,
+                null);
+
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                service.CreateUserAsync(Guid.NewGuid(), request));
+        }
+    }
+
+    [Fact]
     public async Task UpdateUserAsync_UpdatesProfileAndContactInfo()
     {
         var (service, dbContext) = CreateTestService();
@@ -204,7 +224,7 @@ public sealed class UserServiceTests
                 Id = userId,
                 Email = "old@boxora.com",
                 PhoneNumber = "0900000001",
-                Role = UserRole.Resident,
+                Role = UserRole.LockerOperator,
                 Status = UserStatus.Active
             };
             var profile = new ResidentProfile
@@ -226,6 +246,29 @@ public sealed class UserServiceTests
 
             var auditLog = await dbContext.AuditLogs.FirstOrDefaultAsync(l => l.EntityId == userId && l.Action == "UpdateUser");
             Assert.NotNull(auditLog);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateUserAsync_WhenResident_RejectsAdminProfileEdit()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var resident = new User
+            {
+                Id = Guid.NewGuid(),
+                Email = "resident@boxora.com",
+                Role = UserRole.Resident,
+                Status = UserStatus.Active
+            };
+            dbContext.Users.Add(resident);
+            await dbContext.SaveChangesAsync();
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.UpdateUserAsync(
+                Guid.NewGuid(),
+                resident.Id,
+                new UpdateUserRequest("Changed", null, "changed@boxora.com")));
         }
     }
 

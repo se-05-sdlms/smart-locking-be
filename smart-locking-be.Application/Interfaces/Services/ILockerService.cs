@@ -1,10 +1,17 @@
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Lockers;
 
 namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface ILockerService
 {
-    Task<IReadOnlyCollection<LockerSummaryResponse>> GetLockersAsync(Guid userId, string userRole, string? search = null, CancellationToken cancellationToken = default);
+    Task<PagedResult<LockerSummaryResponse>> GetLockersAsync(
+        Guid userId,
+        string userRole,
+        string? search = null,
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20);
 
     Task<LockerDetailResponse> GetLockerByIdAsync(Guid userId, string userRole, Guid lockerId, CancellationToken cancellationToken = default);
 

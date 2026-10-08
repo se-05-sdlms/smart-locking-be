@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.Interfaces.Services;
@@ -12,14 +13,16 @@ public sealed class ParcelService(
     ApplicationDbContext dbContext,
     ILockerAccessService lockerAccessService) : IParcelService
 {
-    public async Task<IReadOnlyCollection<ParcelListItemResponse>> GetParcelsAsync(
+    public async Task<PagedResult<ParcelListItemResponse>> GetParcelsAsync(
         Guid userId,
         string role,
         ParcelListView view,
         string? search,
         DateTimeOffset? from,
         DateTimeOffset? to,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int pageNumber = 1,
+        int pageSize = 20)
     {
         if (from.HasValue && to.HasValue && from > to)
         {
@@ -55,8 +58,13 @@ public sealed class ParcelService(
             query = query.Where(parcel => parcel.StoredAt <= to.Value);
         }
 
-        return await query
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        int totalCount = await query.CountAsync(cancellationToken);
+        List<ParcelListItemResponse> items = await query
             .OrderByDescending(parcel => parcel.StoredAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
             .Select(parcel => new ParcelListItemResponse(
                 parcel.Id,
                 parcel.ParcelCode,
@@ -75,6 +83,8 @@ public sealed class ParcelService(
                 parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Currency,
                 parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Status))
             .ToListAsync(cancellationToken);
+
+        return new PagedResult<ParcelListItemResponse>(items, totalCount, pageNumber, pageSize);
     }
 
     public async Task<ParcelDetailResponse> GetParcelAsync(

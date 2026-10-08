@@ -21,10 +21,12 @@ public sealed class DeviceInstallationServiceTests
 
         await service.RegisterAsync(
             resident.Id,
-            new RegisterDeviceInstallationRequest("phone-1", "ExpoPushToken[token-1]", "android"));
+            "phone-1",
+            new RegisterDeviceInstallationRequest("ExpoPushToken[token-1]", "android"));
         await service.RegisterAsync(
             resident.Id,
-            new RegisterDeviceInstallationRequest("phone-2", "ExpoPushToken[token-2]", "Android"));
+            "phone-2",
+            new RegisterDeviceInstallationRequest("ExpoPushToken[token-2]", "Android"));
 
         Assert.Equal(2, await dbContext.DeviceInstallations.CountAsync());
         Assert.All(dbContext.DeviceInstallations, device => Assert.True(device.IsActive));
@@ -39,10 +41,12 @@ public sealed class DeviceInstallationServiceTests
 
         await service.RegisterAsync(
             resident.Id,
-            new RegisterDeviceInstallationRequest("phone-1", "ExpoPushToken[old-token]", "Android"));
+            "phone-1",
+            new RegisterDeviceInstallationRequest("ExpoPushToken[old-token]", "Android"));
         await service.RegisterAsync(
             resident.Id,
-            new RegisterDeviceInstallationRequest("phone-1", "ExpoPushToken[new-token]", "Android"));
+            "phone-1",
+            new RegisterDeviceInstallationRequest("ExpoPushToken[new-token]", "Android"));
 
         DeviceInstallation installation = await dbContext.DeviceInstallations.SingleAsync();
         Assert.Equal("ExpoPushToken[new-token]", installation.ExpoPushToken);
@@ -56,7 +60,8 @@ public sealed class DeviceInstallationServiceTests
         var service = new DeviceInstallationService(dbContext);
         await service.RegisterAsync(
             resident.Id,
-            new RegisterDeviceInstallationRequest("phone-1", "ExpoPushToken[token-1]", "Android"));
+            "phone-1",
+            new RegisterDeviceInstallationRequest("ExpoPushToken[token-1]", "Android"));
 
         await service.DeactivateAsync(resident.Id, "phone-1");
 

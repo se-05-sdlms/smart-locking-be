@@ -16,10 +16,11 @@ public sealed class NotificationsController(INotificationService notificationSer
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> GetNotifications(
         [FromQuery] bool unreadOnly = false,
-        [FromQuery] int limit = 50,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default) =>
         await ExecuteForCurrentUserAsync(userId =>
-            notificationService.GetForUserAsync(userId, unreadOnly, limit, cancellationToken));
+            notificationService.GetForUserAsync(userId, unreadOnly, pageSize, cancellationToken, pageNumber));
 
     [HttpPatch("{id:guid}")]
     [Authorize(Policy = ApiPolicies.Resident)]
@@ -35,31 +36,6 @@ public sealed class NotificationsController(INotificationService notificationSer
     public async Task<IActionResult> MarkAllRead(CancellationToken cancellationToken) =>
         await ExecuteForCurrentUserAsync(userId =>
             notificationService.MarkAllReadAsync(userId, cancellationToken));
-
-    [HttpPost("rules")]
-    [Authorize(Policy = ApiPolicies.Administrator)]
-    public async Task<IActionResult> CreateRule(
-        CreateNotificationRuleRequest request,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            NotificationRuleResponse response = await notificationService.CreateRuleAsync(request, cancellationToken);
-            return StatusCode(StatusCodes.Status201Created, response);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
-        }
-    }
 
     private async Task<IActionResult> ExecuteForCurrentUserAsync<TResponse>(
         Func<Guid, Task<TResponse>> action)

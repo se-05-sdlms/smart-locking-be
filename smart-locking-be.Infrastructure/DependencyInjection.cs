@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using smart_locking_be.Application.Interfaces;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Infrastructure.Auth;
 using smart_locking_be.Infrastructure.Persistence;
@@ -24,8 +23,7 @@ public static class DependencyInjection
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(connectionString));
 
-        // 2. Đăng ký Service mẫu (Interface ở Application, Implementation ở Infrastructure tiêm DbContext trực tiếp)
-        services.AddScoped<IService, Service>();
+        // 2. Đăng ký các application service.
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IOtpService, OtpService>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();

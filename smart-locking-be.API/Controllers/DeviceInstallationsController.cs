@@ -12,8 +12,9 @@ namespace smart_locking_be.API.Controllers;
 [Authorize(Policy = ApiPolicies.Resident)]
 public sealed class DeviceInstallationsController(IDeviceInstallationService deviceInstallationService) : ControllerBase
 {
-    [HttpPut]
+    [HttpPut("{installationId}")]
     public async Task<IActionResult> Register(
+        string installationId,
         [FromBody] RegisterDeviceInstallationRequest request,
         CancellationToken cancellationToken)
     {
@@ -22,7 +23,7 @@ public sealed class DeviceInstallationsController(IDeviceInstallationService dev
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => deviceInstallationService.RegisterAsync(userId, request, cancellationToken));
+        return await ExecuteAsync(() => deviceInstallationService.RegisterAsync(userId, installationId, request, cancellationToken));
     }
 
     [HttpDelete("{installationId}")]

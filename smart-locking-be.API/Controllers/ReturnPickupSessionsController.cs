@@ -12,7 +12,7 @@ public sealed class ReturnPickupSessionsController(IReturnPickupSessionService s
 
     [HttpPost]
     public Task<IActionResult> Create(ValidateReturnPickupRequest request, CancellationToken ct) =>
-        Execute(() => service.CreateAsync(request, ct));
+        Execute(() => service.CreateAsync(request, ct), StatusCodes.Status201Created);
 
     [HttpGet("{id:guid}")]
     public Task<IActionResult> Get(Guid id, CancellationToken ct) =>
@@ -30,9 +30,9 @@ public sealed class ReturnPickupSessionsController(IReturnPickupSessionService s
             : Execute(() => action(token));
     }
 
-    private static async Task<IActionResult> Execute<T>(Func<Task<T>> action)
+    private static async Task<IActionResult> Execute<T>(Func<Task<T>> action, int statusCode = StatusCodes.Status200OK)
     {
-        try { return new OkObjectResult(await action()); }
+        try { return new ObjectResult(await action()) { StatusCode = statusCode }; }
         catch (ArgumentException ex) { return new BadRequestObjectResult(new { message = ex.Message }); }
         catch (UnauthorizedAccessException ex) { return new UnauthorizedObjectResult(new { message = ex.Message }); }
         catch (KeyNotFoundException ex) { return new NotFoundObjectResult(new { message = ex.Message }); }

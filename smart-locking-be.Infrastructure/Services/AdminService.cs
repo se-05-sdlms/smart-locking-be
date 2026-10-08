@@ -85,6 +85,21 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
             .Select(p => p.DeliveryRequest!.AllocatedCompartmentId!.Value)
             .ToHashSet();
 
+        var activeReturnCompartmentIds = await dbContext.ReturnRequests
+            .AsNoTracking()
+            .Where(r => r.AllocatedCompartmentId.HasValue &&
+                (r.Status == ReturnRequestStatus.Allocated || r.Status == ReturnRequestStatus.Deposited))
+            .Select(r => r.AllocatedCompartmentId!.Value)
+            .ToListAsync(cancellationToken);
+        occupiedCompartmentIds.UnionWith(activeReturnCompartmentIds);
+
+        var reservedCompartmentIds = await dbContext.CompartmentReservations
+            .AsNoTracking()
+            .Where(r => r.ReleasedAt == null && r.ExpiresAt > now)
+            .Select(r => r.LockerCompartmentId)
+            .ToListAsync(cancellationToken);
+        occupiedCompartmentIds.UnionWith(reservedCompartmentIds);
+
         var overdueCompartmentIds = activeParcels
             .Where(p => p.Status == ParcelStatus.Overdue && p.DeliveryRequest != null && p.DeliveryRequest.AllocatedCompartmentId.HasValue)
             .Select(p => p.DeliveryRequest!.AllocatedCompartmentId!.Value)
@@ -100,7 +115,9 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
         int overdueCompartments = compartments.Count(c => overdueCompartmentIds.Contains(c.Id));
         int occupiedCompartments = compartments.Count(c => occupiedCompartmentIds.Contains(c.Id) && !overdueCompartmentIds.Contains(c.Id));
         int availableCompartments = compartments.Count(c =>
-            c.OperationalStatus == LockerCompartmentOperationalStatus.Operational && !occupiedCompartmentIds.Contains(c.Id));
+            c.OperationalStatus == LockerCompartmentOperationalStatus.Operational &&
+            c.DoorStatus == DoorStatus.Closed &&
+            !occupiedCompartmentIds.Contains(c.Id));
 
         int storedParcelsCount = activeParcels.Count;
         int overdueParcelsCount = activeParcels.Count(p => p.Status == ParcelStatus.Overdue);
@@ -224,80 +241,4 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
         );
     }
 
-    public async Task<SystemStatisticsResponse> GetSystemStatisticsAsync(
-        GetSystemStatisticsRequest? request = null,
-        CancellationToken cancellationToken = default)
-    {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        DateTimeOffset todayStart = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, TimeSpan.Zero);
-
-        int overdueDays = request?.OverdueFeeDays is > 0 and <= 365 ? request.OverdueFeeDays : 30;
-        DateTimeOffset overdueChargesStartDate = now.AddDays(-overdueDays);
-
-        int totalUsers = await dbContext.Users.CountAsync(cancellationToken);
-        int residentCount = await dbContext.Users.CountAsync(u => u.Role == UserRole.Resident, cancellationToken);
-        int operatorCount = await dbContext.Users.CountAsync(u => u.Role == UserRole.LockerOperator, cancellationToken);
-
-        int totalLockers = await dbContext.Lockers.CountAsync(cancellationToken);
-        int activeLockers = await dbContext.Lockers.CountAsync(l => l.OperationalStatus == LockerOperationalStatus.Operational, cancellationToken);
-        int offlineLockers = await dbContext.Lockers.CountAsync(l => l.ConnectionStatus == LockerConnectionStatus.Offline, cancellationToken);
-
-        int totalCompartments = await dbContext.LockerCompartments.CountAsync(cancellationToken);
-
-        var activeParcels = await dbContext.Parcels
-            .AsNoTracking()
-            .Include(p => p.DeliveryRequest)
-            .Where(p => p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue)
-            .ToListAsync(cancellationToken);
-
-        int storedParcelsCount = activeParcels.Count;
-        int overdueParcelsCount = activeParcels.Count(p => p.Status == ParcelStatus.Overdue);
-
-        var occupiedCompartmentIds = activeParcels
-            .Where(p => p.DeliveryRequest != null && p.DeliveryRequest.AllocatedCompartmentId.HasValue)
-            .Select(p => p.DeliveryRequest!.AllocatedCompartmentId!.Value)
-            .ToHashSet();
-
-        int occupiedCompartments = occupiedCompartmentIds.Count;
-        int availableCompartments = await dbContext.LockerCompartments
-            .CountAsync(c => c.OperationalStatus == LockerCompartmentOperationalStatus.Operational && !occupiedCompartmentIds.Contains(c.Id), cancellationToken);
-
-        int newParcelsTodayCount = await dbContext.Parcels
-            .AsNoTracking()
-            .CountAsync(p => p.StoredAt >= todayStart, cancellationToken);
-
-        decimal totalOverdueFeeAmount = await dbContext.OverdueCharges
-            .AsNoTracking()
-            .Where(c => c.CreatedAt >= overdueChargesStartDate)
-            .SumAsync(c => (decimal?)c.Amount, cancellationToken) ?? 0m;
-
-        int openIncidentsCount = await dbContext.Incidents
-            .AsNoTracking()
-            .CountAsync(i =>
-                i.Status == IncidentStatus.Open ||
-                i.Status == IncidentStatus.Investigating ||
-                i.Status == IncidentStatus.Escalated, cancellationToken);
-
-        int highPriorityIncidentsCount = await dbContext.Incidents
-            .AsNoTracking()
-            .CountAsync(i => i.Status == IncidentStatus.Escalated, cancellationToken);
-
-        return new SystemStatisticsResponse(
-            TotalLockers: totalLockers,
-            ActiveLockers: activeLockers,
-            TotalCompartments: totalCompartments,
-            AvailableCompartments: availableCompartments,
-            OccupiedCompartments: occupiedCompartments,
-            TotalUsers: totalUsers,
-            ResidentCount: residentCount,
-            OperatorCount: operatorCount,
-            StoredParcelsCount: storedParcelsCount,
-            NewParcelsTodayCount: newParcelsTodayCount,
-            OverdueParcelsCount: overdueParcelsCount,
-            OfflineLockersCount: offlineLockers,
-            OpenIncidentsCount: openIncidentsCount,
-            HighPriorityIncidentsCount: highPriorityIncidentsCount,
-            TotalOverdueFeeAmountLast30Days: totalOverdueFeeAmount
-        );
-    }
 }

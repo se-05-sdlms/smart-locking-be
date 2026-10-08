@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -9,11 +10,13 @@ namespace smart_locking_be.Infrastructure.Services;
 
 public sealed class LockerService(ApplicationDbContext dbContext) : ILockerService
 {
-    public async Task<IReadOnlyCollection<LockerSummaryResponse>> GetLockersAsync(
+    public async Task<PagedResult<LockerSummaryResponse>> GetLockersAsync(
         Guid userId,
         string userRole,
         string? search = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20)
     {
         var query = dbContext.Lockers
             .AsNoTracking()
@@ -48,11 +51,16 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
                 l.DeviceIdentifier.ToLower().Contains(term));
         }
 
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        int totalCount = await query.CountAsync(cancellationToken);
         var lockers = await query
             .OrderByDescending(l => l.CreatedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        return lockers.Select(l => new LockerSummaryResponse(
+        List<LockerSummaryResponse> items = lockers.Select(l => new LockerSummaryResponse(
             l.Id,
             l.Code,
             l.Address,
@@ -66,6 +74,8 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
             l.CreatedAt,
             l.UpdatedAt
         )).ToList();
+
+        return new PagedResult<LockerSummaryResponse>(items, totalCount, pageNumber, pageSize);
     }
 
     public async Task<LockerDetailResponse> GetLockerByIdAsync(
@@ -149,11 +159,6 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         UpdateLockerRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (!Enum.IsDefined(request.OperationalStatus))
-        {
-            throw new ArgumentException($"Trạng thái vận hành tủ locker '{request.OperationalStatus}' không hợp lệ.", nameof(request.OperationalStatus));
-        }
-
         var (code, address, recoveryAddress, deviceIdentifier) = ValidateAndTrimLockerInput(
             request.Code, request.Address, request.RecoveryAddress, request.DeviceIdentifier);
 
@@ -181,7 +186,6 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         locker.Address = address;
         locker.RecoveryAddress = recoveryAddress;
         locker.DeviceIdentifier = deviceIdentifier;
-        locker.OperationalStatus = request.OperationalStatus;
         locker.UpdatedAt = now;
 
         await dbContext.SaveChangesAsync(cancellationToken);

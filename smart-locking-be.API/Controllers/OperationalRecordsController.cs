@@ -9,10 +9,10 @@ namespace smart_locking_be.API.Controllers;
 public sealed class OperationalRecordsController(IOperationsService service) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> Get([FromQuery] string? query, [FromQuery] Guid? lockerId, CancellationToken ct)
+    public async Task<IActionResult> Get([FromQuery] string? query, [FromQuery] Guid? lockerId, [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
     {
         if (!TryGetIdentity(out Guid userId, out string role)) return Unauthorized();
-        try { return Ok(await service.SearchAsync(userId, role, query, lockerId, ct)); }
+        try { return Ok(await service.SearchAsync(userId, role, query, lockerId, ct, pageNumber, pageSize)); }
         catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
     }
 

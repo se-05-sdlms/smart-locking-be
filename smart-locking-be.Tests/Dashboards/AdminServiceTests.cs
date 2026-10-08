@@ -102,7 +102,8 @@ public sealed class AdminServiceTests
             Id = Guid.NewGuid(),
             LockerId = l1.Id,
             Code = "A01",
-            OperationalStatus = LockerCompartmentOperationalStatus.Operational
+            OperationalStatus = LockerCompartmentOperationalStatus.Operational,
+            DoorStatus = DoorStatus.Closed
         };
         var cOccupied = new LockerCompartment
         {
@@ -386,7 +387,7 @@ public sealed class AdminServiceTests
     }
 
     [Fact]
-    public async Task GetSystemStatisticsAsync_ReturnsCorrectStatisticsDirectly()
+    public async Task GetDashboardOverviewAsync_ReturnsStatistics()
     {
         await using var dbContext = CreateInMemoryDbContext();
         var service = new AdminService(dbContext);
@@ -411,7 +412,8 @@ public sealed class AdminServiceTests
             Id = Guid.NewGuid(),
             LockerId = locker.Id,
             Code = "C01",
-            OperationalStatus = LockerCompartmentOperationalStatus.Operational
+            OperationalStatus = LockerCompartmentOperationalStatus.Operational,
+            DoorStatus = DoorStatus.Closed
         };
         dbContext.LockerCompartments.Add(compartment);
 
@@ -424,7 +426,7 @@ public sealed class AdminServiceTests
 
         await dbContext.SaveChangesAsync();
 
-        var stats = await service.GetSystemStatisticsAsync();
+        var stats = (await service.GetDashboardOverviewAsync()).Statistics;
 
         Assert.NotNull(stats);
         Assert.Equal(2, stats.TotalUsers);

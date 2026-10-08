@@ -47,7 +47,8 @@ public sealed class IncidentsController(IIncidentService incidentService) : Cont
         [FromBody] AddIncidentActionRequest request,
         CancellationToken cancellationToken) =>
         await ExecuteAsync(async (userId, role) =>
-            Ok(await incidentService.AddActionAsync(userId, role, id, request, cancellationToken)));
+            StatusCode(StatusCodes.Status201Created,
+                await incidentService.AddActionAsync(userId, role, id, request, cancellationToken)));
 
     [HttpPatch("{id:guid}/status")]
     [Authorize(Roles = "LockerOperator,Administrator")]

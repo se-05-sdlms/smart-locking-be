@@ -114,15 +114,14 @@ public sealed class LockerServiceTests
             Code: "LCK-001-UPD",
             Address: "New Addr",
             RecoveryAddress: "New Rec",
-            DeviceIdentifier: "DEV-001-UPD",
-            OperationalStatus: LockerOperationalStatus.OutOfService
+            DeviceIdentifier: "DEV-001-UPD"
         );
 
         var updated = await service.UpdateLockerAsync(created.Id, updateRequest);
 
         Assert.Equal("LCK-001-UPD", updated.Code);
         Assert.Equal("New Addr", updated.Address);
-        Assert.Equal(LockerOperationalStatus.OutOfService, updated.OperationalStatus);
+        Assert.Equal(LockerOperationalStatus.Operational, updated.OperationalStatus);
     }
 
     [Fact]
@@ -341,19 +340,6 @@ public sealed class LockerServiceTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A02", "HW-02", 1)));
-    }
-
-    [Fact]
-    public async Task UpdateLockerAsync_WithInvalidEnumStatus_ThrowsArgumentException()
-    {
-        await using var dbContext = CreateInMemoryDbContext();
-        var service = new LockerService(dbContext);
-        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-001", "Addr 1", "Rec 1", "DEV-001"));
-
-        var invalidStatusRequest = new UpdateLockerRequest("LCK-001", "Addr 1", "Rec 1", "DEV-001", (LockerOperationalStatus)999);
-
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            service.UpdateLockerAsync(locker.Id, invalidStatusRequest));
     }
 
     [Fact]

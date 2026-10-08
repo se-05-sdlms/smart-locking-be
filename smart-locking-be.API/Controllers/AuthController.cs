@@ -13,18 +13,13 @@ namespace smart_locking_be.API.Controllers;
 [EnableRateLimiting(RateLimitPolicyNames.Auth)]
 public sealed class AuthController(IAuthService authService) : ControllerBase
 {
-    [HttpGet("registration-lockers")]
-    [AllowAnonymous]
-    public async Task<IActionResult> GetRegistrationLockers(CancellationToken cancellationToken) =>
-        Ok(await authService.GetRegistrationLockersAsync(cancellationToken));
-
     [HttpPost("register")]
     [AllowAnonymous]
     public async Task<IActionResult> Register(RegisterRequest request, CancellationToken cancellationToken)
     {
         try
         {
-            return Ok(await authService.RegisterAsync(request, GetIpAddress(), cancellationToken));
+            return StatusCode(StatusCodes.Status201Created, await authService.RegisterAsync(request, GetIpAddress(), cancellationToken));
         }
         catch (ArgumentException exception)
         {

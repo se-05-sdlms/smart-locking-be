@@ -38,10 +38,12 @@ public class UsersController(IUserService userService) : ControllerBase
             return Unauthorized(new { message = "Không xác định được danh tính quản trị viên." });
         }
 
-        return await ExecuteAsync(() => userService.CreateUserAsync(adminId, request, GetIpAddress(), cancellationToken));
+        return await ExecuteAsync(
+            () => userService.CreateUserAsync(adminId, request, GetIpAddress(), cancellationToken),
+            StatusCodes.Status201Created);
     }
 
-    [HttpPut("{id:guid}")]
+    [HttpPatch("{id:guid}")]
     public async Task<IActionResult> UpdateUser(
         Guid id,
         [FromBody] UpdateUserRequest request,
@@ -55,7 +57,7 @@ public class UsersController(IUserService userService) : ControllerBase
         return await ExecuteAsync(() => userService.UpdateUserAsync(adminId, id, request, GetIpAddress(), cancellationToken));
     }
 
-    [HttpPut("{id:guid}/status")]
+    [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateUserStatus(
         Guid id,
         [FromBody] UpdateUserStatusRequest request,
@@ -80,7 +82,9 @@ public class UsersController(IUserService userService) : ControllerBase
             return Unauthorized(new { message = "Không xác định được danh tính quản trị viên." });
         }
 
-        return await ExecuteAsync(() => userService.AssignOperatorScopeAsync(adminId, id, request, GetIpAddress(), cancellationToken));
+        return await ExecuteAsync(
+            () => userService.AssignOperatorScopeAsync(adminId, id, request, GetIpAddress(), cancellationToken),
+            StatusCodes.Status201Created);
     }
 
     [HttpDelete("{id:guid}/assignments/{assignmentId:guid}")]
@@ -119,12 +123,14 @@ public class UsersController(IUserService userService) : ControllerBase
     private string? GetIpAddress() =>
         HttpContext.Connection.RemoteIpAddress?.ToString();
 
-    private async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
+    private async Task<IActionResult> ExecuteAsync<TResponse>(
+        Func<Task<TResponse>> action,
+        int statusCode = StatusCodes.Status200OK)
     {
         try
         {
             TResponse result = await action();
-            return Ok(result);
+            return StatusCode(statusCode, result);
         }
         catch (KeyNotFoundException exception)
         {

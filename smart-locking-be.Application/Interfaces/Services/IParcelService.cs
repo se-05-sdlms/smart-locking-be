@@ -1,17 +1,20 @@
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Parcels;
 
 namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface IParcelService
 {
-    Task<IReadOnlyCollection<ParcelListItemResponse>> GetParcelsAsync(
+    Task<PagedResult<ParcelListItemResponse>> GetParcelsAsync(
         Guid userId,
         string role,
         ParcelListView view,
         string? search,
         DateTimeOffset? from,
         DateTimeOffset? to,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        int pageNumber = 1,
+        int pageSize = 20);
 
     Task<ParcelDetailResponse> GetParcelAsync(
         Guid userId,

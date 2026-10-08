@@ -21,9 +21,11 @@ public sealed class ParcelsController(IParcelService parcelService) : Controller
         [FromQuery] string? search = null,
         [FromQuery] DateTimeOffset? from = null,
         [FromQuery] DateTimeOffset? to = null,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default) =>
         await ExecuteAsync((userId, role) =>
-            parcelService.GetParcelsAsync(userId, role, view, search, from, to, cancellationToken));
+            parcelService.GetParcelsAsync(userId, role, view, search, from, to, cancellationToken, pageNumber, pageSize));
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetParcel(Guid id, CancellationToken cancellationToken) =>

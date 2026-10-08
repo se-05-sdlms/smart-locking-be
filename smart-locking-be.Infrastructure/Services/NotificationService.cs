@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -11,11 +12,12 @@ public sealed class NotificationService(
     ApplicationDbContext dbContext,
     TimeProvider timeProvider) : INotificationService
 {
-    public async Task<IReadOnlyCollection<NotificationResponse>> GetForUserAsync(
+    public async Task<PagedResult<NotificationResponse>> GetForUserAsync(
         Guid userId,
         bool unreadOnly,
         int limit,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int pageNumber = 1)
     {
         if (limit is < 1 or > 100)
         {
@@ -32,8 +34,11 @@ public sealed class NotificationService(
             query = query.Where(notification => !notification.IsRead);
         }
 
-        return await query
+        pageNumber = Math.Max(pageNumber, 1);
+        int totalCount = await query.CountAsync(cancellationToken);
+        List<NotificationResponse> items = await query
             .OrderByDescending(notification => notification.CreatedAt)
+            .Skip((pageNumber - 1) * limit)
             .Take(limit)
             .Select(notification => new NotificationResponse(
                 notification.Id,
@@ -49,6 +54,8 @@ public sealed class NotificationService(
                 notification.ReadAt,
                 notification.CreatedAt))
             .ToListAsync(cancellationToken);
+
+        return new PagedResult<NotificationResponse>(items, totalCount, pageNumber, limit);
     }
 
     public async Task<NotificationResponse> SetReadStateAsync(

@@ -9,20 +9,30 @@ namespace smart_locking_be.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize(Roles = "Administrator,LockerOperator")]
-public class LockersController(ILockerService lockerService) : ControllerBase
+public class LockersController(ILockerService lockerService, IOperationsService operationsService) : ControllerBase
 {
     /// <summary>
     /// Lấy danh sách tủ Locker (Admin xem tất cả, LockerOperator xem danh sách được phân công).
     /// </summary>
     [HttpGet]
-    public async Task<IActionResult> GetLockers([FromQuery] string? search, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetLockers(
+        [FromQuery] string? search,
+        [FromQuery] string? view,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
         if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
         {
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => lockerService.GetLockersAsync(userId, userRole, search, cancellationToken));
+        if (string.Equals(view, "operational", StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExecuteAsync(() => operationsService.GetLockersAsync(userId, userRole, cancellationToken, pageNumber, pageSize));
+        }
+
+        return await ExecuteAsync(() => lockerService.GetLockersAsync(userId, userRole, search, cancellationToken, pageNumber, pageSize));
     }
 
     /// <summary>
@@ -58,7 +68,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     /// <summary>
     /// Cập nhật thông tin tủ Locker (Chỉ Administrator).
     /// </summary>
-    [HttpPut("{id:guid}")]
+    [HttpPatch("{id:guid}")]
     [Authorize(Roles = "Administrator")]
     public async Task<IActionResult> UpdateLocker(
         Guid id,

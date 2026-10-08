@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.DTOs.Returns;
 using smart_locking_be.Application.Interfaces.Services;
@@ -42,8 +43,22 @@ public sealed class ReturnRequestService(
         return Map(entity);
     }
 
-    public async Task<IReadOnlyCollection<ReturnRequestResponse>> GetMineAsync(Guid residentUserId, CancellationToken cancellationToken = default) =>
-        (await ResidentQuery(residentUserId).OrderByDescending(item => item.CreatedAt).ToListAsync(cancellationToken)).Select(Map).ToArray();
+    public async Task<PagedResult<ReturnRequestResponse>> GetMineAsync(
+        Guid residentUserId,
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20)
+    {
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        IQueryable<ReturnRequest> query = ResidentQuery(residentUserId);
+        int totalCount = await query.CountAsync(cancellationToken);
+        ReturnRequest[] entities = await query.OrderByDescending(item => item.CreatedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToArrayAsync(cancellationToken);
+        return new PagedResult<ReturnRequestResponse>(entities.Select(Map).ToArray(), totalCount, pageNumber, pageSize);
+    }
 
     public async Task<ReturnRequestResponse> GetAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default) =>
         Map(await ResidentQuery(residentUserId).SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
@@ -130,6 +145,7 @@ public sealed class ReturnRequestService(
     {
         ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
         SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
         return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl!, entity.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes));
     }
 
@@ -199,8 +215,14 @@ public sealed class ReturnRequestService(
         return entity;
     }
 
-    private async Task<SystemPolicy> ActivePolicyAsync(CancellationToken cancellationToken) =>
-        await dbContext.SystemPolicies.Where(item => item.IsActive).OrderByDescending(item => item.EffectiveFrom).FirstAsync(cancellationToken);
+    private async Task<SystemPolicy> ActivePolicyAsync(CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        return await dbContext.SystemPolicies
+            .Where(item => item.IsActive && item.EffectiveFrom <= now && (!item.EffectiveTo.HasValue || item.EffectiveTo > now))
+            .OrderByDescending(item => item.EffectiveFrom)
+            .FirstAsync(cancellationToken);
+    }
 
     private async Task<string> GeneratePickupCodeAsync(CancellationToken cancellationToken)
     {

@@ -10,7 +10,7 @@ namespace smart_locking_be.API.Controllers;
 public sealed class MaintenanceRequestsController(IOperationsService service) : ControllerBase
 {
     [HttpGet]
-    public Task<IActionResult> Get(CancellationToken ct) => Execute((userId, role) => service.GetMaintenanceAsync(userId, role, ct));
+    public Task<IActionResult> Get([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default) => Execute((userId, role) => service.GetMaintenanceAsync(userId, role, ct, pageNumber, pageSize));
 
     [HttpPost]
     public Task<IActionResult> Create(CreateMaintenanceRequest request, CancellationToken ct) =>

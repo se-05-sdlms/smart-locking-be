@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.DTOs.Operations;
 using smart_locking_be.Application.Interfaces.Services;
@@ -8,18 +9,28 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class OperationsService(ApplicationDbContext db, ILockerAccessService lockerAccess, TimeProvider clock, IPushNotificationService? pushNotificationService = null) : IOperationsService
+public sealed class OperationsService(ApplicationDbContext db, ILockerAccessService lockerAccess, TimeProvider clock, IPushNotificationService pushNotificationService) : IOperationsService
 {
-    public async Task<IReadOnlyCollection<OperationalLockerResponse>> GetLockersAsync(Guid userId, string role, CancellationToken ct = default) =>
-        await ScopeLockers(userId, role).AsNoTracking().OrderBy(x => x.Code).Select(x => new OperationalLockerResponse(
+    public async Task<PagedResult<OperationalLockerResponse>> GetLockersAsync(Guid userId, string role, CancellationToken ct = default, int pageNumber = 1, int pageSize = 20)
+    {
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        DateTimeOffset now = clock.GetUtcNow();
+        IQueryable<Locker> query = ScopeLockers(userId, role).AsNoTracking();
+        int totalCount = await query.CountAsync(ct);
+        List<OperationalLockerResponse> items = await query.OrderBy(x => x.Code)
+            .Skip((pageNumber - 1) * pageSize).Take(pageSize).Select(x => new OperationalLockerResponse(
             x.Id, x.Code, x.Address, x.OperationalStatus, x.ConnectionStatus, x.LastSeenAt,
             x.Compartments.Count(c => c.OperationalStatus == LockerCompartmentOperationalStatus.Operational && c.DoorStatus == DoorStatus.Closed &&
                 !db.Parcels.Any(p => p.DeliveryRequest.AllocatedCompartmentId == c.Id && (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue)) &&
-                !db.ReturnRequests.Any(r => r.AllocatedCompartmentId == c.Id && (r.Status == ReturnRequestStatus.Allocated || r.Status == ReturnRequestStatus.Deposited))),
+                !db.ReturnRequests.Any(r => r.AllocatedCompartmentId == c.Id && (r.Status == ReturnRequestStatus.Allocated || r.Status == ReturnRequestStatus.Deposited)) &&
+                !db.CompartmentReservations.Any(r => r.LockerCompartmentId == c.Id && r.ReleasedAt == null && r.ExpiresAt > now)),
             db.Parcels.Count(p => p.DeliveryRequest.LockerId == x.Id && (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue)),
             x.Incidents.Count(i => i.Status != IncidentStatus.Resolved))).ToListAsync(ct);
+        return new PagedResult<OperationalLockerResponse>(items, totalCount, pageNumber, pageSize);
+    }
 
-    public async Task<IReadOnlyCollection<OperationalRecordResponse>> SearchAsync(Guid userId, string role, string? query, Guid? lockerId, CancellationToken ct = default)
+    public async Task<PagedResult<OperationalRecordResponse>> SearchAsync(Guid userId, string role, string? query, Guid? lockerId, CancellationToken ct = default, int pageNumber = 1, int pageSize = 20)
     {
         HashSet<Guid> scope = (await ScopeLockers(userId, role).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
         if (lockerId.HasValue && !scope.Contains(lockerId.Value)) throw new UnauthorizedAccessException("Tủ không thuộc phạm vi vận hành.");
@@ -27,13 +38,26 @@ public sealed class OperationsService(ApplicationDbContext db, ILockerAccessServ
         IQueryable<Parcel> parcels = db.Parcels.Include(x => x.DeliveryRequest).ThenInclude(x => x.Locker).Where(x => scope.Contains(x.DeliveryRequest.LockerId));
         IQueryable<ReturnRequest> returns = db.ReturnRequests.Include(x => x.Locker).Where(x => scope.Contains(x.LockerId));
         IQueryable<Incident> incidents = db.Incidents.Include(x => x.Locker).Where(x => x.LockerId.HasValue && scope.Contains(x.LockerId.Value));
-        if (lockerId.HasValue) { parcels = parcels.Where(x => x.DeliveryRequest.LockerId == lockerId); returns = returns.Where(x => x.LockerId == lockerId); incidents = incidents.Where(x => x.LockerId == lockerId); }
-        if (term.Length > 0) { parcels = parcels.Where(x => x.ParcelCode.Contains(term)); returns = returns.Where(x => x.ReturnCode.Contains(term)); incidents = incidents.Where(x => x.Title.Contains(term)); }
+        IQueryable<DeliveryRequest> deliveries = db.DeliveryRequests.Include(x => x.Locker).Where(x => scope.Contains(x.LockerId));
+        IQueryable<MaintenanceRequest> maintenance = db.MaintenanceRequests.Include(x => x.Locker).Where(x => scope.Contains(x.LockerId));
+        IQueryable<LockerEvent> events = db.LockerEvents.Include(x => x.Locker).Where(x => scope.Contains(x.LockerId));
+        IQueryable<Locker> lockers = db.Lockers.Where(x => scope.Contains(x.Id));
+        IQueryable<LockerCompartment> compartments = db.LockerCompartments.Include(x => x.Locker).Where(x => scope.Contains(x.LockerId));
+        if (lockerId.HasValue) { parcels = parcels.Where(x => x.DeliveryRequest.LockerId == lockerId); returns = returns.Where(x => x.LockerId == lockerId); incidents = incidents.Where(x => x.LockerId == lockerId); deliveries = deliveries.Where(x => x.LockerId == lockerId); maintenance = maintenance.Where(x => x.LockerId == lockerId); events = events.Where(x => x.LockerId == lockerId); lockers = lockers.Where(x => x.Id == lockerId); compartments = compartments.Where(x => x.LockerId == lockerId); }
+        if (term.Length > 0) { parcels = parcels.Where(x => x.ParcelCode.Contains(term)); returns = returns.Where(x => x.ReturnCode.Contains(term)); incidents = incidents.Where(x => x.Title.Contains(term)); deliveries = deliveries.Where(x => (x.RecipientPhoneSnapshot != null && x.RecipientPhoneSnapshot.Contains(term)) || x.Id.ToString().Contains(term)); maintenance = maintenance.Where(x => x.Description.Contains(term)); events = events.Where(x => (x.Details != null && x.Details.Contains(term)) || (x.Reason != null && x.Reason.Contains(term))); lockers = lockers.Where(x => x.Code.Contains(term) || x.Address.Contains(term)); compartments = compartments.Where(x => x.Code.Contains(term) || x.HardwareCode.Contains(term)); }
         List<OperationalRecordResponse> result = [];
         result.AddRange(await parcels.OrderByDescending(x => x.UpdatedAt).Take(50).Select(x => new OperationalRecordResponse("Parcel", x.Id, x.ParcelCode, x.Status.ToString(), x.DeliveryRequest.Locker.Code, "Kiện hàng cư dân", x.UpdatedAt)).ToListAsync(ct));
         result.AddRange(await returns.OrderByDescending(x => x.UpdatedAt).Take(50).Select(x => new OperationalRecordResponse("Return", x.Id, x.ReturnCode, x.Status.ToString(), x.Locker.Code, "Hàng cư dân gửi", x.UpdatedAt)).ToListAsync(ct));
         result.AddRange(await incidents.OrderByDescending(x => x.UpdatedAt).Take(50).Select(x => new OperationalRecordResponse("Incident", x.Id, x.Id.ToString(), x.Status.ToString(), x.Locker!.Code, x.Title, x.UpdatedAt)).ToListAsync(ct));
-        return result.OrderByDescending(x => x.OccurredAt).Take(100).ToArray();
+        result.AddRange(await deliveries.OrderByDescending(x => x.UpdatedAt).Take(50).Select(x => new OperationalRecordResponse("DeliveryRequest", x.Id, x.Id.ToString(), x.Status.ToString(), x.Locker.Code, x.RecipientPhoneSnapshot ?? "Yêu cầu giao hàng", x.UpdatedAt)).ToListAsync(ct));
+        result.AddRange(await maintenance.OrderByDescending(x => x.UpdatedAt).Take(50).Select(x => new OperationalRecordResponse("MaintenanceRequest", x.Id, x.Id.ToString(), x.Status.ToString(), x.Locker.Code, x.Description, x.UpdatedAt)).ToListAsync(ct));
+        result.AddRange(await events.OrderByDescending(x => x.OccurredAt).Take(50).Select(x => new OperationalRecordResponse("LockerEvent", x.Id, x.Id.ToString(), x.EventType.ToString(), x.Locker.Code, x.Details ?? x.Reason ?? x.EventType.ToString(), x.OccurredAt)).ToListAsync(ct));
+        result.AddRange(await lockers.OrderByDescending(x => x.UpdatedAt).Take(50).Select(x => new OperationalRecordResponse("Locker", x.Id, x.Code, x.OperationalStatus.ToString(), x.Code, x.Address, x.UpdatedAt)).ToListAsync(ct));
+        result.AddRange(await compartments.OrderByDescending(x => x.UpdatedAt).Take(50).Select(x => new OperationalRecordResponse("LockerCompartment", x.Id, x.Code, x.OperationalStatus.ToString(), x.Locker.Code, x.HardwareCode, x.UpdatedAt)).ToListAsync(ct));
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        OperationalRecordResponse[] ordered = result.OrderByDescending(x => x.OccurredAt).ToArray();
+        return new PagedResult<OperationalRecordResponse>(ordered.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToArray(), ordered.Length, pageNumber, pageSize);
     }
 
     public async Task<EmergencyUnlockResponse> EmergencyUnlockAsync(Guid userId, string role, EmergencyUnlockRequest request, CancellationToken ct = default)
@@ -52,12 +76,16 @@ public sealed class OperationsService(ApplicationDbContext db, ILockerAccessServ
         return new(entity.Id, entity.Result, compartment.Code, entity.RequestedAt);
     }
 
-    public async Task<IReadOnlyCollection<MaintenanceResponse>> GetMaintenanceAsync(Guid userId, string role, CancellationToken ct = default)
+    public async Task<PagedResult<MaintenanceResponse>> GetMaintenanceAsync(Guid userId, string role, CancellationToken ct = default, int pageNumber = 1, int pageSize = 20)
     {
         IQueryable<MaintenanceRequest> q = db.MaintenanceRequests.Include(x => x.Locker).Include(x => x.LockerCompartment);
         if (role == nameof(UserRole.LockerOperator)) q = q.Where(x => db.OperatorAssignments.Any(a => a.OperatorUserId == userId && a.LockerId == x.LockerId && a.RevokedAt == null));
         else if (role != nameof(UserRole.Administrator)) throw new UnauthorizedAccessException();
-        return (await q.OrderByDescending(x => x.UpdatedAt).ToListAsync(ct)).Select(MapMaintenance).ToArray();
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        int totalCount = await q.CountAsync(ct);
+        MaintenanceResponse[] items = (await q.OrderByDescending(x => x.UpdatedAt).Skip((pageNumber - 1) * pageSize).Take(pageSize).ToListAsync(ct)).Select(MapMaintenance).ToArray();
+        return new PagedResult<MaintenanceResponse>(items, totalCount, pageNumber, pageSize);
     }
 
     public async Task<MaintenanceResponse> CreateMaintenanceAsync(Guid userId, string role, CreateMaintenanceRequest request, CancellationToken ct = default)
@@ -65,6 +93,7 @@ public sealed class OperationsService(ApplicationDbContext db, ILockerAccessServ
         await EnsureScope(userId, role, request.LockerId, ct);
         if (string.IsNullOrWhiteSpace(request.Description)) throw new ArgumentException("Mô tả bảo trì là bắt buộc.");
         if (request.CompartmentId.HasValue && !await db.LockerCompartments.AnyAsync(x => x.Id == request.CompartmentId && x.LockerId == request.LockerId, ct)) throw new KeyNotFoundException("Không tìm thấy ngăn tủ.");
+        if (request.IncidentId.HasValue && !await db.Incidents.AnyAsync(x => x.Id == request.IncidentId && x.LockerId == request.LockerId && x.LockerCompartmentId == request.CompartmentId, ct)) throw new ArgumentException("Sự cố không thuộc đúng tủ hoặc ngăn được yêu cầu bảo trì.");
         DateTimeOffset now = clock.GetUtcNow();
         MaintenanceRequest entity = new() { Id = Guid.NewGuid(), LockerId = request.LockerId, LockerCompartmentId = request.CompartmentId, CreatedByUserId = userId, IncidentId = request.IncidentId, Priority = request.Priority, Status = MaintenanceStatus.Open, Description = request.Description.Trim(), CreatedAt = now, UpdatedAt = now };
         entity.Activities.Add(new MaintenanceActivity { Id = Guid.NewGuid(), ActionByUserId = userId, ActionType = "Created", ToStatus = MaintenanceStatus.Open, CreatedAt = now });
@@ -97,12 +126,16 @@ public sealed class OperationsService(ApplicationDbContext db, ILockerAccessServ
             await db.EmergencyUnlocks.CountAsync(x => x.RequestedAt >= from && x.RequestedAt < to, ct));
     }
 
-    public async Task<IReadOnlyCollection<AuditLogResponse>> GetAuditLogsAsync(string? query, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default)
+    public async Task<PagedResult<AuditLogResponse>> GetAuditLogsAsync(string? query, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default, int pageNumber = 1, int pageSize = 20)
     {
         IQueryable<AuditLog> q = db.AuditLogs.Include(x => x.ActorUser).AsNoTracking(); string term = query?.Trim() ?? string.Empty;
         if (from.HasValue) q = q.Where(x => x.OccurredAt >= from); if (to.HasValue) q = q.Where(x => x.OccurredAt < to);
         if (term.Length > 0) q = q.Where(x => x.Action.Contains(term) || (x.Details != null && x.Details.Contains(term)));
-        return await q.OrderByDescending(x => x.OccurredAt).Take(500).Select(x => new AuditLogResponse(x.Id, x.ActorUser == null ? "System/Guest" : (x.ActorUser.Email ?? x.ActorUser.PhoneNumber ?? x.ActorUser.Id.ToString()), x.Action, x.EntityType, x.EntityId, x.Result, x.Details, x.OccurredAt)).ToListAsync(ct);
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        int totalCount = await q.CountAsync(ct);
+        List<AuditLogResponse> items = await q.OrderByDescending(x => x.OccurredAt).Skip((pageNumber - 1) * pageSize).Take(pageSize).Select(x => new AuditLogResponse(x.Id, x.ActorUser == null ? "System/Guest" : (x.ActorUser.Email ?? x.ActorUser.PhoneNumber ?? x.ActorUser.Id.ToString()), x.Action, x.EntityType, x.EntityId, x.Result, x.Details, x.OccurredAt)).ToListAsync(ct);
+        return new PagedResult<AuditLogResponse>(items, totalCount, pageNumber, pageSize);
     }
 
     public async Task<OverdueTransferResponse> TransferOverdueAsync(Guid userId, string role, Guid parcelId, CancellationToken ct = default)
@@ -117,7 +150,7 @@ public sealed class OperationsService(ApplicationDbContext db, ILockerAccessServ
         Notification push = new() { Id = Guid.NewGuid(), UserId = resident.UserId, ParcelId = parcel.Id, DeliveryRequestId = parcel.DeliveryRequestId, Type = "ParcelTransferred", Channel = NotificationChannel.Push, Title = "Kiện hàng đã chuyển điểm tập kết", Message = message, DeliveryStatus = NotificationDeliveryStatus.Pending, IsRead = false, CreatedAt = now };
         db.Notifications.Add(push);
         Audit(userId, "Parcel.Transferred", nameof(Parcel), parcel.Id, parcel.DeliveryRequest.Locker.RecoveryAddress, now); await db.SaveChangesAsync(ct);
-        if (pushNotificationService is not null) await pushNotificationService.TrySendAsync(push.Id, ct);
+        await pushNotificationService.TrySendAsync(push.Id, ct);
         return new(parcel.Id, parcel.ParcelCode, parcel.DeliveryRequest.Locker.RecoveryAddress, parcel.Status.ToString());
     }
 
