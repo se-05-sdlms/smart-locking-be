@@ -18,6 +18,8 @@ public sealed record NotificationResponse(
 
 public sealed record MarkAllNotificationsReadResponse(int UpdatedCount);
 
+public sealed record UpdateNotificationRequest(bool IsRead);
+
 public sealed record CreateNotificationRuleRequest(
     Guid SystemPolicyId,
     string EventType,

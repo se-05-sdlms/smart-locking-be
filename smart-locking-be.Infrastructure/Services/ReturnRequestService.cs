@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.DTOs.Returns;
 using smart_locking_be.Application.Interfaces.Services;
@@ -12,9 +13,10 @@ namespace smart_locking_be.Infrastructure.Services;
 public sealed class ReturnRequestService(
     ApplicationDbContext dbContext,
     ILockerAccessService lockerAccessService,
+    ICompartmentAllocationService compartmentAllocationService,
     IPushNotificationService pushNotificationService,
     ITokenHashService tokenHashService,
-    TimeProvider timeProvider) : IReturnRequestService
+    TimeProvider timeProvider) : IReturnRequestService, IReturnPickupSessionService
 {
     public async Task<ReturnRequestResponse> CreateAsync(Guid residentUserId, CreateReturnRequest request, CancellationToken cancellationToken = default)
     {
@@ -41,35 +43,49 @@ public sealed class ReturnRequestService(
         return Map(entity);
     }
 
-    public async Task<IReadOnlyCollection<ReturnRequestResponse>> GetMineAsync(Guid residentUserId, CancellationToken cancellationToken = default) =>
-        (await ResidentQuery(residentUserId).OrderByDescending(item => item.CreatedAt).ToListAsync(cancellationToken)).Select(Map).ToArray();
+    public async Task<PagedResult<ReturnRequestResponse>> GetMineAsync(
+        Guid residentUserId,
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20)
+    {
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        IQueryable<ReturnRequest> query = ResidentQuery(residentUserId);
+        int totalCount = await query.CountAsync(cancellationToken);
+        ReturnRequest[] entities = await query.OrderByDescending(item => item.CreatedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToArrayAsync(cancellationToken);
+        return new PagedResult<ReturnRequestResponse>(entities.Select(Map).ToArray(), totalCount, pageNumber, pageSize);
+    }
 
     public async Task<ReturnRequestResponse> GetAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default) =>
         Map(await ResidentQuery(residentUserId).SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu gửi hàng trả."));
 
-    public async Task<ReturnUnlockResponse> AllocateAndOpenAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default)
+    public async Task<ReturnUnlockResponse> OpenCompartmentAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default)
     {
         ReturnRequest entity = await ResidentQuery(residentUserId).SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu gửi hàng trả.");
         if (entity.Status != ReturnRequestStatus.Created) throw new InvalidOperationException("Yêu cầu không ở trạng thái có thể cấp ngăn.");
 
         DateTimeOffset now = timeProvider.GetUtcNow();
-        LockerCompartment? compartment = await FindAvailableCompartmentAsync(entity.LockerId, now, cancellationToken);
-        if (compartment is null) throw new InvalidOperationException("Tủ hiện không còn ngăn trống.");
         SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
         DateTimeOffset expiresAt = now.AddMinutes(policy.CompartmentReservationMinutes);
-        CompartmentReservation reservation = new()
-        {
-            Id = Guid.NewGuid(), LockerCompartmentId = compartment.Id, ReturnRequestId = entity.Id,
-            ReservedAt = now, ExpiresAt = expiresAt, CreatedAt = now
-        };
+        CompartmentReservation? reservation = await compartmentAllocationService.ReserveAvailableAsync(
+            entity.LockerId,
+            null,
+            entity.Id,
+            expiresAt,
+            cancellationToken);
+        if (reservation is null) throw new InvalidOperationException("Tủ hiện không còn ngăn trống.");
+        LockerCompartment compartment = reservation.LockerCompartment;
         entity.AllocatedCompartmentId = compartment.Id;
         entity.AllocatedAt = now;
         entity.ReservationExpiresAt = expiresAt;
         entity.Status = ReturnRequestStatus.Allocated;
         entity.UpdatedAt = now;
-        dbContext.CompartmentReservations.Add(reservation);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         OpenLockerResponse opened = await lockerAccessService.OpenAsync(new OpenLockerRequest(
@@ -77,7 +93,7 @@ public sealed class ReturnRequestService(
             LockerAccessType.ResidentReturnDropOff, LockerAccessMethod.RemoteApp, null, "Resident Mobile"), cancellationToken);
         if (opened.Result != LockerAccessResult.Succeeded)
         {
-            reservation.ReleasedAt = now;
+            await compartmentAllocationService.ReleaseAsync(null, entity.Id, now, cancellationToken);
             entity.Status = ReturnRequestStatus.Failed;
             entity.FailureReason = opened.FailureReason ?? "Không thể mở ngăn tủ.";
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -88,29 +104,27 @@ public sealed class ReturnRequestService(
         return new ReturnUnlockResponse(entity.Id, compartment.Code, opened.AccessEventId, expiresAt);
     }
 
-    public async Task<ReturnDepositResponse> ConfirmDepositAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default)
+    public async Task FinalizeDepositAsync(Guid id, DateTimeOffset completedAt, CancellationToken cancellationToken = default)
     {
-        ReturnRequest entity = await ResidentQuery(residentUserId).SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
+        ReturnRequest entity = await FullQuery().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu gửi hàng trả.");
+        if (entity.Status == ReturnRequestStatus.Deposited) return;
         if (entity.Status != ReturnRequestStatus.Allocated || entity.AllocatedCompartment is null)
             throw new InvalidOperationException("Yêu cầu chưa được cấp ngăn.");
-        DateTimeOffset now = timeProvider.GetUtcNow();
-        if (entity.ReservationExpiresAt <= now) throw new TimeoutException("Thời gian giữ ngăn đã hết.");
-        if (entity.AllocatedCompartment.DoorStatus != DoorStatus.Closed) throw new InvalidOperationException("Vui lòng đóng cửa ngăn trước khi xác nhận.");
+        DateTimeOffset now = completedAt;
         entity.Status = ReturnRequestStatus.Deposited;
         entity.ResidentDepositedAt = now;
         entity.UpdatedAt = now;
-        await ReleaseReservationsAsync(entity.Id, now, cancellationToken);
+        await compartmentAllocationService.ReleaseAsync(null, entity.Id, now, cancellationToken);
         Guid pushId = pushNotificationService.EnqueueReturnNotification(
             entity.ResidentProfile.UserId, entity.Id, "ReturnDeposited", "Hàng gửi đã được lưu",
             $"Kiện hàng trả đã được lưu tại ngăn {entity.AllocatedCompartment.Code}. Mã shipper lấy hàng: {entity.ReturnCode}.");
-        AddAudit(residentUserId, "ReturnRequest.Deposited", nameof(ReturnRequest), entity.Id, entity.AllocatedCompartment.Code, now);
+        AddAudit(entity.ResidentProfile.UserId, "ReturnRequest.Deposited", nameof(ReturnRequest), entity.Id, entity.AllocatedCompartment.Code, now);
         await dbContext.SaveChangesAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushId, cancellationToken);
-        return new ReturnDepositResponse(entity.Id, entity.ReturnCode, entity.AllocatedCompartment.Code, entity.Status);
     }
 
-    public async Task<ReturnPickupSessionResponse> ValidatePickupAsync(ValidateReturnPickupRequest request, CancellationToken cancellationToken = default)
+    public async Task<ReturnPickupSessionResponse> CreateAsync(ValidateReturnPickupRequest request, CancellationToken cancellationToken = default)
     {
         string code = request.PickupCode.Trim();
         if (!System.Text.RegularExpressions.Regex.IsMatch(code, "^[0-9]{6}$")) throw new ArgumentException("Mã lấy hàng phải gồm đúng 6 chữ số.");
@@ -127,7 +141,15 @@ public sealed class ReturnRequestService(
         return new ReturnPickupSessionResponse(entity.Id, token, entity.Locker.Code, entity.AllocatedCompartment.Code, entity.ReturnImageUrl!, now.AddMinutes(policy.GuestSessionTimeoutMinutes));
     }
 
-    public async Task<ReturnPickupSessionResponse> OpenForPickupAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default)
+    public async Task<ReturnPickupSessionResponse> GetAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default)
+    {
+        ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
+        SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl!, entity.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes));
+    }
+
+    public async Task<ReturnPickupSessionResponse> OpenCompartmentAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default)
     {
         ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
         OpenLockerResponse opened = await lockerAccessService.OpenAsync(new OpenLockerRequest(
@@ -138,11 +160,14 @@ public sealed class ReturnRequestService(
         return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl!, timeProvider.GetUtcNow().AddMinutes(policy.GuestSessionTimeoutMinutes));
     }
 
-    public async Task<ReturnPickupCompleteResponse> ConfirmPickupAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default)
+    public async Task FinalizePickupAsync(Guid id, DateTimeOffset completedAt, CancellationToken cancellationToken = default)
     {
-        ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
-        if (entity.AllocatedCompartment!.DoorStatus != DoorStatus.Closed) throw new InvalidOperationException("Vui lòng đóng cửa ngăn trước khi xác nhận.");
-        DateTimeOffset now = timeProvider.GetUtcNow();
+        ReturnRequest entity = await FullQuery().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu gửi hàng trả.");
+        if (entity.Status == ReturnRequestStatus.Completed) return;
+        if (entity.Status != ReturnRequestStatus.Deposited || entity.AllocatedCompartment is null)
+            throw new InvalidOperationException("Yêu cầu không ở trạng thái có thể hoàn tất lấy hàng.");
+        DateTimeOffset now = completedAt;
         entity.Status = ReturnRequestStatus.Completed;
         entity.ShipperPickedUpAt = now;
         entity.CompartmentReleasedAt = now;
@@ -154,7 +179,6 @@ public sealed class ReturnRequestService(
         AddAudit(null, "ReturnRequest.PickedUp", nameof(ReturnRequest), entity.Id, entity.AllocatedCompartment.Code, now);
         await dbContext.SaveChangesAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushId, cancellationToken);
-        return new ReturnPickupCompleteResponse(entity.Id, entity.Status, entity.AllocatedCompartment.Code);
     }
 
     public async Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default)
@@ -166,7 +190,7 @@ public sealed class ReturnRequestService(
         foreach (ReturnRequest item in items)
         {
             item.Status = ReturnRequestStatus.Expired; item.UpdatedAt = now; item.CompartmentReleasedAt = now;
-            await ReleaseReservationsAsync(item.Id, now, cancellationToken);
+            await compartmentAllocationService.ReleaseAsync(null, item.Id, now, cancellationToken);
         }
         if (items.Count > 0) await dbContext.SaveChangesAsync(cancellationToken);
         return items.Count;
@@ -184,29 +208,21 @@ public sealed class ReturnRequestService(
         if (entity.Status != ReturnRequestStatus.Deposited || string.IsNullOrWhiteSpace(entity.ShipperSessionTokenHash))
             throw new InvalidOperationException("Phiên lấy hàng không còn hiệu lực.");
         if (!string.Equals(entity.ShipperSessionTokenHash, tokenHashService.HashToken(token.Trim()), StringComparison.Ordinal))
-            throw new UnauthorizedAccessException("Guest session token không hợp lệ.");
+            throw new System.Security.Authentication.AuthenticationException("Guest session token không hợp lệ.");
         SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
         if (entity.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes) <= timeProvider.GetUtcNow()) throw new TimeoutException("Phiên lấy hàng đã hết hạn.");
         entity.UpdatedAt = timeProvider.GetUtcNow();
         return entity;
     }
 
-    private async Task<LockerCompartment?> FindAvailableCompartmentAsync(Guid lockerId, DateTimeOffset now, CancellationToken cancellationToken) =>
-        await dbContext.LockerCompartments
-            .Where(item => item.LockerId == lockerId && item.OperationalStatus == LockerCompartmentOperationalStatus.Operational && item.DoorStatus == DoorStatus.Closed)
-            .Where(item => !dbContext.CompartmentReservations.Any(r => r.LockerCompartmentId == item.Id && r.ReleasedAt == null && r.ExpiresAt > now))
-            .Where(item => !dbContext.Parcels.Any(p => p.DeliveryRequest.AllocatedCompartmentId == item.Id && (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue)))
-            .Where(item => !dbContext.ReturnRequests.Any(r => r.AllocatedCompartmentId == item.Id && (r.Status == ReturnRequestStatus.Allocated || r.Status == ReturnRequestStatus.Deposited)))
-            .OrderBy(item => item.Code).FirstOrDefaultAsync(cancellationToken);
-
-    private async Task ReleaseReservationsAsync(Guid returnId, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<SystemPolicy> ActivePolicyAsync(CancellationToken cancellationToken)
     {
-        List<CompartmentReservation> reservations = await dbContext.CompartmentReservations.Where(item => item.ReturnRequestId == returnId && item.ReleasedAt == null).ToListAsync(cancellationToken);
-        foreach (CompartmentReservation reservation in reservations) reservation.ReleasedAt = now;
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        return await dbContext.SystemPolicies
+            .Where(item => item.IsActive && item.EffectiveFrom <= now && (!item.EffectiveTo.HasValue || item.EffectiveTo > now))
+            .OrderByDescending(item => item.EffectiveFrom)
+            .FirstAsync(cancellationToken);
     }
-
-    private async Task<SystemPolicy> ActivePolicyAsync(CancellationToken cancellationToken) =>
-        await dbContext.SystemPolicies.Where(item => item.IsActive).OrderByDescending(item => item.EffectiveFrom).FirstAsync(cancellationToken);
 
     private async Task<string> GeneratePickupCodeAsync(CancellationToken cancellationToken)
     {

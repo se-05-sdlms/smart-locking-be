@@ -1,6 +1,7 @@
 using Serilog;
 using smart_locking_be.API.Extensions;
 using smart_locking_be.API.Services;
+using smart_locking_be.Application.Interfaces.Services;
 
 namespace smart_locking_be.API;
 
@@ -16,6 +17,9 @@ public static class DependencyInjection
     {
         // 1. Controllers & API Behavior
         services.AddControllers();
+        services.AddProblemDetails();
+        services.AddExceptionHandler<ApiExceptionHandler>();
+        services.AddScoped<IImageStorageService, LocalImageStorageService>();
 
         // 2. CORS Policy Configuration
         services.AddCorsPolicy(configuration, environment);
@@ -67,6 +71,8 @@ public static class DependencyInjection
 
         // 2. Log request bằng Serilog
         app.UseSerilogRequestLogging();
+
+        app.UseExceptionHandler();
 
         app.UseStaticFiles();
 

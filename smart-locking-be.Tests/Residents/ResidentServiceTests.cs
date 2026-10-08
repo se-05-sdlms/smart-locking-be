@@ -232,7 +232,7 @@ public sealed class ResidentServiceTests
     }
 
     [Fact]
-    public async Task UpdateApprovalModeAsync_SwitchesModeSuccessfully()
+    public async Task UpdateProfileAsync_SwitchesApprovalModeSuccessfully()
     {
         await using var dbContext = CreateInMemoryDbContext();
         var userId = Guid.NewGuid();
@@ -256,9 +256,9 @@ public sealed class ResidentServiceTests
 
         var service = new ResidentService(dbContext);
 
-        var response = await service.UpdateApprovalModeAsync(
+        var response = await service.UpdateProfileAsync(
             userId,
-            new UpdateApprovalModeRequest(DeliveryApprovalMode.Auto));
+            new UpdateResidentProfileRequest(null, null, null, DeliveryApprovalMode.Auto));
 
         Assert.Equal(DeliveryApprovalMode.Auto, response.DeliveryApprovalMode);
 

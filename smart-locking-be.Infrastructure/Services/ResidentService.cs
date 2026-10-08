@@ -24,13 +24,13 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
         UpdateResidentProfileRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.FullName))
+        if (request.FullName is not null && string.IsNullOrWhiteSpace(request.FullName))
         {
             throw new ArgumentException("Họ và tên không được để trống.", nameof(request.FullName));
         }
 
-        string trimmedFullName = request.FullName.Trim();
-        if (trimmedFullName.Length > 150)
+        string? trimmedFullName = request.FullName?.Trim();
+        if (trimmedFullName?.Length > 150)
         {
             throw new ArgumentException("Họ và tên không được vượt quá 150 ký tự.", nameof(request.FullName));
         }
@@ -44,29 +44,7 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
         {
             throw new ArgumentException("Đường dẫn ảnh đại diện không được vượt quá 2048 ký tự.", nameof(request.AvatarUrl));
         }
-
-        User user = await FindUserWithProfileAsync(userId, cancellationToken);
-        ValidateUserAccess(user);
-
-        ResidentProfile profile = user.ResidentProfile ?? await EnsureProfileCreatedAsync(user, cancellationToken);
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-
-        profile.FullName = trimmedFullName;
-        profile.DateOfBirth = request.DateOfBirth;
-        profile.AvatarUrl = string.IsNullOrWhiteSpace(request.AvatarUrl) ? null : request.AvatarUrl.Trim();
-        profile.UpdatedAt = now;
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return MapToResponse(user, profile);
-    }
-
-    public async Task<ResidentProfileResponse> UpdateApprovalModeAsync(
-        Guid userId,
-        UpdateApprovalModeRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        if (!Enum.IsDefined(typeof(DeliveryApprovalMode), request.DeliveryApprovalMode))
+        if (request.DeliveryApprovalMode.HasValue && !Enum.IsDefined(request.DeliveryApprovalMode.Value))
         {
             throw new ArgumentException("Chế độ phê duyệt không hợp lệ.", nameof(request.DeliveryApprovalMode));
         }
@@ -77,7 +55,10 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
         ResidentProfile profile = user.ResidentProfile ?? await EnsureProfileCreatedAsync(user, cancellationToken);
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        profile.DeliveryApprovalMode = request.DeliveryApprovalMode;
+        if (trimmedFullName is not null) profile.FullName = trimmedFullName;
+        if (request.DateOfBirth.HasValue) profile.DateOfBirth = request.DateOfBirth;
+        if (request.AvatarUrl is not null) profile.AvatarUrl = string.IsNullOrWhiteSpace(request.AvatarUrl) ? null : request.AvatarUrl.Trim();
+        if (request.DeliveryApprovalMode.HasValue) profile.DeliveryApprovalMode = request.DeliveryApprovalMode.Value;
         profile.UpdatedAt = now;
 
         await dbContext.SaveChangesAsync(cancellationToken);

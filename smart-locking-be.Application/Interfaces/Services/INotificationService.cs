@@ -1,25 +1,24 @@
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Notifications;
 
 namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface INotificationService
 {
-    Task<IReadOnlyCollection<NotificationResponse>> GetForUserAsync(
+    Task<PagedResult<NotificationResponse>> GetForUserAsync(
         Guid userId,
         bool unreadOnly,
         int limit,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        int pageNumber = 1);
 
-    Task<NotificationResponse> MarkReadAsync(
+    Task<NotificationResponse> SetReadStateAsync(
         Guid userId,
         Guid notificationId,
+        bool isRead,
         CancellationToken cancellationToken);
 
     Task<MarkAllNotificationsReadResponse> MarkAllReadAsync(
         Guid userId,
-        CancellationToken cancellationToken);
-
-    Task<NotificationRuleResponse> CreateRuleAsync(
-        CreateNotificationRuleRequest request,
         CancellationToken cancellationToken);
 }

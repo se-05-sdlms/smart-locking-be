@@ -6,6 +6,7 @@ public interface IDeviceInstallationService
 {
     Task<DeviceInstallationResponse> RegisterAsync(
         Guid userId,
+        string installationId,
         RegisterDeviceInstallationRequest request,
         CancellationToken cancellationToken = default);
 

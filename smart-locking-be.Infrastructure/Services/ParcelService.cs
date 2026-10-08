@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Common;
+using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -7,16 +9,22 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class ParcelService(ApplicationDbContext dbContext) : IParcelService
+public sealed class ParcelService(
+    ApplicationDbContext dbContext,
+    ILockerAccessService lockerAccessService,
+    IPushNotificationService pushNotificationService,
+    TimeProvider timeProvider) : IParcelService
 {
-    public async Task<IReadOnlyCollection<ParcelListItemResponse>> GetParcelsAsync(
+    public async Task<PagedResult<ParcelListItemResponse>> GetParcelsAsync(
         Guid userId,
         string role,
         ParcelListView view,
         string? search,
         DateTimeOffset? from,
         DateTimeOffset? to,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int pageNumber = 1,
+        int pageSize = 20)
     {
         if (from.HasValue && to.HasValue && from > to)
         {
@@ -52,8 +60,13 @@ public sealed class ParcelService(ApplicationDbContext dbContext) : IParcelServi
             query = query.Where(parcel => parcel.StoredAt <= to.Value);
         }
 
-        return await query
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        int totalCount = await query.CountAsync(cancellationToken);
+        List<ParcelListItemResponse> items = await query
             .OrderByDescending(parcel => parcel.StoredAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
             .Select(parcel => new ParcelListItemResponse(
                 parcel.Id,
                 parcel.ParcelCode,
@@ -72,6 +85,8 @@ public sealed class ParcelService(ApplicationDbContext dbContext) : IParcelServi
                 parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Currency,
                 parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Status))
             .ToListAsync(cancellationToken);
+
+        return new PagedResult<ParcelListItemResponse>(items, totalCount, pageNumber, pageSize);
     }
 
     public async Task<ParcelDetailResponse> GetParcelAsync(
@@ -105,11 +120,13 @@ public sealed class ParcelService(ApplicationDbContext dbContext) : IParcelServi
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw new KeyNotFoundException("Parcel not found.");
 
-    public async Task<IReadOnlyCollection<ParcelStatusHistoryResponse>> GetHistoryAsync(
+    public async Task<PagedResult<ParcelStatusHistoryResponse>> GetHistoryAsync(
         Guid userId,
         string role,
         Guid parcelId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int pageNumber = 1,
+        int pageSize = 20)
     {
         bool canAccess = await ScopeToUser(userId, role)
             .AnyAsync(parcel => parcel.Id == parcelId, cancellationToken);
@@ -118,10 +135,16 @@ public sealed class ParcelService(ApplicationDbContext dbContext) : IParcelServi
             throw new KeyNotFoundException("Parcel not found.");
         }
 
-        return await dbContext.ParcelStatusHistories
+        IQueryable<ParcelStatusHistory> query = dbContext.ParcelStatusHistories
             .AsNoTracking()
-            .Where(history => history.ParcelId == parcelId)
+            .Where(history => history.ParcelId == parcelId);
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        int totalCount = await query.CountAsync(cancellationToken);
+        List<ParcelStatusHistoryResponse> items = await query
             .OrderByDescending(history => history.ChangedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
             .Select(history => new ParcelStatusHistoryResponse(
                 history.Id,
                 history.FromStatus,
@@ -129,6 +152,135 @@ public sealed class ParcelService(ApplicationDbContext dbContext) : IParcelServi
                 history.Reason,
                 history.ChangedAt))
             .ToListAsync(cancellationToken);
+        return new PagedResult<ParcelStatusHistoryResponse>(items, totalCount, pageNumber, pageSize);
+    }
+
+    public async Task<PickupUnlockResponse> OpenCompartmentAsync(
+        Guid residentUserId,
+        Guid parcelId,
+        string? ipAddress,
+        string? deviceContext,
+        CancellationToken cancellationToken = default)
+    {
+        Parcel parcel = await dbContext.Parcels
+            .Include(item => item.OverdueCharge)
+            .Include(item => item.DeliveryRequest).ThenInclude(request => request.ResidentProfile)
+            .Include(item => item.DeliveryRequest).ThenInclude(request => request.SystemPolicy)
+            .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy bưu kiện.");
+
+        if (parcel.DeliveryRequest.ResidentProfile?.UserId != residentUserId)
+            throw new UnauthorizedAccessException("Bạn không có quyền mở ngăn chứa bưu kiện này.");
+        if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
+            throw new InvalidOperationException("Bưu kiện không còn ở trạng thái có thể nhận.");
+        if (parcel.OverdueCharge?.Status == OverdueChargeStatus.Outstanding)
+            throw new InvalidOperationException("Cần thanh toán phí quá hạn trước khi nhận bưu kiện.");
+        if (!parcel.DeliveryRequest.SystemPolicy.EnableRemoteUnlock)
+            throw new InvalidOperationException("Chính sách hiện tại không cho phép mở tủ từ ứng dụng.");
+        if (!parcel.DeliveryRequest.AllocatedCompartmentId.HasValue)
+            throw new InvalidOperationException("Bưu kiện chưa được gắn với ngăn locker.");
+
+        OpenLockerResponse access = await lockerAccessService.OpenAsync(new OpenLockerRequest(
+            parcel.DeliveryRequest.LockerId,
+            parcel.DeliveryRequest.AllocatedCompartmentId.Value,
+            residentUserId,
+            null,
+            parcel.Id,
+            null,
+            LockerAccessType.ResidentPickup,
+            LockerAccessMethod.RemoteApp,
+            ipAddress,
+            deviceContext), cancellationToken);
+
+        return new PickupUnlockResponse(parcel.Id, access.AccessEventId, access.Result, access.FailureReason, access.OccurredAt);
+    }
+
+    public async Task FinalizeRetrievalAsync(
+        Guid parcelId,
+        Guid? residentUserId,
+        DateTimeOffset completedAt,
+        CancellationToken cancellationToken = default)
+    {
+        Parcel parcel = await dbContext.Parcels
+            .Include(item => item.DeliveryRequest)
+            .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy bưu kiện.");
+
+        if (parcel.Status == ParcelStatus.Retrieved)
+            return;
+        if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
+            throw new InvalidOperationException("Bưu kiện không còn ở trạng thái có thể hoàn tất lấy hàng.");
+
+        ParcelStatus previousStatus = parcel.Status;
+        parcel.Status = ParcelStatus.Retrieved;
+        parcel.RetrievedAt = completedAt;
+        parcel.UpdatedAt = completedAt;
+        parcel.DeliveryRequest.CompartmentReleasedAt = completedAt;
+        parcel.DeliveryRequest.UpdatedAt = completedAt;
+        dbContext.ParcelStatusHistories.Add(new ParcelStatusHistory
+        {
+            Id = Guid.NewGuid(),
+            ParcelId = parcel.Id,
+            FromStatus = previousStatus,
+            ToStatus = ParcelStatus.Retrieved,
+            Reason = "Cửa ngăn đã đóng sau khi người nhận lấy bưu kiện.",
+            ChangedByUserId = residentUserId,
+            ChangedAt = completedAt,
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<OverdueTransferResponse> TransferOverdueAsync(
+        Guid userId,
+        string role,
+        Guid parcelId,
+        CancellationToken cancellationToken = default)
+    {
+        Parcel parcel = await dbContext.Parcels
+            .Include(item => item.DeliveryRequest).ThenInclude(request => request.Locker)
+            .Include(item => item.DeliveryRequest).ThenInclude(request => request.ResidentProfile)
+            .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy kiện hàng.");
+        await EnsureOperationalAccessAsync(userId, role, parcel.DeliveryRequest.LockerId, cancellationToken);
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        if (parcel.MaxStorageUntil > now || parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
+            throw new InvalidOperationException("Kiện hàng chưa đủ điều kiện chuyển điểm tập kết.");
+
+        ResidentProfile resident = parcel.DeliveryRequest.ResidentProfile
+            ?? throw new InvalidOperationException("Kiện hàng không có cư dân nhận.");
+        parcel.Status = ParcelStatus.Removed;
+        parcel.RemovedAt = now;
+        parcel.RemovedByUserId = userId;
+        parcel.RemovalReason = "Transferred to overdue collection point";
+        parcel.UpdatedAt = now;
+        Guid pushId = pushNotificationService.EnqueueParcelTransferred(
+            resident.UserId,
+            parcel.DeliveryRequestId,
+            parcel.Id,
+            parcel.DeliveryRequest.Locker.RecoveryAddress);
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(), ActorUserId = userId, Action = "Parcel.Transferred",
+            EntityType = nameof(Parcel), EntityId = parcel.Id, Result = AuditLogResult.Succeeded,
+            Details = parcel.DeliveryRequest.Locker.RecoveryAddress, OccurredAt = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await pushNotificationService.TrySendAsync(pushId, cancellationToken);
+        return new OverdueTransferResponse(
+            parcel.Id,
+            parcel.ParcelCode,
+            parcel.DeliveryRequest.Locker.RecoveryAddress,
+            parcel.Status.ToString());
+    }
+
+    private async Task EnsureOperationalAccessAsync(Guid userId, string role, Guid lockerId, CancellationToken cancellationToken)
+    {
+        if (role == nameof(UserRole.Administrator)) return;
+        if (role != nameof(UserRole.LockerOperator) ||
+            !await dbContext.OperatorAssignments.AnyAsync(item =>
+                item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
+                cancellationToken))
+            throw new UnauthorizedAccessException("Tủ không thuộc phạm vi vận hành.");
     }
 
     private IQueryable<Parcel> ScopeToUser(Guid userId, string role)

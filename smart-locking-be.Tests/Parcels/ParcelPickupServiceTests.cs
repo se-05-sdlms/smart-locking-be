@@ -18,9 +18,9 @@ public sealed class ParcelPickupServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         (User resident, Parcel parcel, LockerCompartment compartment) = await SeedParcelAsync(dbContext);
         var lockerAccess = new RecordingLockerAccessService();
-        var service = new ParcelPickupService(dbContext, lockerAccess, new FixedTimeProvider(Now));
+        var service = CreateService(dbContext, lockerAccess);
 
-        var response = await service.UnlockAsync(
+        var response = await service.OpenCompartmentAsync(
             resident.Id,
             parcel.Id,
             "127.0.0.1",
@@ -40,10 +40,10 @@ public sealed class ParcelPickupServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         (User resident, Parcel parcel, _) = await SeedParcelAsync(dbContext, outstandingCharge: true);
         var lockerAccess = new RecordingLockerAccessService();
-        var service = new ParcelPickupService(dbContext, lockerAccess, TimeProvider.System);
+        var service = CreateService(dbContext, lockerAccess);
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.UnlockAsync(resident.Id, parcel.Id, null, null));
+            service.OpenCompartmentAsync(resident.Id, parcel.Id, null, null));
 
         Assert.Contains("phí quá hạn", exception.Message);
         Assert.Empty(lockerAccess.Requests);
@@ -54,13 +54,10 @@ public sealed class ParcelPickupServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (_, Parcel parcel, _) = await SeedParcelAsync(dbContext);
-        var service = new ParcelPickupService(
-            dbContext,
-            new RecordingLockerAccessService(),
-            TimeProvider.System);
+        var service = CreateService(dbContext, new RecordingLockerAccessService());
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-            service.UnlockAsync(Guid.NewGuid(), parcel.Id, null, null));
+            service.OpenCompartmentAsync(Guid.NewGuid(), parcel.Id, null, null));
     }
 
     [Fact]
@@ -82,15 +79,11 @@ public sealed class ParcelPickupServiceTests
         };
         dbContext.LockerAccessEvents.Add(accessEvent);
         await dbContext.SaveChangesAsync();
-        var service = new ParcelPickupService(
-            dbContext,
-            new RecordingLockerAccessService(),
-            new FixedTimeProvider(Now));
+        var service = CreateService(dbContext, new RecordingLockerAccessService());
 
-        var response = await service.ConfirmPickupAsync(resident.Id, accessEvent.Id);
+        await service.FinalizeRetrievalAsync(parcel.Id, resident.Id, Now);
 
-        Assert.Equal(ParcelStatus.Retrieved, response.Status);
-        Assert.Equal(Now, response.RetrievedAt);
+        Assert.Equal(ParcelStatus.Retrieved, parcel.Status);
         Assert.Equal(Now, parcel.RetrievedAt);
         ParcelStatusHistory history = await dbContext.ParcelStatusHistories.SingleAsync();
         Assert.Equal(ParcelStatus.Stored, history.FromStatus);
@@ -102,6 +95,19 @@ public sealed class ParcelPickupServiceTests
         new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options);
+
+    private static ParcelService CreateService(ApplicationDbContext dbContext, ILockerAccessService lockerAccess) =>
+        new(dbContext, lockerAccess, new UnusedPushNotificationService(), TimeProvider.System);
+
+    private sealed class UnusedPushNotificationService : IPushNotificationService
+    {
+        public Guid EnqueueDeliveryApprovalRequest(Guid residentUserId, Guid deliveryRequestId, string lockerCode) => throw new NotSupportedException();
+        public Guid EnqueueParcelStored(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, string compartmentCode) => throw new NotSupportedException();
+        public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => throw new NotSupportedException();
+        public Guid EnqueueParcelTransferred(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string collectionAddress) => throw new NotSupportedException();
+        public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
 
     private static async Task<(User Resident, Parcel Parcel, LockerCompartment Compartment)> SeedParcelAsync(
         ApplicationDbContext dbContext,
@@ -247,8 +253,4 @@ public sealed class ParcelPickupServiceTests
         }
     }
 
-    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => now;
-    }
 }

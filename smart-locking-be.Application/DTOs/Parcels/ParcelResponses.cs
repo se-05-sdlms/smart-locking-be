@@ -3,6 +3,12 @@ using System.Text.Json.Serialization;
 
 namespace smart_locking_be.Application.DTOs.Parcels;
 
+public sealed record OverdueTransferResponse(
+    Guid ParcelId,
+    string ParcelCode,
+    string CollectionAddress,
+    string Status);
+
 public enum ParcelListView
 {
     Active,

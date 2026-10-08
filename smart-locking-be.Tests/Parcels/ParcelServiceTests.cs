@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Parcels;
+using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
@@ -37,7 +39,7 @@ public sealed class ParcelServiceTests
         AddParcelGraph(dbContext, other, ParcelStatus.Overdue, "P-OTHER");
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelListItemResponse> result = await new ParcelService(dbContext)
+        IReadOnlyCollection<ParcelListItemResponse> result = await CreateService(dbContext)
             .GetParcelsAsync(owner.Id, nameof(UserRole.Resident), ParcelListView.Active, null, null, null, default);
 
         ParcelListItemResponse parcel = Assert.Single(result);
@@ -63,7 +65,7 @@ public sealed class ParcelServiceTests
         });
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelListItemResponse> result = await new ParcelService(dbContext)
+        IReadOnlyCollection<ParcelListItemResponse> result = await CreateService(dbContext)
             .GetParcelsAsync(operatorUser.Id, nameof(UserRole.LockerOperator), ParcelListView.All, null, null, null, default);
 
         Assert.Equal(assigned.Id, Assert.Single(result).Id);
@@ -78,7 +80,7 @@ public sealed class ParcelServiceTests
         Parcel parcel = AddParcelGraph(dbContext, owner, ParcelStatus.Stored, "P-PRIVATE");
         await dbContext.SaveChangesAsync();
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => new ParcelService(dbContext)
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => CreateService(dbContext)
             .GetParcelAsync(requester.Id, nameof(UserRole.Resident), parcel.Id, default));
     }
 
@@ -89,7 +91,7 @@ public sealed class ParcelServiceTests
         User resident = CreateUser(UserRole.Resident);
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        await Assert.ThrowsAsync<ArgumentException>(() => new ParcelService(dbContext).GetParcelsAsync(
+        await Assert.ThrowsAsync<ArgumentException>(() => CreateService(dbContext).GetParcelsAsync(
             resident.Id,
             nameof(UserRole.Resident),
             ParcelListView.History,
@@ -124,11 +126,41 @@ public sealed class ParcelServiceTests
             });
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelStatusHistoryResponse> result = await new ParcelService(dbContext)
+        IReadOnlyCollection<ParcelStatusHistoryResponse> result = await CreateService(dbContext)
             .GetHistoryAsync(owner.Id, nameof(UserRole.Resident), parcel.Id, default);
 
         Assert.Equal(ParcelStatus.Overdue, result.First().ToStatus);
         Assert.Equal(ParcelStatus.Stored, result.Last().ToStatus);
+    }
+
+    [Fact]
+    public async Task TransferOverdueAsync_WhenEligible_RemovesParcelAndNotifiesResident()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        User resident = CreateUser(UserRole.Resident);
+        User administrator = CreateUser(UserRole.Administrator);
+        Parcel parcel = AddParcelGraph(dbContext, resident, ParcelStatus.Overdue, "P-OVERDUE");
+        parcel.MaxStorageUntil = DateTimeOffset.UtcNow.AddMinutes(-1);
+        dbContext.Users.Add(administrator);
+        await dbContext.SaveChangesAsync();
+        var pushNotifications = new RecordingPushNotificationService();
+        var service = new ParcelService(
+            dbContext,
+            new UnusedLockerAccessService(),
+            pushNotifications,
+            TimeProvider.System);
+
+        OverdueTransferResponse response = await service.TransferOverdueAsync(
+            administrator.Id,
+            nameof(UserRole.Administrator),
+            parcel.Id);
+
+        Assert.Equal(ParcelStatus.Removed, parcel.Status);
+        Assert.Equal("456 Nguyen Van Linh", response.CollectionAddress);
+        Assert.Equal(resident.Id, pushNotifications.ResidentUserId);
+        Assert.True(pushNotifications.WasSent);
+        Assert.Contains(dbContext.AuditLogs, log =>
+            log.EntityId == parcel.Id && log.Action == "Parcel.Transferred");
     }
 
     private static ApplicationDbContext CreateDbContext()
@@ -137,6 +169,50 @@ public sealed class ParcelServiceTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         return new ApplicationDbContext(options);
+    }
+
+    private static ParcelService CreateService(ApplicationDbContext dbContext) =>
+        new(dbContext, new UnusedLockerAccessService(), new UnusedPushNotificationService(), TimeProvider.System);
+
+    private sealed class UnusedLockerAccessService : ILockerAccessService
+    {
+        public Task<OpenLockerResponse> OpenAsync(OpenLockerRequest request, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class UnusedPushNotificationService : IPushNotificationService
+    {
+        public Guid EnqueueDeliveryApprovalRequest(Guid residentUserId, Guid deliveryRequestId, string lockerCode) => throw new NotSupportedException();
+        public Guid EnqueueParcelStored(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, string compartmentCode) => throw new NotSupportedException();
+        public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => throw new NotSupportedException();
+        public Guid EnqueueParcelTransferred(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string collectionAddress) => throw new NotSupportedException();
+        public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingPushNotificationService : IPushNotificationService
+    {
+        private readonly Guid notificationId = Guid.NewGuid();
+
+        public Guid? ResidentUserId { get; private set; }
+        public bool WasSent { get; private set; }
+
+        public Guid EnqueueParcelTransferred(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string collectionAddress)
+        {
+            ResidentUserId = residentUserId;
+            return notificationId;
+        }
+
+        public Task TrySendAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            WasSent = id == notificationId;
+            return Task.CompletedTask;
+        }
+
+        public Guid EnqueueDeliveryApprovalRequest(Guid residentUserId, Guid deliveryRequestId, string lockerCode) => throw new NotSupportedException();
+        public Guid EnqueueParcelStored(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, string compartmentCode) => throw new NotSupportedException();
+        public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => throw new NotSupportedException();
+        public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private static User CreateUser(UserRole role) => new()

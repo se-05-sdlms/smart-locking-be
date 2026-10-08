@@ -21,15 +21,6 @@ public sealed class AuthService(
     private static readonly Regex PhonePattern = new("^0[0-9]{9}$", RegexOptions.Compiled);
     private const string InvalidCredentialsMessage = "Invalid credentials.";
 
-    public async Task<IReadOnlyCollection<RegistrationLockerResponse>> GetRegistrationLockersAsync(
-        CancellationToken cancellationToken) =>
-        await dbContext.Lockers
-            .AsNoTracking()
-            .Where(locker => locker.OperationalStatus == LockerOperationalStatus.Operational)
-            .OrderBy(locker => locker.Code)
-            .Select(locker => new RegistrationLockerResponse(locker.Id, locker.Code, locker.Address))
-            .ToListAsync(cancellationToken);
-
     public async Task<AuthTokenResponse> RegisterAsync(
         RegisterRequest request,
         string? ipAddress,

@@ -23,19 +23,26 @@ public sealed class ReturnRequestServiceTests
         LockerCompartment compartment = new() { Id = compartmentId, LockerId = lockerId, Locker = locker, Code = "A01", HardwareCode = "A01", HardwareChannel = 1, OperationalStatus = LockerCompartmentOperationalStatus.Operational, DoorStatus = DoorStatus.Closed, CreatedAt = now, UpdatedAt = now };
         db.AddRange(user, locker, resident, compartment, new SystemPolicy { Id = Guid.NewGuid(), Version = 1, IsActive = true, GuestSessionTimeoutMinutes = 10, CompartmentReservationMinutes = 10, Currency = "VND", EffectiveFrom = now, CreatedAt = now, CreatedByUserId = Guid.NewGuid() });
         await db.SaveChangesAsync();
-        var service = new ReturnRequestService(db, new SuccessfulAccess(), new NoopPush(), new Sha256TokenHashService(), TimeProvider.System);
+        var service = new ReturnRequestService(
+            db,
+            new SuccessfulAccess(),
+            new CompartmentAllocationService(db, TimeProvider.System),
+            new NoopPush(),
+            new Sha256TokenHashService(),
+            TimeProvider.System);
 
         ReturnRequestResponse created = await service.CreateAsync(userId, new CreateReturnRequest("https://example.com/return.jpg", null));
-        ReturnUnlockResponse opened = await service.AllocateAndOpenAsync(userId, created.Id);
-        ReturnDepositResponse deposited = await service.ConfirmDepositAsync(userId, created.Id);
-        ReturnPickupSessionResponse session = await service.ValidatePickupAsync(new ValidateReturnPickupRequest("LK-01", deposited.PickupCode));
-        await service.OpenForPickupAsync(created.Id, session.GuestSessionToken);
-        ReturnPickupCompleteResponse completed = await service.ConfirmPickupAsync(created.Id, session.GuestSessionToken);
+        ReturnUnlockResponse opened = await service.OpenCompartmentAsync(userId, created.Id);
+        await service.FinalizeDepositAsync(created.Id, now);
+        ReturnRequest deposited = await db.ReturnRequests.SingleAsync();
+        ReturnPickupSessionResponse session = await service.CreateAsync(new ValidateReturnPickupRequest("LK-01", deposited.ReturnCode));
+        await service.OpenCompartmentAsync(created.Id, session.GuestSessionToken);
+        await service.FinalizePickupAsync(created.Id, now);
 
-        Assert.Matches("^[0-9]{6}$", deposited.PickupCode);
+        Assert.Matches("^[0-9]{6}$", deposited.ReturnCode);
         Assert.Equal("A01", opened.CompartmentCode);
-        Assert.Equal(ReturnRequestStatus.Completed, completed.Status);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ValidatePickupAsync(new ValidateReturnPickupRequest("LK-01", deposited.PickupCode)));
+        Assert.Equal(ReturnRequestStatus.Completed, deposited.Status);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new ValidateReturnPickupRequest("LK-01", deposited.ReturnCode)));
     }
 
     private static ApplicationDbContext CreateDb() => new(new DbContextOptionsBuilder<ApplicationDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
@@ -48,6 +55,7 @@ public sealed class ReturnRequestServiceTests
         public Guid EnqueueDeliveryApprovalRequest(Guid residentUserId, Guid deliveryRequestId, string lockerCode) => Guid.NewGuid();
         public Guid EnqueueParcelStored(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, string compartmentCode) => Guid.NewGuid();
         public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => Guid.NewGuid();
+        public Guid EnqueueParcelTransferred(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string collectionAddress) => Guid.NewGuid();
         public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
     }

@@ -2,10 +2,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using smart_locking_be.Application.DTOs.Auth;
+using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Auth;
 using smart_locking_be.Infrastructure.Persistence;
+using smart_locking_be.Infrastructure.Services;
 
 namespace smart_locking_be.Tests.Auth;
 
@@ -14,7 +16,7 @@ public sealed class AuthServiceRegistrationTests
     private const string OtpCode = "123456";
 
     [Fact]
-    public async Task GetRegistrationLockersAsync_ReturnsOnlyOperationalLockers()
+    public async Task GetRegistrationOptionsAsync_ReturnsOnlyOperationalLockers()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Locker operational = CreateLocker(LockerOperationalStatus.Operational);
@@ -23,7 +25,7 @@ public sealed class AuthServiceRegistrationTests
         await dbContext.SaveChangesAsync();
 
         IReadOnlyCollection<RegistrationLockerResponse> result =
-            await CreateService(dbContext).GetRegistrationLockersAsync(default);
+            await new LockerService(dbContext).GetRegistrationOptionsAsync(default);
 
         RegistrationLockerResponse locker = Assert.Single(result);
         Assert.Equal(operational.Id, locker.Id);

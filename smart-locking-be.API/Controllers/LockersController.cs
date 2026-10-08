@@ -14,15 +14,40 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     /// <summary>
     /// Lấy danh sách tủ Locker (Admin xem tất cả, LockerOperator xem danh sách được phân công).
     /// </summary>
+    [HttpGet("registration-options")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetRegistrationOptions(CancellationToken cancellationToken) =>
+        Ok(await lockerService.GetRegistrationOptionsAsync(cancellationToken));
+
+    /// <summary>
+    /// Lấy danh sách tủ Locker (Admin xem tất cả, LockerOperator xem danh sách được phân công).
+    /// </summary>
     [HttpGet]
-    public async Task<IActionResult> GetLockers([FromQuery] string? search, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetLockers(
+        [FromQuery] string? search,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
         if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
         {
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => lockerService.GetLockersAsync(userId, userRole, search, cancellationToken));
+        return await ExecuteAsync(() => lockerService.GetLockersAsync(userId, userRole, search, cancellationToken, pageNumber, pageSize));
+    }
+
+    [HttpGet("operational-summary")]
+    public async Task<IActionResult> GetOperationalSummary(
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
+
+        return await ExecuteAsync(() => lockerService.GetOperationalSummaryAsync(
+            userId, userRole, cancellationToken, pageNumber, pageSize));
     }
 
     /// <summary>
@@ -58,7 +83,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     /// <summary>
     /// Cập nhật thông tin tủ Locker (Chỉ Administrator).
     /// </summary>
-    [HttpPut("{id:guid}")]
+    [HttpPatch("{id:guid}")]
     [Authorize(Roles = "Administrator")]
     public async Task<IActionResult> UpdateLocker(
         Guid id,
@@ -68,32 +93,38 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         return await ExecuteAsync(() => lockerService.UpdateLockerAsync(id, request, cancellationToken));
     }
 
-    /// <summary>
-    /// Vô hiệu hóa tủ Locker (Soft delete - chuyển OperationalStatus thành Inactive). Chỉ Admin mới được thực hiện.
-    /// </summary>
-    [HttpDelete("{id:guid}")]
-    [Authorize(Roles = "Administrator")]
-    public async Task<IActionResult> SoftDeleteLocker(Guid id, CancellationToken cancellationToken)
-    {
-        return await ExecuteAsync(async () =>
-        {
-            await lockerService.SoftDeleteLockerAsync(id, cancellationToken);
-            return NoContent();
-        });
-    }
-
-    /// <summary>
-    /// Lấy danh sách các ngăn (Compartments) thuộc tủ Locker.
-    /// </summary>
-    [HttpGet("{id:guid}/compartments")]
-    public async Task<IActionResult> GetCompartments(Guid id, CancellationToken cancellationToken)
+    [HttpPatch("{id:guid}/operational-status")]
+    public async Task<IActionResult> UpdateOperationalStatus(
+        Guid id,
+        [FromBody] UpdateOperationalStatusRequest request,
+        CancellationToken cancellationToken)
     {
         if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
         {
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => lockerService.GetCompartmentsAsync(userId, userRole, id, cancellationToken));
+        return await ExecuteAsync(() =>
+            lockerService.UpdateOperationalStatusAsync(userId, userRole, id, request, cancellationToken));
+    }
+
+    /// <summary>
+    /// Lấy danh sách các ngăn (Compartments) thuộc tủ Locker.
+    /// </summary>
+    [HttpGet("{id:guid}/compartments")]
+    public async Task<IActionResult> GetCompartments(
+        Guid id,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
+        }
+
+        return await ExecuteAsync(() => lockerService.GetCompartmentsAsync(
+            userId, userRole, id, cancellationToken, pageNumber, pageSize));
     }
 
     /// <summary>
@@ -116,12 +147,12 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     /// <summary>
     /// Cập nhật trạng thái vận hành của ngăn tủ (Locker Compartment). Administrator hoặc LockerOperator được phân công.
     /// </summary>
-    [HttpPut("{id:guid}/compartments/{compartmentId:guid}/status")]
+    [HttpPatch("{id:guid}/compartments/{compartmentId:guid}/operational-status")]
     [Authorize(Roles = "Administrator,LockerOperator")]
-    public async Task<IActionResult> UpdateCompartmentStatus(
+    public async Task<IActionResult> UpdateCompartmentOperationalStatus(
         Guid id,
         Guid compartmentId,
-        [FromBody] UpdateCompartmentStatusRequest request,
+        [FromBody] UpdateOperationalStatusRequest request,
         CancellationToken cancellationToken)
     {
         if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
@@ -129,7 +160,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => lockerService.UpdateCompartmentStatusAsync(userId, userRole, id, compartmentId, request, cancellationToken));
+        return await ExecuteAsync(() => lockerService.UpdateCompartmentOperationalStatusAsync(userId, userRole, id, compartmentId, request, cancellationToken));
     }
 
     private bool TryGetUserIdAndRole(out Guid userId, out string userRole)
@@ -141,31 +172,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
 
     private async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
     {
-        try
-        {
-            TResponse result = await action();
-            if (result is IActionResult actionResult)
-            {
-                return actionResult;
-            }
-
-            return Ok(result);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
+        TResponse result = await action();
+        return result is IActionResult actionResult ? actionResult : Ok(result);
     }
 }

@@ -11,12 +11,13 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
 {
     public async Task<DeviceInstallationResponse> RegisterAsync(
         Guid userId,
+        string installationId,
         RegisterDeviceInstallationRequest request,
         CancellationToken cancellationToken = default)
     {
         await EnsureActiveResidentAsync(userId, cancellationToken);
 
-        string installationId = RequireValue(request.InstallationId, nameof(request.InstallationId), 100);
+        installationId = RequireValue(installationId, nameof(installationId), 100);
         string expoPushToken = RequireExpoPushToken(request.ExpoPushToken);
         string platform = NormalizePlatform(request.Platform);
         DateTimeOffset now = DateTimeOffset.UtcNow;

@@ -93,6 +93,11 @@ public sealed class UserService(
         string? ipAddress = null,
         CancellationToken cancellationToken = default)
     {
+        if (request.Role != UserRole.LockerOperator)
+        {
+            throw new ArgumentException("API quản trị chỉ được tạo tài khoản nhân viên vận hành.", nameof(request.Role));
+        }
+
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
             throw new ArgumentException("Họ và tên không được để trống.", nameof(request.FullName));
@@ -146,8 +151,13 @@ public sealed class UserService(
 
         dbContext.ResidentProfiles.Add(profile);
 
-        if (request.LockerId.HasValue && request.Role == UserRole.LockerOperator)
+        if (request.LockerId.HasValue)
         {
+            if (!await dbContext.Lockers.AnyAsync(locker => locker.Id == request.LockerId.Value, cancellationToken))
+            {
+                throw new KeyNotFoundException("Không tìm thấy tủ locker được phân công.");
+            }
+
             var assignment = new OperatorAssignment
             {
                 Id = Guid.NewGuid(),
@@ -203,6 +213,11 @@ public sealed class UserService(
         if (user is null)
         {
             throw new KeyNotFoundException("Không tìm thấy người dùng.");
+        }
+
+        if (user.Role != UserRole.LockerOperator)
+        {
+            throw new InvalidOperationException("Thông tin cư dân phải được cập nhật qua API hồ sơ cư dân.");
         }
 
         if (string.IsNullOrWhiteSpace(request.FullName))
