@@ -189,19 +189,6 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         return MapToDetailResponse(locker);
     }
 
-    public async Task<bool> SoftDeleteLockerAsync(Guid lockerId, CancellationToken cancellationToken = default)
-    {
-        var locker = await dbContext.Lockers
-            .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
-
-        locker.OperationalStatus = LockerOperationalStatus.Inactive;
-        locker.UpdatedAt = DateTimeOffset.UtcNow;
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
-    }
-
     public async Task<IReadOnlyCollection<LockerCompartmentResponse>> GetCompartmentsAsync(
         Guid userId,
         string userRole,
@@ -297,60 +284,100 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         return MapCompartmentToResponse(compartment);
     }
 
-    public async Task<LockerCompartmentResponse> UpdateCompartmentStatusAsync(
+    public async Task<LockerDetailResponse> UpdateOperationalStatusAsync(
+        Guid userId,
+        string userRole,
+        Guid lockerId,
+        UpdateOperationalStatusRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureAccessAsync(userId, userRole, lockerId, cancellationToken);
+        if (!Enum.TryParse(request.Status, true, out LockerOperationalStatus status))
+        {
+            throw new ArgumentException("Trạng thái tủ không hợp lệ.", nameof(request));
+        }
+
+        Locker locker = await dbContext.Lockers
+            .Include(item => item.Compartments)
+            .SingleAsync(item => item.Id == lockerId, cancellationToken);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string previous = locker.OperationalStatus.ToString();
+        locker.OperationalStatus = status;
+        locker.UpdatedAt = now;
+        AddStatusEvent(lockerId, null, userId, previous, status.ToString(), request.Reason, now);
+        AddAudit(userId, "Locker.StatusChanged", nameof(Locker), lockerId, $"{previous} -> {status}: {request.Reason}", now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return MapToDetailResponse(locker);
+    }
+
+    public async Task<LockerCompartmentResponse> UpdateCompartmentOperationalStatusAsync(
         Guid userId,
         string userRole,
         Guid lockerId,
         Guid compartmentId,
-        UpdateCompartmentStatusRequest request,
+        UpdateOperationalStatusRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (!Enum.IsDefined(request.OperationalStatus))
+        if (!Enum.TryParse(request.Status, true, out LockerCompartmentOperationalStatus status))
         {
-            throw new ArgumentException($"Trạng thái vận hành ngăn tủ '{request.OperationalStatus}' không hợp lệ.", nameof(request.OperationalStatus));
+            throw new ArgumentException("Trạng thái ngăn tủ không hợp lệ.", nameof(request));
         }
 
-        var locker = await dbContext.Lockers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
+        await EnsureAccessAsync(userId, userRole, lockerId, cancellationToken);
+        Locker locker = await dbContext.Lockers.AsNoTracking().SingleAsync(item => item.Id == lockerId, cancellationToken);
 
         if (locker.OperationalStatus == LockerOperationalStatus.Inactive)
         {
             throw new InvalidOperationException("Tủ locker đã bị vô hiệu hóa (Inactive), không thể cập nhật trạng thái ngăn tủ.");
         }
 
-        if (userRole == nameof(UserRole.Administrator))
-        {
-            // Administrator được quyền cập nhật
-        }
-        else if (userRole == nameof(UserRole.LockerOperator))
-        {
-            var isAssigned = await dbContext.OperatorAssignments
-                .AsNoTracking()
-                .AnyAsync(a => a.OperatorUserId == userId && a.LockerId == lockerId && a.RevokedAt == null, cancellationToken);
-
-            if (!isAssigned)
-            {
-                throw new UnauthorizedAccessException("Bạn không có quyền cập nhật trạng thái ngăn tủ trong tủ locker này.");
-            }
-        }
-        else
-        {
-            throw new UnauthorizedAccessException($"Role '{userRole}' không có quyền cập nhật trạng thái ngăn tủ.");
-        }
-
-        var compartment = await dbContext.LockerCompartments
+        LockerCompartment compartment = await dbContext.LockerCompartments
             .FirstOrDefaultAsync(c => c.Id == compartmentId && c.LockerId == lockerId, cancellationToken)
             ?? throw new KeyNotFoundException($"Ngăn tủ với ID '{compartmentId}' không tồn tại trong tủ locker này.");
 
-        compartment.OperationalStatus = request.OperationalStatus;
-        compartment.UpdatedAt = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string previous = compartment.OperationalStatus.ToString();
+        compartment.OperationalStatus = status;
+        compartment.UpdatedAt = now;
+        AddStatusEvent(lockerId, compartment.Id, userId, previous, status.ToString(), request.Reason, now);
+        AddAudit(userId, "Compartment.StatusChanged", nameof(LockerCompartment), compartment.Id, $"{previous} -> {status}: {request.Reason}", now);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return MapCompartmentToResponse(compartment);
     }
+
+    private async Task EnsureAccessAsync(Guid userId, string userRole, Guid lockerId, CancellationToken cancellationToken)
+    {
+        if (!await dbContext.Lockers.AnyAsync(item => item.Id == lockerId, cancellationToken))
+        {
+            throw new KeyNotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
+        }
+        if (userRole == nameof(UserRole.Administrator)) return;
+        if (userRole != nameof(UserRole.LockerOperator) ||
+            !await dbContext.OperatorAssignments.AnyAsync(item =>
+                item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
+                cancellationToken))
+        {
+            throw new UnauthorizedAccessException("Bạn không có quyền cập nhật trạng thái tủ locker này.");
+        }
+    }
+
+    private void AddStatusEvent(Guid lockerId, Guid? compartmentId, Guid userId, string previous, string next, string reason, DateTimeOffset now) =>
+        dbContext.LockerEvents.Add(new LockerEvent
+        {
+            Id = Guid.NewGuid(), LockerId = lockerId, LockerCompartmentId = compartmentId, ActorUserId = userId,
+            EventType = LockerEventType.OperationalStatusChanged, PreviousValue = previous, NewValue = next,
+            Severity = next == "Operational" ? LockerEventSeverity.Info : LockerEventSeverity.Warning,
+            Reason = reason?.Trim(), OccurredAt = now, ReceivedAt = now
+        });
+
+    private void AddAudit(Guid userId, string action, string entityType, Guid entityId, string details, DateTimeOffset now) =>
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(), ActorUserId = userId, Action = action, EntityType = entityType,
+            EntityId = entityId, Result = AuditLogResult.Succeeded, Details = details, OccurredAt = now
+        });
 
     private static (string Code, string Address, string RecoveryAddress, string DeviceIdentifier) ValidateAndTrimLockerInput(
         string code, string address, string recoveryAddress, string deviceIdentifier)

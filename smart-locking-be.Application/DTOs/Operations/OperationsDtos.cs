@@ -6,7 +6,6 @@ public sealed record OperationalLockerResponse(Guid Id, string Code, string Addr
 public sealed record OperationalRecordResponse(string Kind, Guid Id, string Code, string Status, string LockerCode, string Summary, DateTimeOffset OccurredAt);
 public sealed record EmergencyUnlockRequest(Guid LockerId, Guid CompartmentId, Guid? IncidentId, string Reason);
 public sealed record EmergencyUnlockResponse(Guid Id, EmergencyUnlockResult Result, string CompartmentCode, DateTimeOffset RequestedAt);
-public sealed record UpdateOperationalStatusRequest(string Status, string Reason);
 public sealed record CreateMaintenanceRequest(Guid LockerId, Guid? CompartmentId, Guid? IncidentId, MaintenancePriority Priority, string Description);
 public sealed record UpdateMaintenanceRequest(MaintenanceStatus Status, string? Notes, string? ResolutionSummary);
 public sealed record MaintenanceResponse(Guid Id, string LockerCode, string? CompartmentCode, MaintenancePriority Priority, MaintenanceStatus Status, string Description, string? ResolutionSummary, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);

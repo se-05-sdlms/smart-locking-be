@@ -68,18 +68,19 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         return await ExecuteAsync(() => lockerService.UpdateLockerAsync(id, request, cancellationToken));
     }
 
-    /// <summary>
-    /// Vô hiệu hóa tủ Locker (Soft delete - chuyển OperationalStatus thành Inactive). Chỉ Admin mới được thực hiện.
-    /// </summary>
-    [HttpDelete("{id:guid}")]
-    [Authorize(Roles = "Administrator")]
-    public async Task<IActionResult> SoftDeleteLocker(Guid id, CancellationToken cancellationToken)
+    [HttpPatch("{id:guid}/operational-status")]
+    public async Task<IActionResult> UpdateOperationalStatus(
+        Guid id,
+        [FromBody] UpdateOperationalStatusRequest request,
+        CancellationToken cancellationToken)
     {
-        return await ExecuteAsync(async () =>
+        if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
         {
-            await lockerService.SoftDeleteLockerAsync(id, cancellationToken);
-            return NoContent();
-        });
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
+        }
+
+        return await ExecuteAsync(() =>
+            lockerService.UpdateOperationalStatusAsync(userId, userRole, id, request, cancellationToken));
     }
 
     /// <summary>
@@ -116,12 +117,12 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     /// <summary>
     /// Cập nhật trạng thái vận hành của ngăn tủ (Locker Compartment). Administrator hoặc LockerOperator được phân công.
     /// </summary>
-    [HttpPut("{id:guid}/compartments/{compartmentId:guid}/status")]
+    [HttpPatch("{id:guid}/compartments/{compartmentId:guid}/operational-status")]
     [Authorize(Roles = "Administrator,LockerOperator")]
-    public async Task<IActionResult> UpdateCompartmentStatus(
+    public async Task<IActionResult> UpdateCompartmentOperationalStatus(
         Guid id,
         Guid compartmentId,
-        [FromBody] UpdateCompartmentStatusRequest request,
+        [FromBody] UpdateOperationalStatusRequest request,
         CancellationToken cancellationToken)
     {
         if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
@@ -129,7 +130,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => lockerService.UpdateCompartmentStatusAsync(userId, userRole, id, compartmentId, request, cancellationToken));
+        return await ExecuteAsync(() => lockerService.UpdateCompartmentOperationalStatusAsync(userId, userRole, id, compartmentId, request, cancellationToken));
     }
 
     private bool TryGetUserIdAndRole(out Guid userId, out string userRole)

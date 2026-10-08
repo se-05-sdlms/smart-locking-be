@@ -23,7 +23,7 @@ public class ResidentsController(IResidentService residentService) : ControllerB
         return await ExecuteAsync(() => residentService.GetProfileAsync(userId, cancellationToken));
     }
 
-    [HttpPut("me")]
+    [HttpPatch("me")]
     public async Task<IActionResult> UpdateProfile(
         [FromBody] UpdateResidentProfileRequest request,
         CancellationToken cancellationToken)
@@ -34,19 +34,6 @@ public class ResidentsController(IResidentService residentService) : ControllerB
         }
 
         return await ExecuteAsync(() => residentService.UpdateProfileAsync(userId, request, cancellationToken));
-    }
-
-    [HttpPut("me/approval-mode")]
-    public async Task<IActionResult> UpdateApprovalMode(
-        [FromBody] UpdateApprovalModeRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
-
-        return await ExecuteAsync(() => residentService.UpdateApprovalModeAsync(userId, request, cancellationToken));
     }
 
     private bool TryGetUserId(out Guid userId)

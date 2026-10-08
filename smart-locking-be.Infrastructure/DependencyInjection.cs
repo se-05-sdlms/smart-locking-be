@@ -33,6 +33,7 @@ public static class DependencyInjection
         services.AddScoped<ITokenHashService, Sha256TokenHashService>();
         services.AddScoped<IResidentService, ResidentService>();
         services.AddScoped<ILockerService, LockerService>();
+        services.AddScoped<ICompartmentAllocationService, CompartmentAllocationService>();
         services.AddScoped<ILockerAccessService, LockerAccessService>();
         services.AddScoped<ILockerCommandDispatcher, MqttLockerCommandDispatcher>();
         services.AddHostedService<MqttLockerListenerService>();

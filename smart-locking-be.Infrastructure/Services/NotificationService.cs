@@ -51,9 +51,10 @@ public sealed class NotificationService(
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<NotificationResponse> MarkReadAsync(
+    public async Task<NotificationResponse> SetReadStateAsync(
         Guid userId,
         Guid notificationId,
+        bool isRead,
         CancellationToken cancellationToken)
     {
         Notification notification = await dbContext.Notifications.SingleOrDefaultAsync(
@@ -63,10 +64,10 @@ public sealed class NotificationService(
                 candidate.Channel == NotificationChannel.InApp,
             cancellationToken) ?? throw new KeyNotFoundException("Notification not found.");
 
-        if (!notification.IsRead)
+        if (notification.IsRead != isRead)
         {
-            notification.IsRead = true;
-            notification.ReadAt = timeProvider.GetUtcNow();
+            notification.IsRead = isRead;
+            notification.ReadAt = isRead ? timeProvider.GetUtcNow() : null;
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 

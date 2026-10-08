@@ -406,6 +406,7 @@ public sealed class DeliveryRequestServiceTests
             tokenHashService ?? new Sha256TokenHashService(),
             pushNotificationService ?? new RecordingPushNotificationService(),
             new SuccessfulLockerAccessService(),
+            new CompartmentAllocationService(dbContext, timeProvider ?? TimeProvider.System),
             timeProvider ?? TimeProvider.System);
 
     private static async Task<(Locker Locker, SystemPolicy Policy)> SeedLockerAndPolicyAsync(ApplicationDbContext dbContext)

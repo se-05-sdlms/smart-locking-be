@@ -10,9 +10,10 @@ public interface INotificationService
         int limit,
         CancellationToken cancellationToken);
 
-    Task<NotificationResponse> MarkReadAsync(
+    Task<NotificationResponse> SetReadStateAsync(
         Guid userId,
         Guid notificationId,
+        bool isRead,
         CancellationToken cancellationToken);
 
     Task<MarkAllNotificationsReadResponse> MarkAllReadAsync(

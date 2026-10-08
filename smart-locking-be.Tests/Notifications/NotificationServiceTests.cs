@@ -28,7 +28,7 @@ public sealed class NotificationServiceTests
     }
 
     [Fact]
-    public async Task MarkReadAsync_IsIdempotentAndSetsTimestamp()
+    public async Task SetReadStateAsync_IsIdempotentAndSetsTimestamp()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Guid userId = Guid.NewGuid();
@@ -37,9 +37,9 @@ public sealed class NotificationServiceTests
         await dbContext.SaveChangesAsync();
 
         NotificationResponse first = await CreateService(dbContext)
-            .MarkReadAsync(userId, notification.Id, default);
+            .SetReadStateAsync(userId, notification.Id, true, default);
         NotificationResponse second = await CreateService(dbContext)
-            .MarkReadAsync(userId, notification.Id, default);
+            .SetReadStateAsync(userId, notification.Id, true, default);
 
         Assert.True(first.IsRead);
         Assert.NotNull(first.ReadAt);
@@ -47,7 +47,7 @@ public sealed class NotificationServiceTests
     }
 
     [Fact]
-    public async Task MarkReadAsync_ForAnotherUser_ReturnsNotFound()
+    public async Task SetReadStateAsync_ForAnotherUser_ReturnsNotFound()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Notification notification = CreateNotification(Guid.NewGuid(), NotificationChannel.InApp);
@@ -55,7 +55,7 @@ public sealed class NotificationServiceTests
         await dbContext.SaveChangesAsync();
 
         await Assert.ThrowsAsync<KeyNotFoundException>(() => CreateService(dbContext)
-            .MarkReadAsync(Guid.NewGuid(), notification.Id, default));
+            .SetReadStateAsync(Guid.NewGuid(), notification.Id, true, default));
     }
 
     [Fact]

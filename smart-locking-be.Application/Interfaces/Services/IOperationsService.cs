@@ -7,8 +7,6 @@ public interface IOperationsService
     Task<IReadOnlyCollection<OperationalLockerResponse>> GetLockersAsync(Guid userId, string role, CancellationToken ct = default);
     Task<IReadOnlyCollection<OperationalRecordResponse>> SearchAsync(Guid userId, string role, string? query, Guid? lockerId, CancellationToken ct = default);
     Task<EmergencyUnlockResponse> EmergencyUnlockAsync(Guid userId, string role, EmergencyUnlockRequest request, CancellationToken ct = default);
-    Task UpdateLockerStatusAsync(Guid userId, string role, Guid lockerId, UpdateOperationalStatusRequest request, CancellationToken ct = default);
-    Task UpdateCompartmentStatusAsync(Guid userId, string role, Guid lockerId, Guid compartmentId, UpdateOperationalStatusRequest request, CancellationToken ct = default);
     Task<IReadOnlyCollection<MaintenanceResponse>> GetMaintenanceAsync(Guid userId, string role, CancellationToken ct = default);
     Task<MaintenanceResponse> CreateMaintenanceAsync(Guid userId, string role, CreateMaintenanceRequest request, CancellationToken ct = default);
     Task<MaintenanceResponse> UpdateMaintenanceAsync(Guid userId, string role, Guid id, UpdateMaintenanceRequest request, CancellationToken ct = default);

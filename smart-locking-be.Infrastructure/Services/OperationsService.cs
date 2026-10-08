@@ -52,28 +52,6 @@ public sealed class OperationsService(ApplicationDbContext db, ILockerAccessServ
         return new(entity.Id, entity.Result, compartment.Code, entity.RequestedAt);
     }
 
-    public async Task UpdateLockerStatusAsync(Guid userId, string role, Guid lockerId, UpdateOperationalStatusRequest request, CancellationToken ct = default)
-    {
-        await EnsureScope(userId, role, lockerId, ct);
-        if (!Enum.TryParse(request.Status, true, out LockerOperationalStatus status)) throw new ArgumentException("Trạng thái tủ không hợp lệ.");
-        Locker locker = await db.Lockers.FindAsync([lockerId], ct) ?? throw new KeyNotFoundException("Không tìm thấy tủ.");
-        string previous = locker.OperationalStatus.ToString(); locker.OperationalStatus = status; locker.UpdatedAt = clock.GetUtcNow();
-        db.LockerEvents.Add(Event(lockerId, null, userId, previous, status.ToString(), request.Reason));
-        Audit(userId, "Locker.StatusChanged", nameof(Locker), lockerId, $"{previous} -> {status}: {request.Reason}", locker.UpdatedAt);
-        await db.SaveChangesAsync(ct);
-    }
-
-    public async Task UpdateCompartmentStatusAsync(Guid userId, string role, Guid lockerId, Guid compartmentId, UpdateOperationalStatusRequest request, CancellationToken ct = default)
-    {
-        await EnsureScope(userId, role, lockerId, ct);
-        if (!Enum.TryParse(request.Status, true, out LockerCompartmentOperationalStatus status)) throw new ArgumentException("Trạng thái ngăn không hợp lệ.");
-        LockerCompartment item = await db.LockerCompartments.SingleOrDefaultAsync(x => x.Id == compartmentId && x.LockerId == lockerId, ct) ?? throw new KeyNotFoundException("Không tìm thấy ngăn tủ.");
-        string previous = item.OperationalStatus.ToString(); item.OperationalStatus = status; item.UpdatedAt = clock.GetUtcNow();
-        db.LockerEvents.Add(Event(lockerId, item.Id, userId, previous, status.ToString(), request.Reason));
-        Audit(userId, "Compartment.StatusChanged", nameof(LockerCompartment), item.Id, $"{previous} -> {status}: {request.Reason}", item.UpdatedAt);
-        await db.SaveChangesAsync(ct);
-    }
-
     public async Task<IReadOnlyCollection<MaintenanceResponse>> GetMaintenanceAsync(Guid userId, string role, CancellationToken ct = default)
     {
         IQueryable<MaintenanceRequest> q = db.MaintenanceRequests.Include(x => x.Locker).Include(x => x.LockerCompartment);
@@ -145,7 +123,6 @@ public sealed class OperationsService(ApplicationDbContext db, ILockerAccessServ
 
     private IQueryable<Locker> ScopeLockers(Guid userId, string role) => role switch { nameof(UserRole.Administrator) => db.Lockers, nameof(UserRole.LockerOperator) => db.Lockers.Where(x => db.OperatorAssignments.Any(a => a.OperatorUserId == userId && a.LockerId == x.Id && a.RevokedAt == null)), _ => throw new UnauthorizedAccessException() };
     private async Task EnsureScope(Guid userId, string role, Guid lockerId, CancellationToken ct) { if (!await ScopeLockers(userId, role).AnyAsync(x => x.Id == lockerId, ct)) throw new UnauthorizedAccessException("Tủ không thuộc phạm vi vận hành."); }
-    private LockerEvent Event(Guid lockerId, Guid? compartmentId, Guid userId, string previous, string next, string reason) { DateTimeOffset now = clock.GetUtcNow(); return new() { Id = Guid.NewGuid(), LockerId = lockerId, LockerCompartmentId = compartmentId, ActorUserId = userId, EventType = LockerEventType.OperationalStatusChanged, PreviousValue = previous, NewValue = next, Severity = next == "Operational" ? LockerEventSeverity.Info : LockerEventSeverity.Warning, Reason = reason?.Trim(), OccurredAt = now, ReceivedAt = now }; }
     private void Audit(Guid? userId, string action, string type, Guid id, string? details, DateTimeOffset now) => db.AuditLogs.Add(new AuditLog { Id = Guid.NewGuid(), ActorUserId = userId, Action = action, EntityType = type, EntityId = id, Result = AuditLogResult.Succeeded, Details = details, OccurredAt = now });
     private async Task<MaintenanceResponse> LoadMaintenance(Guid id, CancellationToken ct) => MapMaintenance(await db.MaintenanceRequests.Include(x => x.Locker).Include(x => x.LockerCompartment).SingleAsync(x => x.Id == id, ct));
     private static MaintenanceResponse MapMaintenance(MaintenanceRequest x) => new(x.Id, x.Locker.Code, x.LockerCompartment == null ? null : x.LockerCompartment.Code, x.Priority, x.Status, x.Description, x.ResolutionSummary, x.CreatedAt, x.UpdatedAt);

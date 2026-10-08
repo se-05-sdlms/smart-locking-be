@@ -23,7 +23,13 @@ public sealed class ReturnRequestServiceTests
         LockerCompartment compartment = new() { Id = compartmentId, LockerId = lockerId, Locker = locker, Code = "A01", HardwareCode = "A01", HardwareChannel = 1, OperationalStatus = LockerCompartmentOperationalStatus.Operational, DoorStatus = DoorStatus.Closed, CreatedAt = now, UpdatedAt = now };
         db.AddRange(user, locker, resident, compartment, new SystemPolicy { Id = Guid.NewGuid(), Version = 1, IsActive = true, GuestSessionTimeoutMinutes = 10, CompartmentReservationMinutes = 10, Currency = "VND", EffectiveFrom = now, CreatedAt = now, CreatedByUserId = Guid.NewGuid() });
         await db.SaveChangesAsync();
-        var service = new ReturnRequestService(db, new SuccessfulAccess(), new NoopPush(), new Sha256TokenHashService(), TimeProvider.System);
+        var service = new ReturnRequestService(
+            db,
+            new SuccessfulAccess(),
+            new CompartmentAllocationService(db, TimeProvider.System),
+            new NoopPush(),
+            new Sha256TokenHashService(),
+            TimeProvider.System);
 
         ReturnRequestResponse created = await service.CreateAsync(userId, new CreateReturnRequest("https://example.com/return.jpg", null));
         ReturnUnlockResponse opened = await service.OpenCompartmentAsync(userId, created.Id);

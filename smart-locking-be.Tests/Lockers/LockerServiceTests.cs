@@ -126,7 +126,7 @@ public sealed class LockerServiceTests
     }
 
     [Fact]
-    public async Task UpdateCompartmentStatusAsync_AsAssignedOperator_UpdatesStatusSuccessfully()
+    public async Task UpdateCompartmentOperationalStatusAsync_AsAssignedOperator_UpdatesStatusSuccessfully()
     {
         await using var dbContext = CreateInMemoryDbContext();
         var service = new LockerService(dbContext);
@@ -147,14 +147,14 @@ public sealed class LockerServiceTests
         });
         await dbContext.SaveChangesAsync();
 
-        var updateReq = new UpdateCompartmentStatusRequest(LockerCompartmentOperationalStatus.OutOfService);
-        var result = await service.UpdateCompartmentStatusAsync(operatorId, nameof(UserRole.LockerOperator), locker.Id, compartment.Id, updateReq);
+        var updateReq = new UpdateOperationalStatusRequest(nameof(LockerCompartmentOperationalStatus.OutOfService), "Maintenance");
+        var result = await service.UpdateCompartmentOperationalStatusAsync(operatorId, nameof(UserRole.LockerOperator), locker.Id, compartment.Id, updateReq);
 
         Assert.Equal(LockerCompartmentOperationalStatus.OutOfService, result.OperationalStatus);
     }
 
     [Fact]
-    public async Task UpdateCompartmentStatusAsync_AsUnassignedOperator_ThrowsUnauthorizedAccessException()
+    public async Task UpdateCompartmentOperationalStatusAsync_AsUnassignedOperator_ThrowsUnauthorizedAccessException()
     {
         await using var dbContext = CreateInMemoryDbContext();
         var service = new LockerService(dbContext);
@@ -163,22 +163,24 @@ public sealed class LockerServiceTests
         var compartment = await service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A01", "HW-01", 1));
 
         var unassignedOperatorId = Guid.NewGuid();
-        var updateReq = new UpdateCompartmentStatusRequest(LockerCompartmentOperationalStatus.OutOfService);
+        var updateReq = new UpdateOperationalStatusRequest(nameof(LockerCompartmentOperationalStatus.OutOfService), "Maintenance");
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-            service.UpdateCompartmentStatusAsync(unassignedOperatorId, nameof(UserRole.LockerOperator), locker.Id, compartment.Id, updateReq));
+            service.UpdateCompartmentOperationalStatusAsync(unassignedOperatorId, nameof(UserRole.LockerOperator), locker.Id, compartment.Id, updateReq));
     }
 
     [Fact]
-    public async Task SoftDeleteLockerAsync_SetsOperationalStatusToInactive()
+    public async Task UpdateOperationalStatusAsync_SetsOperationalStatusToInactive()
     {
         await using var dbContext = CreateInMemoryDbContext();
         var service = new LockerService(dbContext);
 
         var created = await service.CreateLockerAsync(new CreateLockerRequest("LCK-001", "Addr 1", "Rec 1", "DEV-001"));
 
-        var result = await service.SoftDeleteLockerAsync(created.Id);
-        Assert.True(result);
+        var result = await service.UpdateOperationalStatusAsync(
+            Guid.NewGuid(), nameof(UserRole.Administrator), created.Id,
+            new UpdateOperationalStatusRequest(nameof(LockerOperationalStatus.Inactive), "Decommissioned"));
+        Assert.Equal(LockerOperationalStatus.Inactive, result.OperationalStatus);
 
         var locker = await dbContext.Lockers.FirstAsync(l => l.Id == created.Id);
         Assert.Equal(LockerOperationalStatus.Inactive, locker.OperationalStatus);
@@ -204,7 +206,7 @@ public sealed class LockerServiceTests
     }
 
     [Fact]
-    public async Task UpdateCompartmentStatusAsync_AsAdmin_UpdatesStatusSuccessfully()
+    public async Task UpdateCompartmentOperationalStatusAsync_AsAdmin_UpdatesStatusSuccessfully()
     {
         await using var dbContext = CreateInMemoryDbContext();
         var service = new LockerService(dbContext);
@@ -213,37 +215,37 @@ public sealed class LockerServiceTests
         var compartment = await service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A01", "HW-01", 1));
 
         var adminId = Guid.NewGuid();
-        var updateReq = new UpdateCompartmentStatusRequest(LockerCompartmentOperationalStatus.OutOfService);
-        var result = await service.UpdateCompartmentStatusAsync(adminId, nameof(UserRole.Administrator), locker.Id, compartment.Id, updateReq);
+        var updateReq = new UpdateOperationalStatusRequest(nameof(LockerCompartmentOperationalStatus.OutOfService), "Maintenance");
+        var result = await service.UpdateCompartmentOperationalStatusAsync(adminId, nameof(UserRole.Administrator), locker.Id, compartment.Id, updateReq);
 
         Assert.Equal(LockerCompartmentOperationalStatus.OutOfService, result.OperationalStatus);
     }
 
     [Fact]
-    public async Task UpdateCompartmentStatusAsync_LockerNotFound_ThrowsKeyNotFoundException()
+    public async Task UpdateCompartmentOperationalStatusAsync_LockerNotFound_ThrowsKeyNotFoundException()
     {
         await using var dbContext = CreateInMemoryDbContext();
         var service = new LockerService(dbContext);
 
         var adminId = Guid.NewGuid();
-        var updateReq = new UpdateCompartmentStatusRequest(LockerCompartmentOperationalStatus.OutOfService);
+        var updateReq = new UpdateOperationalStatusRequest(nameof(LockerCompartmentOperationalStatus.OutOfService), "Maintenance");
 
         await Assert.ThrowsAsync<KeyNotFoundException>(() =>
-            service.UpdateCompartmentStatusAsync(adminId, nameof(UserRole.Administrator), Guid.NewGuid(), Guid.NewGuid(), updateReq));
+            service.UpdateCompartmentOperationalStatusAsync(adminId, nameof(UserRole.Administrator), Guid.NewGuid(), Guid.NewGuid(), updateReq));
     }
 
     [Fact]
-    public async Task UpdateCompartmentStatusAsync_CompartmentNotFound_ThrowsKeyNotFoundException()
+    public async Task UpdateCompartmentOperationalStatusAsync_CompartmentNotFound_ThrowsKeyNotFoundException()
     {
         await using var dbContext = CreateInMemoryDbContext();
         var service = new LockerService(dbContext);
 
         var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-001", "Addr 1", "Rec 1", "DEV-001"));
         var adminId = Guid.NewGuid();
-        var updateReq = new UpdateCompartmentStatusRequest(LockerCompartmentOperationalStatus.OutOfService);
+        var updateReq = new UpdateOperationalStatusRequest(nameof(LockerCompartmentOperationalStatus.OutOfService), "Maintenance");
 
         await Assert.ThrowsAsync<KeyNotFoundException>(() =>
-            service.UpdateCompartmentStatusAsync(adminId, nameof(UserRole.Administrator), locker.Id, Guid.NewGuid(), updateReq));
+            service.UpdateCompartmentOperationalStatusAsync(adminId, nameof(UserRole.Administrator), locker.Id, Guid.NewGuid(), updateReq));
     }
 
     [Theory]
@@ -275,16 +277,16 @@ public sealed class LockerServiceTests
     [Theory]
     [InlineData(nameof(UserRole.Resident))]
     [InlineData("")]
-    public async Task UpdateCompartmentStatusAsync_AsInvalidRole_ThrowsUnauthorizedAccessException(string role)
+    public async Task UpdateCompartmentOperationalStatusAsync_AsInvalidRole_ThrowsUnauthorizedAccessException(string role)
     {
         await using var dbContext = CreateInMemoryDbContext();
         var service = new LockerService(dbContext);
         var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-001", "Addr 1", "Rec 1", "DEV-001"));
         var compartment = await service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A01", "HW-01", 1));
-        var updateReq = new UpdateCompartmentStatusRequest(LockerCompartmentOperationalStatus.OutOfService);
+        var updateReq = new UpdateOperationalStatusRequest(nameof(LockerCompartmentOperationalStatus.OutOfService), "Maintenance");
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-            service.UpdateCompartmentStatusAsync(Guid.NewGuid(), role, locker.Id, compartment.Id, updateReq));
+            service.UpdateCompartmentOperationalStatusAsync(Guid.NewGuid(), role, locker.Id, compartment.Id, updateReq));
     }
 
     [Theory]
@@ -355,21 +357,21 @@ public sealed class LockerServiceTests
     }
 
     [Fact]
-    public async Task UpdateCompartmentStatusAsync_WithInvalidEnumStatus_ThrowsArgumentException()
+    public async Task UpdateCompartmentOperationalStatusAsync_WithInvalidEnumStatus_ThrowsArgumentException()
     {
         await using var dbContext = CreateInMemoryDbContext();
         var service = new LockerService(dbContext);
         var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-001", "Addr 1", "Rec 1", "DEV-001"));
         var compartment = await service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A01", "HW-01", 1));
 
-        var invalidStatusRequest = new UpdateCompartmentStatusRequest((LockerCompartmentOperationalStatus)999);
+        var invalidStatusRequest = new UpdateOperationalStatusRequest("Invalid", "Maintenance");
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            service.UpdateCompartmentStatusAsync(Guid.NewGuid(), nameof(UserRole.Administrator), locker.Id, compartment.Id, invalidStatusRequest));
+            service.UpdateCompartmentOperationalStatusAsync(Guid.NewGuid(), nameof(UserRole.Administrator), locker.Id, compartment.Id, invalidStatusRequest));
     }
 
     [Fact]
-    public async Task UpdateCompartmentStatusAsync_WhenLockerIsInactive_ThrowsInvalidOperationException()
+    public async Task UpdateCompartmentOperationalStatusAsync_WhenLockerIsInactive_ThrowsInvalidOperationException()
     {
         await using var dbContext = CreateInMemoryDbContext();
         var service = new LockerService(dbContext);
@@ -389,13 +391,14 @@ public sealed class LockerServiceTests
         });
         await dbContext.SaveChangesAsync();
 
-        // Soft-delete locker
-        await service.SoftDeleteLockerAsync(locker.Id);
+        await service.UpdateOperationalStatusAsync(
+            adminId, nameof(UserRole.Administrator), locker.Id,
+            new UpdateOperationalStatusRequest(nameof(LockerOperationalStatus.Inactive), "Decommissioned"));
 
-        var updateReq = new UpdateCompartmentStatusRequest(LockerCompartmentOperationalStatus.OutOfService);
+        var updateReq = new UpdateOperationalStatusRequest(nameof(LockerCompartmentOperationalStatus.OutOfService), "Maintenance");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.UpdateCompartmentStatusAsync(operatorId, nameof(UserRole.LockerOperator), locker.Id, compartment.Id, updateReq));
+            service.UpdateCompartmentOperationalStatusAsync(operatorId, nameof(UserRole.LockerOperator), locker.Id, compartment.Id, updateReq));
     }
 
     [Fact]
@@ -405,8 +408,9 @@ public sealed class LockerServiceTests
         var service = new LockerService(dbContext);
         var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-001", "Addr 1", "Rec 1", "DEV-001"));
 
-        // Soft-delete locker
-        await service.SoftDeleteLockerAsync(locker.Id);
+        await service.UpdateOperationalStatusAsync(
+            Guid.NewGuid(), nameof(UserRole.Administrator), locker.Id,
+            new UpdateOperationalStatusRequest(nameof(LockerOperationalStatus.Inactive), "Decommissioned"));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A01", "HW-01", 1)));

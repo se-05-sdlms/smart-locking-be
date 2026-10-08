@@ -21,13 +21,16 @@ public sealed class NotificationsController(INotificationService notificationSer
         await ExecuteForCurrentUserAsync(userId =>
             notificationService.GetForUserAsync(userId, unreadOnly, limit, cancellationToken));
 
-    [HttpPatch("{id:guid}/read")]
+    [HttpPatch("{id:guid}")]
     [Authorize(Policy = ApiPolicies.Resident)]
-    public async Task<IActionResult> MarkRead(Guid id, CancellationToken cancellationToken) =>
+    public async Task<IActionResult> Update(
+        Guid id,
+        UpdateNotificationRequest request,
+        CancellationToken cancellationToken) =>
         await ExecuteForCurrentUserAsync(userId =>
-            notificationService.MarkReadAsync(userId, id, cancellationToken));
+            notificationService.SetReadStateAsync(userId, id, request.IsRead, cancellationToken));
 
-    [HttpPatch("read-all")]
+    [HttpPost("/api/notifications:markAllRead")]
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> MarkAllRead(CancellationToken cancellationToken) =>
         await ExecuteForCurrentUserAsync(userId =>
