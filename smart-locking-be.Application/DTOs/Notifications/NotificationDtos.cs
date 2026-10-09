@@ -34,3 +34,5 @@ public sealed record NotificationRuleResponse(
     NotificationChannel Channel,
     int? LeadTimeMinutes,
     bool IsEnabled);
+
+public sealed record UpdateNotificationRuleRequest(int? LeadTimeMinutes, bool IsEnabled);

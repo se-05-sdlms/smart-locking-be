@@ -10,10 +10,18 @@ public sealed class AuditLogsController(IAuditLogService service) : ControllerBa
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] string? query,
+        [FromQuery] Guid? actorUserId,
+        [FromQuery] string? action,
+        [FromQuery] string? entityType,
+        [FromQuery] Guid? entityId,
         [FromQuery] DateTimeOffset? from,
         [FromQuery] DateTimeOffset? to,
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default) =>
-        Ok(await service.GetAsync(query, from, to, cancellationToken, pageNumber, pageSize));
+        Ok(await service.GetAsync(query, actorUserId, action, entityType, entityId, from, to, cancellationToken, pageNumber, pageSize));
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken) =>
+        Ok(await service.GetByIdAsync(id, cancellationToken));
 }

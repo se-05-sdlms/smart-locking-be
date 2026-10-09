@@ -33,6 +33,12 @@ public interface IUserService
         string? ipAddress = null,
         CancellationToken cancellationToken = default);
 
+    Task<ResetUserCredentialsResponse> ResetCredentialsAsync(
+        Guid actorAdminId,
+        Guid id,
+        string? ipAddress = null,
+        CancellationToken cancellationToken = default);
+
     Task<OperatorAssignmentResponse> AssignOperatorScopeAsync(
         Guid actorAdminId,
         Guid operatorId,

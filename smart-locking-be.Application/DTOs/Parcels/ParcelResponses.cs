@@ -45,8 +45,6 @@ public sealed record ParcelDetailResponse(
     Guid CompartmentId,
     string CompartmentCode,
     string? ParcelImageUrl,
-    string? ShipperName,
-    string? ShipperPhone,
     DateTimeOffset StoredAt,
     DateTimeOffset PickupDueAt,
     DateTimeOffset MaxStorageUntil,

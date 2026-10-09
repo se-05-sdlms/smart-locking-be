@@ -11,7 +11,8 @@ namespace smart_locking_be.Infrastructure.Services;
 public sealed class OperationalRecordService(ApplicationDbContext dbContext) : IOperationalRecordService
 {
     public async Task<PagedResult<OperationalRecordResponse>> SearchAsync(
-        Guid userId, string role, string? query, Guid? lockerId,
+        Guid userId, string role, string? query, Guid? lockerId, string? kind,
+        DateTimeOffset? from, DateTimeOffset? to,
         CancellationToken cancellationToken = default, int pageNumber = 1, int pageSize = 20)
     {
         HashSet<Guid> scope = (await ScopeLockers(userId, role).Select(item => item.Id)
@@ -62,10 +63,127 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
         result.AddRange(await compartments.OrderByDescending(item => item.UpdatedAt).Take(50).Select(item => new OperationalRecordResponse("LockerCompartment", item.Id, item.Code, item.OperationalStatus.ToString(), item.Locker.Code, item.HardwareCode, item.UpdatedAt)).ToListAsync(cancellationToken));
         pageNumber = Math.Max(pageNumber, 1);
         pageSize = Math.Clamp(pageSize, 1, 100);
-        OperationalRecordResponse[] ordered = result.OrderByDescending(item => item.OccurredAt).ToArray();
+        IEnumerable<OperationalRecordResponse> filtered = result;
+        if (!string.IsNullOrWhiteSpace(kind))
+            filtered = filtered.Where(item => item.Kind.Equals(kind.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (from.HasValue) filtered = filtered.Where(item => item.OccurredAt >= from);
+        if (to.HasValue) filtered = filtered.Where(item => item.OccurredAt < to);
+        OperationalRecordResponse[] ordered = filtered.OrderByDescending(item => item.OccurredAt).ToArray();
         return new PagedResult<OperationalRecordResponse>(
             ordered.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToArray(),
             ordered.Length, pageNumber, pageSize);
+    }
+
+    public async Task<OperationalRecordDetailResponse> GetDetailAsync(
+        Guid userId, string role, string kind, Guid id, CancellationToken cancellationToken = default)
+    {
+        string normalized = kind.Trim().ToLowerInvariant();
+        OperationalRecordDetailResponse? result;
+        switch (normalized)
+        {
+            case "parcel":
+                {
+                    Parcel? item = await dbContext.Parcels.AsNoTracking()
+                        .Include(item => item.DeliveryRequest).ThenInclude(item => item.Locker)
+                        .Include(item => item.DeliveryRequest).ThenInclude(item => item.AllocatedCompartment)
+                        .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+                    result = item is null ? null : new OperationalRecordDetailResponse(
+                        "Parcel", item.Id, item.ParcelCode, item.Status.ToString(),
+                        item.DeliveryRequest.LockerId, item.DeliveryRequest.Locker.Code, item.UpdatedAt,
+                        new Dictionary<string, string?>
+                        {
+                            ["compartmentCode"] = item.DeliveryRequest.AllocatedCompartment?.Code,
+                            ["storedAt"] = item.StoredAt.ToString("O"),
+                            ["pickupDueAt"] = item.PickupDueAt.ToString("O"),
+                            ["maxStorageUntil"] = item.MaxStorageUntil.ToString("O")
+                        });
+                    break;
+                }
+            case "return":
+            case "return-request":
+                {
+                    ReturnRequest? item = await dbContext.ReturnRequests.AsNoTracking()
+                        .Include(item => item.Locker).Include(item => item.AllocatedCompartment)
+                        .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+                    result = item is null ? null : new OperationalRecordDetailResponse(
+                        "ReturnRequest", item.Id, item.ReturnCode, item.Status.ToString(), item.LockerId, item.Locker.Code,
+                        item.UpdatedAt, new Dictionary<string, string?>
+                        {
+                            ["compartmentCode"] = item.AllocatedCompartment == null ? null : item.AllocatedCompartment.Code,
+                            ["residentDepositedAt"] = item.ResidentDepositedAt.HasValue ? item.ResidentDepositedAt.Value.ToString("O") : null,
+                            ["pickedUpAt"] = item.ShipperPickedUpAt.HasValue ? item.ShipperPickedUpAt.Value.ToString("O") : null
+                        });
+                    break;
+                }
+            case "deliveryrequest":
+            case "delivery-request":
+                {
+                    DeliveryRequest? item = await dbContext.DeliveryRequests.AsNoTracking()
+                        .Include(item => item.Locker).Include(item => item.AllocatedCompartment)
+                        .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+                    result = item is null ? null : new OperationalRecordDetailResponse(
+                        "DeliveryRequest", item.Id, item.Id.ToString(), item.Status.ToString(), item.LockerId, item.Locker.Code,
+                        item.UpdatedAt, new Dictionary<string, string?>
+                        {
+                            ["recipientPhone"] = item.RecipientPhoneSnapshot,
+                            ["compartmentCode"] = item.AllocatedCompartment == null ? null : item.AllocatedCompartment.Code,
+                            ["depositedAt"] = item.DepositedAt.HasValue ? item.DepositedAt.Value.ToString("O") : null
+                        });
+                    break;
+                }
+            case "incident":
+                {
+                    Incident? item = await dbContext.Incidents.AsNoTracking().Include(item => item.Locker)
+                        .SingleOrDefaultAsync(item => item.Id == id && item.LockerId.HasValue, cancellationToken);
+                    result = item is null ? null : new OperationalRecordDetailResponse(
+                        "Incident", item.Id, item.Id.ToString(), item.Status.ToString(), item.LockerId!.Value, item.Locker!.Code,
+                        item.UpdatedAt, new Dictionary<string, string?>
+                        {
+                            ["type"] = item.Type,
+                            ["title"] = item.Title,
+                            ["description"] = item.Description,
+                            ["resolution"] = item.ResolutionSummary
+                        });
+                    break;
+                }
+            case "maintenancerequest":
+            case "maintenance-request":
+                {
+                    MaintenanceRequest? item = await dbContext.MaintenanceRequests.AsNoTracking().Include(item => item.Locker)
+                        .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+                    result = item is null ? null : new OperationalRecordDetailResponse(
+                        "MaintenanceRequest", item.Id, item.Id.ToString(), item.Status.ToString(), item.LockerId, item.Locker.Code,
+                        item.UpdatedAt, new Dictionary<string, string?>
+                        {
+                            ["priority"] = item.Priority.ToString(),
+                            ["description"] = item.Description,
+                            ["resolution"] = item.ResolutionSummary
+                        });
+                    break;
+                }
+            case "lockerevent":
+            case "locker-event":
+                {
+                    LockerEvent? item = await dbContext.LockerEvents.AsNoTracking().Include(item => item.Locker)
+                        .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+                    result = item is null ? null : new OperationalRecordDetailResponse(
+                        "LockerEvent", item.Id, item.Id.ToString(), item.EventType.ToString(), item.LockerId, item.Locker.Code,
+                        item.OccurredAt, new Dictionary<string, string?>
+                        {
+                            ["severity"] = item.Severity.ToString(),
+                            ["previousValue"] = item.PreviousValue,
+                            ["newValue"] = item.NewValue,
+                            ["reason"] = item.Reason,
+                            ["details"] = item.Details
+                        });
+                    break;
+                }
+            default:
+                throw new ArgumentException("Operational record kind is invalid.", nameof(kind));
+        }
+        if (result is null || !await ScopeLockers(userId, role).AnyAsync(item => item.Id == result.LockerId, cancellationToken))
+            throw new KeyNotFoundException("Operational record not found.");
+        return result;
     }
 
     private IQueryable<Locker> ScopeLockers(Guid userId, string role) => role switch

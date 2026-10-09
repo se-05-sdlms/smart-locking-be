@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -13,7 +14,8 @@ public sealed class ParcelService(
     ApplicationDbContext dbContext,
     ILockerAccessService lockerAccessService,
     IPushNotificationService pushNotificationService,
-    TimeProvider timeProvider) : IParcelService
+    TimeProvider timeProvider,
+    IOperationsRealtimeNotifier? realtimeNotifier = null) : IParcelService
 {
     public async Task<PagedResult<ParcelListItemResponse>> GetParcelsAsync(
         Guid userId,
@@ -107,8 +109,6 @@ public sealed class ParcelService(
                 parcel.DeliveryRequest.AllocatedCompartmentId!.Value,
                 parcel.DeliveryRequest.AllocatedCompartment!.Code,
                 parcel.DeliveryRequest.ParcelImageUrl,
-                parcel.DeliveryRequest.ShipperName,
-                parcel.DeliveryRequest.ShipperPhone,
                 parcel.StoredAt,
                 parcel.PickupDueAt,
                 parcel.MaxStorageUntil,
@@ -228,6 +228,7 @@ public sealed class ParcelService(
             ChangedAt = completedAt,
         });
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishAsync(parcel, completedAt, cancellationToken);
     }
 
     public async Task<OverdueTransferResponse> TransferOverdueAsync(
@@ -260,18 +261,33 @@ public sealed class ParcelService(
             parcel.DeliveryRequest.Locker.RecoveryAddress);
         dbContext.AuditLogs.Add(new AuditLog
         {
-            Id = Guid.NewGuid(), ActorUserId = userId, Action = "Parcel.Transferred",
-            EntityType = nameof(Parcel), EntityId = parcel.Id, Result = AuditLogResult.Succeeded,
-            Details = parcel.DeliveryRequest.Locker.RecoveryAddress, OccurredAt = now
+            Id = Guid.NewGuid(),
+            ActorUserId = userId,
+            Action = "Parcel.Transferred",
+            EntityType = nameof(Parcel),
+            EntityId = parcel.Id,
+            Result = AuditLogResult.Succeeded,
+            Details = parcel.DeliveryRequest.Locker.RecoveryAddress,
+            OccurredAt = now
         });
         await dbContext.SaveChangesAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushId, cancellationToken);
+        await PublishAsync(parcel, now, cancellationToken);
         return new OverdueTransferResponse(
             parcel.Id,
             parcel.ParcelCode,
             parcel.DeliveryRequest.Locker.RecoveryAddress,
             parcel.Status.ToString());
     }
+
+    private Task PublishAsync(Parcel parcel, DateTimeOffset occurredAt, CancellationToken cancellationToken) =>
+        realtimeNotifier?.PublishToLockerAsync(parcel.DeliveryRequest.LockerId, new RealtimeEvent(
+            "ParcelUpdated",
+            parcel.Id,
+            parcel.DeliveryRequest.LockerId,
+            parcel.Status.ToString(),
+            null,
+            occurredAt), cancellationToken) ?? Task.CompletedTask;
 
     private async Task EnsureOperationalAccessAsync(Guid userId, string role, Guid lockerId, CancellationToken cancellationToken)
     {

@@ -1,7 +1,9 @@
 using Serilog;
 using smart_locking_be.API.Extensions;
 using smart_locking_be.API.Services;
+using smart_locking_be.API.Middleware;
 using smart_locking_be.Application.Interfaces.Services;
+using smart_locking_be.API.Hubs;
 
 namespace smart_locking_be.API;
 
@@ -17,9 +19,11 @@ public static class DependencyInjection
     {
         // 1. Controllers & API Behavior
         services.AddControllers();
+        services.AddSignalR();
         services.AddProblemDetails();
         services.AddExceptionHandler<ApiExceptionHandler>();
         services.AddScoped<IImageStorageService, LocalImageStorageService>();
+        services.AddScoped<IOperationsRealtimeNotifier, SignalROperationsRealtimeNotifier>();
 
         // 2. CORS Policy Configuration
         services.AddCorsPolicy(configuration, environment);
@@ -44,6 +48,7 @@ public static class DependencyInjection
 
         // 9. Periodic overdue parcel fee calculation
         services.AddHostedService<OverdueChargeWorker>();
+        services.AddHostedService<ParcelReminderWorker>();
 
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE CẤP API TRONG TƯƠNG LAI:
         // Khi cần tạo các service hoặc BackgroundWorker ở tầng API, thực hiện đăng ký tại đây:
@@ -88,6 +93,8 @@ public static class DependencyInjection
         // 6. Xác thực danh tính người dùng (Authentication)
         app.UseAuthentication();
 
+        app.UseMiddleware<PasswordChangeRequiredMiddleware>();
+
         // 7. Giới hạn số lượng request (Rate Limiting)
         app.UseApiRateLimiting();
 
@@ -99,6 +106,7 @@ public static class DependencyInjection
 
         // 10. Ánh xạ các Controller endpoints
         app.MapControllers();
+        app.MapHub<OperationsHub>("/hubs/operations");
 
         return app;
     }

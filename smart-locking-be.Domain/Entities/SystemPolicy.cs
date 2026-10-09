@@ -68,6 +68,11 @@ public sealed class SystemPolicy
     public int ClearanceNoticeBeforeHours { get; set; }
 
     /// <summary>
+    /// Ngày đếm đầu tiên bắt đầu gửi nhắc nhận hàng hằng ngày (1-based).
+    /// </summary>
+    public int PickupReminderStartDay { get; set; } = 5;
+
+    /// <summary>
     /// Số lần nhập mã OTP sai tối đa cho phép trước khi tạm thời khóa xác thực.
     /// </summary>
     public int OtpMaxAttempts { get; set; }

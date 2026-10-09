@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -144,11 +145,13 @@ public sealed class ParcelServiceTests
         dbContext.Users.Add(administrator);
         await dbContext.SaveChangesAsync();
         var pushNotifications = new RecordingPushNotificationService();
+        var realtimeNotifier = new RecordingRealtimeNotifier();
         var service = new ParcelService(
             dbContext,
             new UnusedLockerAccessService(),
             pushNotifications,
-            TimeProvider.System);
+            TimeProvider.System,
+            realtimeNotifier);
 
         OverdueTransferResponse response = await service.TransferOverdueAsync(
             administrator.Id,
@@ -159,6 +162,9 @@ public sealed class ParcelServiceTests
         Assert.Equal("456 Nguyen Van Linh", response.CollectionAddress);
         Assert.Equal(resident.Id, pushNotifications.ResidentUserId);
         Assert.True(pushNotifications.WasSent);
+        Assert.Equal(parcel.DeliveryRequest.LockerId, realtimeNotifier.LockerId);
+        Assert.Equal("ParcelUpdated", realtimeNotifier.Message?.Type);
+        Assert.Equal(ParcelStatus.Removed.ToString(), realtimeNotifier.Message?.Status);
         Assert.Contains(dbContext.AuditLogs, log =>
             log.EntityId == parcel.Id && log.Action == "Parcel.Transferred");
     }
@@ -186,6 +192,7 @@ public sealed class ParcelServiceTests
         public Guid EnqueueParcelStored(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, string compartmentCode) => throw new NotSupportedException();
         public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => throw new NotSupportedException();
         public Guid EnqueueParcelTransferred(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string collectionAddress) => throw new NotSupportedException();
+        public Guid EnqueueParcelPickupReminder(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, int daysUntilTransfer, bool isOverdue) => throw new NotSupportedException();
         public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
@@ -203,6 +210,8 @@ public sealed class ParcelServiceTests
             return notificationId;
         }
 
+        public Guid EnqueueParcelPickupReminder(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, int daysUntilTransfer, bool isOverdue) => notificationId;
+
         public Task TrySendAsync(Guid id, CancellationToken cancellationToken = default)
         {
             WasSent = id == notificationId;
@@ -213,6 +222,22 @@ public sealed class ParcelServiceTests
         public Guid EnqueueParcelStored(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, string compartmentCode) => throw new NotSupportedException();
         public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => throw new NotSupportedException();
         public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingRealtimeNotifier : IOperationsRealtimeNotifier
+    {
+        public Guid? LockerId { get; private set; }
+        public RealtimeEvent? Message { get; private set; }
+
+        public Task PublishToLockerAsync(Guid lockerId, RealtimeEvent message, CancellationToken cancellationToken = default)
+        {
+            LockerId = lockerId;
+            Message = message;
+            return Task.CompletedTask;
+        }
+
+        public Task PublishToUserAsync(Guid userId, RealtimeEvent message, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private static User CreateUser(UserRole role) => new()

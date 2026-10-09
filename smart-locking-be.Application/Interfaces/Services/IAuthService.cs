@@ -22,4 +22,10 @@ public interface IAuthService
         ResetPasswordRequest request,
         string? ipAddress,
         CancellationToken cancellationToken);
+
+    Task<AuthTokenResponse> ChangePasswordAsync(
+        Guid userId,
+        ChangePasswordRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken);
 }

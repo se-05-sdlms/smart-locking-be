@@ -6,6 +6,10 @@ namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface IIncidentService
 {
+    Task<GuestIncidentResponse> CreateGuestIncidentAsync(
+        CreateGuestIncidentRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<IncidentDetailResponse> CreateResidentIncidentAsync(
         Guid residentUserId,
         CreateIncidentRequest request,

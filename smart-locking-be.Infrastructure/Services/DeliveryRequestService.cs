@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -15,7 +16,8 @@ public sealed class DeliveryRequestService(
     IPushNotificationService pushNotificationService,
     ILockerAccessService lockerAccessService,
     ICompartmentAllocationService compartmentAllocationService,
-    TimeProvider timeProvider) : IDeliveryRequestService
+    TimeProvider timeProvider,
+    IOperationsRealtimeNotifier? realtimeNotifier = null) : IDeliveryRequestService
 {
     public async Task<InitiateDeliveryResponse> CreateAsync(
         InitiateDeliveryRequest request,
@@ -56,6 +58,7 @@ public sealed class DeliveryRequestService(
         };
 
         dbContext.DeliveryRequests.Add(deliveryRequest);
+        AddAudit(null, "DeliveryRequest.Created", deliveryRequest, deliveryRequest.Status.ToString(), now);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return new InitiateDeliveryResponse(
@@ -113,6 +116,7 @@ public sealed class DeliveryRequestService(
                 deliveryRequest.Locker.Code);
         }
 
+        AddAudit(null, "DeliveryRequest.Submitted", deliveryRequest, deliveryRequest.Status.ToString(), now);
         await dbContext.SaveChangesAsync(cancellationToken);
         if (pushNotificationId.HasValue)
         {
@@ -174,6 +178,7 @@ public sealed class DeliveryRequestService(
             request.Status = DeliveryRequestStatus.Expired;
             request.FailureCode = DeliveryRequestFailureCode.SessionExpired;
             request.UpdatedAt = now;
+            AddAudit(null, "DeliveryRequest.Expired", request, "Guest session expired.", now);
         }
 
         if (expiredSessions.Count > 0)
@@ -262,6 +267,7 @@ public sealed class DeliveryRequestService(
         deliveryRequest.LastActivityAt = now;
         deliveryRequest.UpdatedAt = now;
 
+        AddAudit(residentUserId, "DeliveryRequest.Approved", deliveryRequest, null, now);
         await dbContext.SaveChangesAsync(cancellationToken);
         return MapSummary(deliveryRequest);
     }
@@ -303,6 +309,7 @@ public sealed class DeliveryRequestService(
         deliveryRequest.LastActivityAt = now;
         deliveryRequest.UpdatedAt = now;
 
+        AddAudit(residentUserId, "DeliveryRequest.Rejected", deliveryRequest, null, now);
         await dbContext.SaveChangesAsync(cancellationToken);
         return MapSummary(deliveryRequest);
     }
@@ -321,6 +328,7 @@ public sealed class DeliveryRequestService(
             request.Status = DeliveryRequestStatus.Expired;
             request.FailureCode = DeliveryRequestFailureCode.ApprovalExpired;
             request.UpdatedAt = now;
+            AddAudit(null, "DeliveryRequest.Expired", request, "Approval expired.", now);
         }
 
         if (expiredRequests.Count > 0)
@@ -370,6 +378,7 @@ public sealed class DeliveryRequestService(
         deliveryRequest.LastActivityAt = now;
         deliveryRequest.UpdatedAt = now;
 
+        AddAudit(null, "DeliveryRequest.CompartmentAllocated", deliveryRequest, availableCompartment.Code, now);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         OpenLockerResponse access = await lockerAccessService.OpenAsync(new OpenLockerRequest(
@@ -417,6 +426,7 @@ public sealed class DeliveryRequestService(
             request.Status = DeliveryRequestStatus.Expired;
             request.FailureCode = DeliveryRequestFailureCode.ReservationExpired;
             request.UpdatedAt = now;
+            AddAudit(null, "DeliveryRequest.Expired", request, "Compartment reservation expired.", now);
 
             await compartmentAllocationService.ReleaseAsync(request.Id, null, now, cancellationToken);
         }
@@ -464,6 +474,10 @@ public sealed class DeliveryRequestService(
             throw new TimeoutException("Thời gian giữ ngăn tủ đã hết hạn.");
         }
 
+        (_, DateTimeOffset pickupDueAt, DateTimeOffset transferEligibleAt) = ParcelTimeline.GetDeadlines(
+            now,
+            deliveryRequest.SystemPolicy.OverdueStartAfterHours,
+            deliveryRequest.SystemPolicy.MaxStorageHours);
         Parcel parcel = new()
         {
             Id = Guid.NewGuid(),
@@ -471,8 +485,8 @@ public sealed class DeliveryRequestService(
             ParcelCode = $"P-{Guid.NewGuid():N}"[..10].ToUpperInvariant(),
             Status = ParcelStatus.Stored,
             StoredAt = now,
-            PickupDueAt = now.AddHours(deliveryRequest.SystemPolicy.OverdueStartAfterHours),
-            MaxStorageUntil = now.AddHours(deliveryRequest.SystemPolicy.MaxStorageHours),
+            PickupDueAt = pickupDueAt,
+            MaxStorageUntil = transferEligibleAt,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -511,8 +525,19 @@ public sealed class DeliveryRequestService(
             parcel.Id,
             deliveryRequest.Locker.Code,
             compartmentCode);
+        AddAudit(null, "DeliveryRequest.Deposited", deliveryRequest, $"ParcelId={parcel.Id}", now);
         await dbContext.SaveChangesAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushNotificationId, cancellationToken);
+        if (realtimeNotifier is not null)
+        {
+            await realtimeNotifier.PublishToLockerAsync(deliveryRequest.LockerId, new RealtimeEvent(
+                "ParcelStored",
+                parcel.Id,
+                deliveryRequest.LockerId,
+                parcel.Status.ToString(),
+                "Parcel stored in locker.",
+                now), cancellationToken);
+        }
 
     }
 
@@ -613,4 +638,17 @@ public sealed class DeliveryRequestService(
 
     private static DeliveryRequestSummaryResponse MapSummary(DeliveryRequest request) =>
         new(request.Id, request.Status, request.ParcelImageUrl, request.SessionExpiresAt);
+
+    private void AddAudit(Guid? actorUserId, string action, DeliveryRequest request, string? details, DateTimeOffset occurredAt) =>
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = actorUserId,
+            Action = action,
+            EntityType = nameof(DeliveryRequest),
+            EntityId = request.Id,
+            Result = AuditLogResult.Succeeded,
+            Details = details,
+            OccurredAt = occurredAt
+        });
 }

@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using smart_locking_be.API.Constants;
 using smart_locking_be.Application.DTOs.Incidents;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Enums;
@@ -12,6 +14,17 @@ namespace smart_locking_be.API.Controllers;
 [Authorize(Roles = "Resident,LockerOperator,Administrator")]
 public sealed class IncidentsController(IIncidentService incidentService) : ControllerBase
 {
+    [HttpPost("guest")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicyNames.PublicApi)]
+    public async Task<IActionResult> CreateGuest(
+        [FromBody] CreateGuestIncidentRequest request,
+        CancellationToken cancellationToken)
+    {
+        GuestIncidentResponse response = await incidentService.CreateGuestIncidentAsync(request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, response);
+    }
+
     [HttpPost]
     [Authorize(Roles = "Resident")]
     public async Task<IActionResult> Create(

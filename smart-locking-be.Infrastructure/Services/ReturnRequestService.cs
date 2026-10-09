@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.DTOs.Returns;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -16,7 +17,8 @@ public sealed class ReturnRequestService(
     ICompartmentAllocationService compartmentAllocationService,
     IPushNotificationService pushNotificationService,
     ITokenHashService tokenHashService,
-    TimeProvider timeProvider) : IReturnRequestService, IReturnPickupSessionService
+    TimeProvider timeProvider,
+    IOperationsRealtimeNotifier? realtimeNotifier = null) : IReturnRequestService, IReturnPickupSessionService
 {
     public async Task<ReturnRequestResponse> CreateAsync(Guid residentUserId, CreateReturnRequest request, CancellationToken cancellationToken = default)
     {
@@ -101,6 +103,7 @@ public sealed class ReturnRequestService(
         }
         AddAudit(residentUserId, "ReturnRequest.CompartmentOpened", nameof(ReturnRequest), entity.Id, compartment.Code, now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishAsync(entity, cancellationToken);
         return new ReturnUnlockResponse(entity.Id, compartment.Code, opened.AccessEventId, expiresAt);
     }
 
@@ -122,6 +125,7 @@ public sealed class ReturnRequestService(
         AddAudit(entity.ResidentProfile.UserId, "ReturnRequest.Deposited", nameof(ReturnRequest), entity.Id, entity.AllocatedCompartment.Code, now);
         await dbContext.SaveChangesAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushId, cancellationToken);
+        await PublishAsync(entity, cancellationToken);
     }
 
     public async Task<ReturnPickupSessionResponse> CreateAsync(ValidateReturnPickupRequest request, CancellationToken cancellationToken = default)
@@ -179,6 +183,7 @@ public sealed class ReturnRequestService(
         AddAudit(null, "ReturnRequest.PickedUp", nameof(ReturnRequest), entity.Id, entity.AllocatedCompartment.Code, now);
         await dbContext.SaveChangesAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushId, cancellationToken);
+        await PublishAsync(entity, cancellationToken);
     }
 
     public async Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default)
@@ -192,9 +197,23 @@ public sealed class ReturnRequestService(
             item.Status = ReturnRequestStatus.Expired; item.UpdatedAt = now; item.CompartmentReleasedAt = now;
             await compartmentAllocationService.ReleaseAsync(null, item.Id, now, cancellationToken);
         }
-        if (items.Count > 0) await dbContext.SaveChangesAsync(cancellationToken);
+        if (items.Count > 0)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            foreach (ReturnRequest item in items)
+                await PublishAsync(item, cancellationToken);
+        }
         return items.Count;
     }
+
+    private Task PublishAsync(ReturnRequest request, CancellationToken cancellationToken) =>
+        realtimeNotifier?.PublishToLockerAsync(request.LockerId, new RealtimeEvent(
+            "ReturnRequestUpdated",
+            request.Id,
+            request.LockerId,
+            request.Status.ToString(),
+            null,
+            request.UpdatedAt), cancellationToken) ?? Task.CompletedTask;
 
     private IQueryable<ReturnRequest> ResidentQuery(Guid userId) => FullQuery().Where(item => item.ResidentProfile.UserId == userId);
     private IQueryable<ReturnRequest> FullQuery() => dbContext.ReturnRequests

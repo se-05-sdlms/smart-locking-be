@@ -11,7 +11,6 @@ public sealed class ReturnRequestConfiguration() : BaseConfiguration<ReturnReque
         Varchar(builder.Property(entity => entity.ReturnCode)).IsRequired().HasMaxLength(100);
         Text(builder.Property(entity => entity.ReturnReason));
         Varchar(builder.Property(entity => entity.ReturnImageUrl)).HasMaxLength(2048);
-        Varchar(builder.Property(entity => entity.ShipperPhone)).HasMaxLength(20);
         Varchar(builder.Property(entity => entity.ShipperSessionTokenHash)).HasMaxLength(256);
         EnumAsString(builder.Property(entity => entity.Status)).IsRequired();
         Text(builder.Property(entity => entity.FailureReason));

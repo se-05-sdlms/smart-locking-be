@@ -39,6 +39,12 @@ public interface ILockerService
 
     Task<LockerCompartmentResponse> CreateCompartmentAsync(Guid lockerId, CreateCompartmentRequest request, CancellationToken cancellationToken = default);
 
+    Task<LockerCompartmentResponse> UpdateCompartmentAsync(Guid userId, Guid lockerId, Guid compartmentId, UpdateCompartmentRequest request, CancellationToken cancellationToken = default);
+
+    Task<LockerDetailResponse> DeactivateLockerAsync(Guid userId, Guid lockerId, string reason, CancellationToken cancellationToken = default);
+
+    Task<LockerCompartmentResponse> DeactivateCompartmentAsync(Guid userId, Guid lockerId, Guid compartmentId, string reason, CancellationToken cancellationToken = default);
+
     Task<LockerDetailResponse> UpdateOperationalStatusAsync(Guid userId, string userRole, Guid lockerId, UpdateOperationalStatusRequest request, CancellationToken cancellationToken = default);
 
     Task<LockerCompartmentResponse> UpdateCompartmentOperationalStatusAsync(Guid userId, string userRole, Guid lockerId, Guid compartmentId, UpdateOperationalStatusRequest request, CancellationToken cancellationToken = default);

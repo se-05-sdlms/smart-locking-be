@@ -71,6 +71,13 @@ public class UsersController(IUserService userService) : ControllerBase
         return await ExecuteAsync(() => userService.UpdateUserStatusAsync(adminId, id, request, GetIpAddress(), cancellationToken));
     }
 
+    [HttpPost("{id:guid}:resetCredentials")]
+    public async Task<IActionResult> ResetCredentials(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out Guid adminId)) return Unauthorized();
+        return Ok(await userService.ResetCredentialsAsync(adminId, id, GetIpAddress(), cancellationToken));
+    }
+
     [HttpPost("{id:guid}/assignments")]
     public async Task<IActionResult> AssignOperatorScope(
         Guid id,
