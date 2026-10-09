@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -15,7 +16,8 @@ public sealed class DeliveryRequestService(
     IPushNotificationService pushNotificationService,
     ILockerAccessService lockerAccessService,
     ICompartmentAllocationService compartmentAllocationService,
-    TimeProvider timeProvider) : IDeliveryRequestService
+    TimeProvider timeProvider,
+    IOperationsRealtimeNotifier? realtimeNotifier = null) : IDeliveryRequestService
 {
     public async Task<InitiateDeliveryResponse> CreateAsync(
         InitiateDeliveryRequest request,
@@ -526,6 +528,16 @@ public sealed class DeliveryRequestService(
         AddAudit(null, "DeliveryRequest.Deposited", deliveryRequest, $"ParcelId={parcel.Id}", now);
         await dbContext.SaveChangesAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushNotificationId, cancellationToken);
+        if (realtimeNotifier is not null)
+        {
+            await realtimeNotifier.PublishToLockerAsync(deliveryRequest.LockerId, new RealtimeEvent(
+                "ParcelStored",
+                parcel.Id,
+                deliveryRequest.LockerId,
+                parcel.Status.ToString(),
+                "Parcel stored in locker.",
+                now), cancellationToken);
+        }
 
     }
 
