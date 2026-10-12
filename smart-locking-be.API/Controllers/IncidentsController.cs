@@ -1,3 +1,5 @@
+using smart_locking_be.API.Constants;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.Application.DTOs.Incidents;
@@ -65,4 +67,15 @@ public sealed class IncidentsController(IIncidentService incidentService) : Cont
             return Conflict(new { message = exception.Message });
         }
     }
+    [HttpPost("guest")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicyNames.PublicApi)]
+    public async Task<IActionResult> CreateGuest(
+        [FromBody] CreateGuestIncidentRequest request,
+        CancellationToken cancellationToken)
+    {
+        GuestIncidentResponse response = await incidentService.CreateGuestIncidentAsync(request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, response);
+    }
+
 }

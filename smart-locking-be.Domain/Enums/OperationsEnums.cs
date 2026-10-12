@@ -16,6 +16,11 @@ public enum IncidentSource
     Shipper,
 
     /// <summary>
+    /// Sự cố do khách không đăng nhập báo cáo tại locker.
+    /// </summary>
+    Guest,
+
+    /// <summary>
     /// Sự cố do hệ thống tự động phát hiện và ghi nhận.
     /// </summary>
     System

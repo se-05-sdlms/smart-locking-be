@@ -39,4 +39,8 @@ public interface IIncidentService
         Guid incidentId,
         UpdateIncidentStatusRequest request,
         CancellationToken cancellationToken = default);
+    Task<GuestIncidentResponse> CreateGuestIncidentAsync(
+        CreateGuestIncidentRequest request,
+        CancellationToken cancellationToken = default);
+
 }

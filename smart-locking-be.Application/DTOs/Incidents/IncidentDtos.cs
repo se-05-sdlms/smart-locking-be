@@ -74,3 +74,18 @@ public sealed record IncidentDetailResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     IReadOnlyCollection<IncidentActionResponse> Actions);
+
+public sealed record CreateGuestIncidentRequest(
+    string LockerCode,
+    string Type,
+    string Title,
+    string Description,
+    Guid? DeliveryRequestId = null,
+    Guid? ReturnRequestId = null,
+    Guid? LockerCompartmentId = null);
+
+public sealed record GuestIncidentResponse(
+    Guid Id,
+    string ReferenceCode,
+    IncidentStatus Status,
+    DateTimeOffset CreatedAt);
