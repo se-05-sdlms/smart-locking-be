@@ -63,6 +63,8 @@ public static class DependencyInjection
 
         services.AddScoped<IReportService, ReportService>();
 
+        services.AddScoped<ISystemPolicyService, SystemPolicyService>();
+
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE TRONG TƯƠNG LAI:
         // Các Service thực thi nghiệp vụ tiêm trực tiếp ApplicationDbContext được ghép cặp như sau:
         //
