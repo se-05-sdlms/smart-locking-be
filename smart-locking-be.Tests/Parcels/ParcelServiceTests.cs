@@ -183,6 +183,376 @@ public sealed class ParcelServiceTests
             log.EntityId == parcel.Id && log.Action == "Parcel.Transferred");
     }
 
+    #region PAR-01 to PAR-06 Matrix Tests
+
+    [Fact]
+    [Trait("Category", "PAR-01")]
+    public async Task GetParcelsAsync_UTC01()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        AddParcelGraph(db, owner, ParcelStatus.Stored, "P-UTC01");
+        await db.SaveChangesAsync();
+
+        var res = await CreateService(db).GetParcelsAsync(owner.Id, nameof(UserRole.Resident), ParcelListView.Active, null, null, null, default);
+
+        Assert.Single(res.Items);
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-01")]
+    public async Task GetParcelsAsync_UTC02()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User operatorUser = CreateUser(UserRole.LockerOperator);
+        User resident = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, resident, ParcelStatus.Stored, "P-UTC02");
+        db.OperatorAssignments.Add(new OperatorAssignment
+        {
+            Id = Guid.NewGuid(),
+            OperatorUserId = operatorUser.Id,
+            LockerId = parcel.DeliveryRequest.LockerId,
+            AssignedByUserId = Guid.NewGuid(),
+            AssignedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var res = await CreateService(db).GetParcelsAsync(operatorUser.Id, nameof(UserRole.LockerOperator), ParcelListView.Active, null, null, null, default);
+
+        Assert.Single(res.Items);
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-01")]
+    public async Task GetParcelsAsync_UTC03()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        await Assert.ThrowsAsync<ArgumentException>(() => CreateService(db)
+            .GetParcelsAsync(owner.Id, nameof(UserRole.Resident), ParcelListView.Active, null, now, now.AddDays(-1), default));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-01")]
+    public async Task GetParcelsAsync_UTC04()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        AddParcelGraph(db, owner, ParcelStatus.Stored, "P-UTC04");
+        await db.SaveChangesAsync();
+
+        var res = await CreateService(db).GetParcelsAsync(owner.Id, nameof(UserRole.Resident), ParcelListView.Active, "NON_EXISTENT_CODE", null, null, default);
+
+        Assert.Empty(res.Items);
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-02")]
+    public async Task GetParcelAsync_UTC01()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Stored, "P-UTC01");
+        await db.SaveChangesAsync();
+
+        var res = await CreateService(db).GetParcelAsync(owner.Id, nameof(UserRole.Resident), parcel.Id, default);
+
+        Assert.Equal(parcel.Id, res.Id);
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-02")]
+    public async Task GetParcelAsync_UTC02()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        User other = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Stored, "P-UTC02");
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => CreateService(db).GetParcelAsync(other.Id, nameof(UserRole.Resident), parcel.Id, default));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-02")]
+    public async Task GetParcelAsync_UTC03()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => CreateService(db).GetParcelAsync(owner.Id, nameof(UserRole.Resident), Guid.NewGuid(), default));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-03")]
+    public async Task GetHistoryAsync_UTC01()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Stored, "P-HIST");
+        db.ParcelStatusHistories.Add(new ParcelStatusHistory
+        {
+            Id = Guid.NewGuid(),
+            ParcelId = parcel.Id,
+            FromStatus = null,
+            ToStatus = ParcelStatus.Stored,
+            ChangedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var res = await CreateService(db).GetHistoryAsync(owner.Id, nameof(UserRole.Resident), parcel.Id, default);
+
+        Assert.Single(res.Items);
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-03")]
+    public async Task GetHistoryAsync_UTC02()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        User other = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Stored, "P-HIST");
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => CreateService(db).GetHistoryAsync(other.Id, nameof(UserRole.Resident), parcel.Id, default));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-03")]
+    public async Task GetHistoryAsync_UTC03()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => CreateService(db).GetHistoryAsync(owner.Id, nameof(UserRole.Resident), Guid.NewGuid(), default));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-04")]
+    public async Task OpenCompartmentAsync_UTC01()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Stored, "P-OPEN");
+        await db.SaveChangesAsync();
+
+        var service = new ParcelService(db, new SuccessfulAccessService(), new UnusedPushNotificationService(), TimeProvider.System);
+        var res = await service.OpenCompartmentAsync(owner.Id, parcel.Id, "127.0.0.1", "device");
+
+        Assert.Equal(parcel.Id, res.ParcelId);
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-04")]
+    public async Task OpenCompartmentAsync_UTC02()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        User other = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Stored, "P-OPEN");
+        await db.SaveChangesAsync();
+
+        var service = new ParcelService(db, new SuccessfulAccessService(), new UnusedPushNotificationService(), TimeProvider.System);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.OpenCompartmentAsync(other.Id, parcel.Id, null, null));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-04")]
+    public async Task OpenCompartmentAsync_UTC03()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+
+        var service = new ParcelService(db, new SuccessfulAccessService(), new UnusedPushNotificationService(), TimeProvider.System);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.OpenCompartmentAsync(owner.Id, Guid.NewGuid(), null, null));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-04")]
+    public async Task OpenCompartmentAsync_UTC04()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Retrieved, "P-OPEN");
+        await db.SaveChangesAsync();
+
+        var service = new ParcelService(db, new SuccessfulAccessService(), new UnusedPushNotificationService(), TimeProvider.System);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.OpenCompartmentAsync(owner.Id, parcel.Id, null, null));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-04")]
+    public async Task OpenCompartmentAsync_UTC05()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Overdue, "P-OPEN");
+        parcel.OverdueCharge = new OverdueCharge
+        {
+            Id = Guid.NewGuid(),
+            ParcelId = parcel.Id,
+            Status = OverdueChargeStatus.Outstanding,
+            Amount = 15000,
+            Currency = "VND",
+            ChargeStartAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        db.OverdueCharges.Add(parcel.OverdueCharge);
+        await db.SaveChangesAsync();
+
+        var service = new ParcelService(db, new SuccessfulAccessService(), new UnusedPushNotificationService(), TimeProvider.System);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.OpenCompartmentAsync(owner.Id, parcel.Id, null, null));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-04")]
+    public async Task OpenCompartmentAsync_UTC06()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Stored, "P-OPEN");
+        parcel.DeliveryRequest.SystemPolicy.EnableRemoteUnlock = false; // Disabled
+        await db.SaveChangesAsync();
+
+        var service = new ParcelService(db, new SuccessfulAccessService(), new UnusedPushNotificationService(), TimeProvider.System);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.OpenCompartmentAsync(owner.Id, parcel.Id, null, null));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-05")]
+    public async Task FinalizeRetrievalAsync_UTC01()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Stored, "P-FIN");
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        await service.FinalizeRetrievalAsync(parcel.Id, owner.Id, DateTimeOffset.UtcNow);
+
+        Assert.Equal(ParcelStatus.Retrieved, parcel.Status);
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-05")]
+    public async Task FinalizeRetrievalAsync_UTC02()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        var service = CreateService(db);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.FinalizeRetrievalAsync(Guid.NewGuid(), null, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-05")]
+    public async Task FinalizeRetrievalAsync_UTC03()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Removed, "P-REMOVED");
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.FinalizeRetrievalAsync(parcel.Id, owner.Id, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-05")]
+    public async Task FinalizeRetrievalAsync_UTC04()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User owner = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, owner, ParcelStatus.Retrieved, "P-ALREADY");
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        await service.FinalizeRetrievalAsync(parcel.Id, owner.Id, DateTimeOffset.UtcNow);
+
+        Assert.Equal(ParcelStatus.Retrieved, parcel.Status);
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-06")]
+    public async Task TransferOverdueAsync_UTC01()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User resident = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, resident, ParcelStatus.Overdue, "P-TRANS");
+        parcel.MaxStorageUntil = DateTimeOffset.UtcNow.AddMinutes(-10);
+        await db.SaveChangesAsync();
+
+        var pushService = new RecordingPushNotificationService();
+        var service = new ParcelService(db, new UnusedLockerAccessService(), pushService, TimeProvider.System);
+
+        OverdueTransferResponse res = await service.TransferOverdueAsync(Guid.NewGuid(), nameof(UserRole.Administrator), parcel.Id);
+
+        Assert.Equal(ParcelStatus.Removed.ToString(), res.Status);
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-06")]
+    public async Task TransferOverdueAsync_UTC02()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User resident = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, resident, ParcelStatus.Overdue, "P-TRANS");
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.TransferOverdueAsync(resident.Id, nameof(UserRole.Resident), parcel.Id));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-06")]
+    public async Task TransferOverdueAsync_UTC03()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User resident = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, resident, ParcelStatus.Stored, "P-STORED");
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.TransferOverdueAsync(Guid.NewGuid(), nameof(UserRole.Administrator), parcel.Id));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-06")]
+    public async Task TransferOverdueAsync_UTC04()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        var service = CreateService(db);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.TransferOverdueAsync(Guid.NewGuid(), nameof(UserRole.Administrator), Guid.NewGuid()));
+    }
+
+    [Fact]
+    [Trait("Category", "PAR-06")]
+    public async Task TransferOverdueAsync_UTC05()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        User operatorUser = CreateUser(UserRole.LockerOperator);
+        User resident = CreateUser(UserRole.Resident);
+        Parcel parcel = AddParcelGraph(db, resident, ParcelStatus.Overdue, "P-TRANS");
+        parcel.MaxStorageUntil = DateTimeOffset.UtcNow.AddMinutes(-10);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        // Operator is not assigned to this locker
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.TransferOverdueAsync(operatorUser.Id, nameof(UserRole.LockerOperator), parcel.Id));
+    }
+
+    #endregion
+
+    private sealed class SuccessfulAccessService : ILockerAccessService
+    {
+        public Task<OpenLockerResponse> OpenAsync(OpenLockerRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new OpenLockerResponse(Guid.NewGuid(), request.LockerId, request.LockerCompartmentId, "SIM", 1, LockerAccessResult.Succeeded, null, DateTimeOffset.UtcNow));
+    }
+
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -295,13 +665,25 @@ public sealed class ParcelServiceTests
             HardwareChannel = 1,
             OperationalStatus = LockerCompartmentOperationalStatus.Operational
         };
+        SystemPolicy? existingPolicy = dbContext.SystemPolicies.Local.FirstOrDefault();
+        var policy = existingPolicy ?? new SystemPolicy
+        {
+            Id = Guid.NewGuid(),
+            Version = 1,
+            IsActive = true,
+            EnableRemoteUnlock = true,
+            EffectiveFrom = DateTimeOffset.UtcNow.AddMinutes(-5),
+            Currency = "VND",
+            CreatedAt = DateTimeOffset.UtcNow
+        };
         var deliveryRequest = new DeliveryRequest
         {
             Id = Guid.NewGuid(),
             ResidentProfileId = profile.Id,
             LockerId = locker.Id,
             AllocatedCompartmentId = compartment.Id,
-            SystemPolicyId = Guid.NewGuid(),
+            SystemPolicyId = policy.Id,
+            SystemPolicy = policy,
             GuestSessionTokenHash = "hash",
             Status = DeliveryRequestStatus.Deposited
         };
@@ -322,6 +704,10 @@ public sealed class ParcelServiceTests
         if (existingProfile is null)
         {
             dbContext.AddRange(residentUser, profile);
+        }
+        if (existingPolicy is null)
+        {
+            dbContext.Add(policy);
         }
         dbContext.AddRange(locker, compartment, deliveryRequest, parcel);
         return parcel;

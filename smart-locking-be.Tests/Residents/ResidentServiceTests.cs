@@ -266,4 +266,60 @@ public sealed class ResidentServiceTests
         Assert.Equal(DeliveryApprovalMode.Auto, updatedProfile.DeliveryApprovalMode);
     }
 
+    #region Standardized Matrix Tests
+    [Fact]
+    [Trait("Category", "RES-01")]
+    public async Task GetProfileAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, PhoneNumber = "0911223344", Role = UserRole.Resident, Status = UserStatus.Active };
+        var profile = new ResidentProfile { Id = Guid.NewGuid(), UserId = userId, FullName = "Resident A" };
+        dbContext.AddRange(user, profile);
+        await dbContext.SaveChangesAsync();
+
+        var service = new ResidentService(dbContext);
+        var res = await service.GetProfileAsync(userId);
+
+        Assert.Equal("Resident A", res.FullName);
+    }
+
+    [Fact]
+    [Trait("Category", "RES-01")]
+    public async Task GetProfileAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new ResidentService(dbContext);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetProfileAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    [Trait("Category", "RES-02")]
+    public async Task UpdateProfileAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, PhoneNumber = "0911223355", Role = UserRole.Resident, Status = UserStatus.Active };
+        var profile = new ResidentProfile { Id = Guid.NewGuid(), UserId = userId, FullName = "Old Name" };
+        dbContext.AddRange(user, profile);
+        await dbContext.SaveChangesAsync();
+
+        var service = new ResidentService(dbContext);
+        var updated = await service.UpdateProfileAsync(userId, new UpdateResidentProfileRequest("New Name", null, null, null));
+
+        Assert.Equal("New Name", updated.FullName);
+    }
+
+    [Fact]
+    [Trait("Category", "RES-02")]
+    public async Task UpdateProfileAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new ResidentService(dbContext);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.UpdateProfileAsync(Guid.NewGuid(), new UpdateResidentProfileRequest("Name", null, null, null)));
+    }
+    #endregion
 }

@@ -439,4 +439,30 @@ public sealed class AdminServiceTests
         Assert.Equal(0, stats.OccupiedCompartments);
         Assert.Equal(1, stats.OpenIncidentsCount);
     }
+
+    #region Standardized Matrix Tests
+    [Fact]
+    [Trait("Category", "ADM-01")]
+    public async Task GetDashboardOverviewAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new AdminService(dbContext);
+
+        var overview = await service.GetDashboardOverviewAsync();
+        Assert.NotNull(overview);
+        Assert.NotNull(overview.Statistics);
+    }
+
+    [Fact]
+    [Trait("Category", "ADM-01")]
+    public async Task GetDashboardOverviewAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new AdminService(dbContext);
+
+        var req = new smart_locking_be.Application.DTOs.Dashboards.GetDashboardOverviewRequest(30, 10);
+        var overview = await service.GetDashboardOverviewAsync(req);
+        Assert.NotNull(overview);
+    }
+    #endregion
 }

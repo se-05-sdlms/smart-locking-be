@@ -401,4 +401,279 @@ public sealed class LockerServiceTests
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A01", "HW-01", 1)));
     }
+
+    #region Standardized Matrix Tests
+    [Fact]
+    [Trait("Category", "LKR-01")]
+    public async Task GetRegistrationOptionsAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-REG-01", "Addr", "Rec", "DEV-REG-01"));
+
+        var options = await service.GetRegistrationOptionsAsync();
+        Assert.Contains(options, o => o.Id == locker.Id);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-02")]
+    public async Task GetLockersAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        await service.CreateLockerAsync(new CreateLockerRequest("LCK-LST-01", "Addr", "Rec", "DEV-LST-01"));
+
+        var paged = await service.GetLockersAsync(Guid.NewGuid(), nameof(UserRole.Administrator));
+        Assert.True(paged.TotalCount >= 1);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-03")]
+    public async Task GetOperationalSummaryAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        await service.CreateLockerAsync(new CreateLockerRequest("LCK-OPS-01", "Addr", "Rec", "DEV-OPS-01"));
+
+        var summary = await service.GetOperationalSummaryAsync(Guid.NewGuid(), nameof(UserRole.Administrator));
+        Assert.NotNull(summary);
+        Assert.True(summary.TotalCount >= 1);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-04")]
+    public async Task GetLockerByIdAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-BYID-01", "Addr", "Rec", "DEV-BYID-01"));
+
+        var detail = await service.GetLockerByIdAsync(Guid.NewGuid(), nameof(UserRole.Administrator), locker.Id);
+        Assert.Equal(locker.Id, detail.Id);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-04")]
+    public async Task GetLockerByIdAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.GetLockerByIdAsync(Guid.NewGuid(), nameof(UserRole.Administrator), Guid.NewGuid()));
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-05")]
+    public async Task CreateLockerAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+
+        var created = await service.CreateLockerAsync(new CreateLockerRequest("LCK-CRT-01", "Addr", "Rec", "DEV-CRT-01"));
+        Assert.Equal("LCK-CRT-01", created.Code);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-05")]
+    public async Task CreateLockerAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        await service.CreateLockerAsync(new CreateLockerRequest("LCK-DUP-01", "Addr", "Rec", "DEV-DUP-01"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CreateLockerAsync(new CreateLockerRequest("LCK-DUP-01", "Addr2", "Rec2", "DEV-DUP-02")));
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-06")]
+    public async Task UpdateLockerAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-UPD-01", "Addr", "Rec", "DEV-UPD-01"));
+
+        var updated = await service.UpdateLockerAsync(locker.Id, new UpdateLockerRequest("LCK-UPD-01-NEW", "Addr New", "Rec New", "DEV-UPD-01-NEW"));
+        Assert.Equal("LCK-UPD-01-NEW", updated.Code);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-06")]
+    public async Task UpdateLockerAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.UpdateLockerAsync(Guid.NewGuid(), new UpdateLockerRequest("LCK", "A", "R", "D")));
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-07")]
+    public async Task GetCompartmentsAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-CMP-01", "Addr", "Rec", "DEV-CMP-01"));
+        await service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A01", "HW-01", 1));
+
+        var comps = await service.GetCompartmentsAsync(Guid.NewGuid(), nameof(UserRole.Administrator), locker.Id);
+        Assert.Single(comps.Items);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-08")]
+    public async Task CreateCompartmentAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-CCMP-01", "Addr", "Rec", "DEV-CCMP-01"));
+
+        var comp = await service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A01", "HW-01", 1));
+        Assert.Equal("A01", comp.Code);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-08")]
+    public async Task CreateCompartmentAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.CreateCompartmentAsync(Guid.NewGuid(), new CreateCompartmentRequest("A01", "HW-01", 1)));
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-09")]
+    public async Task UpdateCompartmentAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-UCMP-01", "Addr", "Rec", "DEV-UCMP-01"));
+        var comp = await service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A01", "HW-01", 1));
+
+        var updated = await service.UpdateCompartmentAsync(Guid.NewGuid(), locker.Id, comp.Id, new UpdateCompartmentRequest("A01-NEW", "HW-01-NEW", 2));
+        Assert.Equal("A01-NEW", updated.Code);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-09")]
+    public async Task UpdateCompartmentAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-UCMP-02", "Addr", "Rec", "DEV-UCMP-02"));
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.UpdateCompartmentAsync(Guid.NewGuid(), locker.Id, Guid.NewGuid(), new UpdateCompartmentRequest("A01", "HW", 1)));
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-10")]
+    public async Task DeactivateLockerAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-DAC-01", "Addr", "Rec", "DEV-DAC-01"));
+
+        var deactivated = await service.DeactivateLockerAsync(Guid.NewGuid(), locker.Id, "Closing facility");
+        Assert.Equal(LockerOperationalStatus.Inactive, deactivated.OperationalStatus);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-10")]
+    public async Task DeactivateLockerAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.DeactivateLockerAsync(Guid.NewGuid(), Guid.NewGuid(), "Reason"));
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-11")]
+    public async Task DeactivateCompartmentAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-DCP-01", "Addr", "Rec", "DEV-DCP-01"));
+        var comp = await service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A01", "HW-01", 1));
+
+        var deactivated = await service.DeactivateCompartmentAsync(Guid.NewGuid(), locker.Id, comp.Id, "Broken hinge");
+        Assert.Equal(LockerCompartmentOperationalStatus.Inactive, deactivated.OperationalStatus);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-11")]
+    public async Task DeactivateCompartmentAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-DCP-02", "Addr", "Rec", "DEV-DCP-02"));
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.DeactivateCompartmentAsync(Guid.NewGuid(), locker.Id, Guid.NewGuid(), "Reason"));
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-12")]
+    public async Task UpdateOperationalStatusAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-UOPS-01", "Addr", "Rec", "DEV-UOPS-01"));
+
+        var updated = await service.UpdateOperationalStatusAsync(
+            Guid.NewGuid(), nameof(UserRole.Administrator), locker.Id,
+            new UpdateOperationalStatusRequest(nameof(LockerOperationalStatus.OutOfService), "Maintenance work"));
+
+        Assert.Equal(LockerOperationalStatus.OutOfService, updated.OperationalStatus);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-12")]
+    public async Task UpdateOperationalStatusAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.UpdateOperationalStatusAsync(
+                Guid.NewGuid(), nameof(UserRole.Administrator), Guid.NewGuid(),
+                new UpdateOperationalStatusRequest(nameof(LockerOperationalStatus.OutOfService), "Reason")));
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-13")]
+    public async Task UpdateCompartmentOperationalStatusAsync_UTC01()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-UCOP-01", "Addr", "Rec", "DEV-UCOP-01"));
+        var comp = await service.CreateCompartmentAsync(locker.Id, new CreateCompartmentRequest("A01", "HW-01", 1));
+
+        var updated = await service.UpdateCompartmentOperationalStatusAsync(
+            Guid.NewGuid(), nameof(UserRole.Administrator), locker.Id, comp.Id,
+            new UpdateOperationalStatusRequest(nameof(LockerCompartmentOperationalStatus.OutOfService), "Need repair"));
+
+        Assert.Equal(LockerCompartmentOperationalStatus.OutOfService, updated.OperationalStatus);
+    }
+
+    [Fact]
+    [Trait("Category", "LKR-13")]
+    public async Task UpdateCompartmentOperationalStatusAsync_UTC02()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new LockerService(dbContext);
+        var locker = await service.CreateLockerAsync(new CreateLockerRequest("LCK-UCOP-02", "Addr", "Rec", "DEV-UCOP-02"));
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.UpdateCompartmentOperationalStatusAsync(
+                Guid.NewGuid(), nameof(UserRole.Administrator), locker.Id, Guid.NewGuid(),
+                new UpdateOperationalStatusRequest(nameof(LockerCompartmentOperationalStatus.OutOfService), "Reason")));
+    }
+    #endregion
 }

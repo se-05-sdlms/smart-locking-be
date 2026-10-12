@@ -9,8 +9,10 @@ namespace smart_locking_be.Tests.Notifications;
 
 public sealed class NotificationServiceTests
 {
+    #region NOT-01: GetForUserAsync
     [Fact]
-    public async Task GetForUserAsync_ReturnsOnlyOwnedInAppNotifications()
+    [Trait("Category", "NOT-01")]
+    public async Task GetForUserAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Guid userId = Guid.NewGuid();
@@ -28,7 +30,35 @@ public sealed class NotificationServiceTests
     }
 
     [Fact]
-    public async Task SetReadStateAsync_IsIdempotentAndSetsTimestamp()
+    [Trait("Category", "NOT-01")]
+    public async Task GetForUserAsync_UTC02()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Guid userId = Guid.NewGuid();
+        var service = CreateService(dbContext);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.GetForUserAsync(userId, false, 0, default));
+
+        Assert.Equal("Limit must be between 1 and 100. (Parameter 'limit')", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "NOT-01")]
+    public async Task GetForUserAsync_UTC03()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = CreateService(dbContext);
+
+        var result = await service.GetForUserAsync(Guid.Empty, false, 10, default);
+        Assert.Empty(result.Items);
+    }
+    #endregion
+
+    #region NOT-02: SetReadStateAsync
+    [Fact]
+    [Trait("Category", "NOT-02")]
+    public async Task SetReadStateAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Guid userId = Guid.NewGuid();
@@ -47,19 +77,36 @@ public sealed class NotificationServiceTests
     }
 
     [Fact]
-    public async Task SetReadStateAsync_ForAnotherUser_ReturnsNotFound()
+    [Trait("Category", "NOT-02")]
+    public async Task SetReadStateAsync_UTC02()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Notification notification = CreateNotification(Guid.NewGuid(), NotificationChannel.InApp);
         dbContext.Notifications.Add(notification);
         await dbContext.SaveChangesAsync();
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => CreateService(dbContext)
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => CreateService(dbContext)
             .SetReadStateAsync(Guid.NewGuid(), notification.Id, true, default));
+
+        Assert.Equal("Notification not found.", ex.Message);
     }
 
     [Fact]
-    public async Task MarkAllReadAsync_UpdatesOnlyUnreadInAppNotifications()
+    [Trait("Category", "NOT-02")]
+    public async Task SetReadStateAsync_UTC03()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = CreateService(dbContext);
+
+        await Assert.ThrowsAnyAsync<KeyNotFoundException>(() =>
+            service.SetReadStateAsync(Guid.Empty, Guid.Empty, false, default));
+    }
+    #endregion
+
+    #region NOT-03: MarkAllReadAsync
+    [Fact]
+    [Trait("Category", "NOT-03")]
+    public async Task MarkAllReadAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Guid userId = Guid.NewGuid();
@@ -77,6 +124,29 @@ public sealed class NotificationServiceTests
         Assert.True(second.IsRead);
         Assert.False(push.IsRead);
     }
+
+    [Fact]
+    [Trait("Category", "NOT-03")]
+    public async Task MarkAllReadAsync_UTC02()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = CreateService(dbContext);
+
+        MarkAllNotificationsReadResponse result = await service.MarkAllReadAsync(Guid.NewGuid(), default);
+        Assert.Equal(0, result.UpdatedCount);
+    }
+
+    [Fact]
+    [Trait("Category", "NOT-03")]
+    public async Task MarkAllReadAsync_UTC03()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = CreateService(dbContext);
+
+        MarkAllNotificationsReadResponse result = await service.MarkAllReadAsync(Guid.Empty, default);
+        Assert.Equal(0, result.UpdatedCount);
+    }
+    #endregion
 
     private static ApplicationDbContext CreateDbContext()
     {

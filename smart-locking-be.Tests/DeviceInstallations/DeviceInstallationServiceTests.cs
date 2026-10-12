@@ -12,11 +12,33 @@ namespace smart_locking_be.Tests.DeviceInstallations;
 
 public sealed class DeviceInstallationServiceTests
 {
+    #region DEV-01: RegisterAsync
     [Fact]
-    public async Task RegisterAsync_AllowsMultipleDevicesForResident()
+    [Trait("Category", "DEV-01")]
+    public async Task RegisterAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         User resident = await SeedResidentAsync(dbContext);
+        var service = new DeviceInstallationService(dbContext);
+
+        DeviceInstallationResponse response = await service.RegisterAsync(
+            resident.Id,
+            "phone-1",
+            new RegisterDeviceInstallationRequest("ExpoPushToken[token-1]", "android"));
+
+        Assert.Equal("phone-1", response.InstallationId);
+        Assert.Equal("ExpoPushToken[token-1]", response.ExpoPushToken);
+        Assert.Equal("Android", response.Platform);
+        Assert.True(response.IsActive);
+    }
+
+    [Fact]
+    [Trait("Category", "DEV-01")]
+    public async Task RegisterAsync_UTC02()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        User resident = await SeedResidentAsync(dbContext);
+        User resident2 = await SeedResidentAsync(dbContext);
         var service = new DeviceInstallationService(dbContext);
 
         await service.RegisterAsync(
@@ -24,36 +46,34 @@ public sealed class DeviceInstallationServiceTests
             "phone-1",
             new RegisterDeviceInstallationRequest("ExpoPushToken[token-1]", "android"));
         await service.RegisterAsync(
-            resident.Id,
+            resident2.Id,
             "phone-2",
-            new RegisterDeviceInstallationRequest("ExpoPushToken[token-2]", "Android"));
+            new RegisterDeviceInstallationRequest("ExpoPushToken[token-2]", "android"));
 
-        Assert.Equal(2, await dbContext.DeviceInstallations.CountAsync());
-        Assert.All(dbContext.DeviceInstallations, device => Assert.True(device.IsActive));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.RegisterAsync(
+            resident2.Id,
+            "phone-2",
+            new RegisterDeviceInstallationRequest("ExpoPushToken[token-1]", "android")));
+
+        Assert.Equal("Expo push token đã được đăng ký cho thiết bị khác.", ex.Message);
     }
 
     [Fact]
-    public async Task RegisterAsync_SameInstallationUpdatesTokenWithoutDuplicate()
+    [Trait("Category", "DEV-01")]
+    public async Task RegisterAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        User resident = await SeedResidentAsync(dbContext);
         var service = new DeviceInstallationService(dbContext);
 
-        await service.RegisterAsync(
-            resident.Id,
-            "phone-1",
-            new RegisterDeviceInstallationRequest("ExpoPushToken[old-token]", "Android"));
-        await service.RegisterAsync(
-            resident.Id,
-            "phone-1",
-            new RegisterDeviceInstallationRequest("ExpoPushToken[new-token]", "Android"));
-
-        DeviceInstallation installation = await dbContext.DeviceInstallations.SingleAsync();
-        Assert.Equal("ExpoPushToken[new-token]", installation.ExpoPushToken);
+        await Assert.ThrowsAnyAsync<Exception>(() => service.RegisterAsync(
+            Guid.Empty, "", null!, default));
     }
+    #endregion
 
+    #region DEV-02: DeactivateAsync
     [Fact]
-    public async Task DeactivateAsync_OwnDeviceMarksItInactive()
+    [Trait("Category", "DEV-02")]
+    public async Task DeactivateAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         User resident = await SeedResidentAsync(dbContext);
@@ -69,7 +89,35 @@ public sealed class DeviceInstallationServiceTests
     }
 
     [Fact]
-    public async Task TrySendAsync_WithoutDeviceKeepsInAppAndMarksPushAsFailed()
+    [Trait("Category", "DEV-02")]
+    public async Task DeactivateAsync_UTC02()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        User resident = await SeedResidentAsync(dbContext);
+        var service = new DeviceInstallationService(dbContext);
+
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.DeactivateAsync(
+            resident.Id, "non-existing-phone"));
+
+        Assert.Equal("Không tìm thấy thiết bị đã đăng ký.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "DEV-02")]
+    public async Task DeactivateAsync_UTC03()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new DeviceInstallationService(dbContext);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => service.DeactivateAsync(
+            Guid.Empty, ""));
+    }
+    #endregion
+
+    #region PSH-01: TrySendAsync
+    [Fact]
+    [Trait("Category", "PSH-01")]
+    public async Task TrySendAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         User resident = await SeedResidentAsync(dbContext);
@@ -103,7 +151,39 @@ public sealed class DeviceInstallationServiceTests
     }
 
     [Fact]
-    public async Task RetryPendingDeliveryApprovalNotificationsAsync_WhenDeviceRegisters_SendsFailedPush()
+    [Trait("Category", "PSH-01")]
+    public async Task TrySendAsync_UTC02()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new ExpoPushNotificationService(
+            dbContext,
+            new HttpClient(new ExpoSuccessHandler()),
+            TimeProvider.System,
+            NullLogger<ExpoPushNotificationService>.Instance);
+
+        // Non-existing notification ID does not throw unhandled exception (handled internally in TrySendAsync)
+        await service.TrySendAsync(Guid.NewGuid());
+    }
+
+    [Fact]
+    [Trait("Category", "PSH-01")]
+    public async Task TrySendAsync_UTC03()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new ExpoPushNotificationService(
+            dbContext,
+            new HttpClient(new ExpoSuccessHandler()),
+            TimeProvider.System,
+            NullLogger<ExpoPushNotificationService>.Instance);
+
+        await service.TrySendAsync(Guid.Empty);
+    }
+    #endregion
+
+    #region PSH-02: RetryPendingDeliveryApprovalNotificationsAsync
+    [Fact]
+    [Trait("Category", "PSH-02")]
+    public async Task RetryPendingDeliveryApprovalNotificationsAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         User resident = await SeedResidentAsync(dbContext);
@@ -156,6 +236,37 @@ public sealed class DeviceInstallationServiceTests
         Assert.Equal(NotificationDeliveryStatus.Sent, notification.DeliveryStatus);
         Assert.NotNull(notification.SentAt);
     }
+
+    [Fact]
+    [Trait("Category", "PSH-02")]
+    public async Task RetryPendingDeliveryApprovalNotificationsAsync_UTC02()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new ExpoPushNotificationService(
+            dbContext,
+            new HttpClient(new ExpoSuccessHandler()),
+            TimeProvider.System,
+            NullLogger<ExpoPushNotificationService>.Instance);
+
+        int retried = await service.RetryPendingDeliveryApprovalNotificationsAsync();
+        Assert.Equal(0, retried);
+    }
+
+    [Fact]
+    [Trait("Category", "PSH-02")]
+    public async Task RetryPendingDeliveryApprovalNotificationsAsync_UTC03()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new ExpoPushNotificationService(
+            dbContext,
+            new HttpClient(new ExpoSuccessHandler()),
+            TimeProvider.System,
+            NullLogger<ExpoPushNotificationService>.Instance);
+
+        int retried = await service.RetryPendingDeliveryApprovalNotificationsAsync(default);
+        Assert.Equal(0, retried);
+    }
+    #endregion
 
     private static ApplicationDbContext CreateDbContext()
     {

@@ -437,4 +437,229 @@ public sealed class UserServiceTests
             Assert.Equal("Chuyển công tác", updated.Reason);
         }
     }
+
+    #region Standardized Matrix Tests
+    [Fact]
+    [Trait("Category", "USR-01")]
+    public async Task GetUsersAsync_UTC01()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var paged = await service.GetUsersAsync(new GetUsersFilterRequest());
+            Assert.NotNull(paged);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-02")]
+    public async Task GetUserByIdAsync_UTC01()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var user = new User { Id = Guid.NewGuid(), PhoneNumber = "0911111111", Email = "u1@boxora.com", Role = UserRole.Resident, Status = UserStatus.Active };
+            dbContext.Users.Add(user);
+            await dbContext.SaveChangesAsync();
+
+            var detail = await service.GetUserByIdAsync(user.Id);
+            Assert.Equal(user.Id, detail.Id);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-02")]
+    public async Task GetUserByIdAsync_UTC02()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetUserByIdAsync(Guid.NewGuid()));
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-03")]
+    public async Task CreateUserAsync_UTC01()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var adminId = Guid.NewGuid();
+            var req = new CreateUserRequest("Nguyen Van Test", "create1@boxora.com", "0922222222", UserRole.LockerOperator, "Password@123", null, null);
+            var created = await service.CreateUserAsync(adminId, req, "127.0.0.1");
+
+            Assert.Equal("0922222222", created.PhoneNumber);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-03")]
+    public async Task CreateUserAsync_UTC02()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var adminId = Guid.NewGuid();
+            var user = new User { Id = Guid.NewGuid(), PhoneNumber = "0933333333", Email = "dup@boxora.com", Role = UserRole.LockerOperator, Status = UserStatus.Active };
+            dbContext.Users.Add(user);
+            await dbContext.SaveChangesAsync();
+
+            var req = new CreateUserRequest("Duplicate", "dup@boxora.com", "0988888888", UserRole.LockerOperator, "Password@123", null, null);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateUserAsync(adminId, req, "127.0.0.1"));
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-04")]
+    public async Task UpdateUserAsync_UTC01()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var adminId = Guid.NewGuid();
+            var user = new User { Id = Guid.NewGuid(), PhoneNumber = "0944444444", Email = "upd@boxora.com", Role = UserRole.LockerOperator, Status = UserStatus.Active };
+            dbContext.Users.Add(user);
+            await dbContext.SaveChangesAsync();
+
+            var req = new UpdateUserRequest("Nguyen New", "0944444444", "upd.new@boxora.com");
+            var updated = await service.UpdateUserAsync(adminId, user.Id, req, "127.0.0.1");
+
+            Assert.Equal("upd.new@boxora.com", updated.Email);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-04")]
+    public async Task UpdateUserAsync_UTC02()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+                service.UpdateUserAsync(Guid.NewGuid(), Guid.NewGuid(), new UpdateUserRequest("0912345678", "a@b.com", "Name"), "127.0.0.1"));
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-05")]
+    public async Task UpdateUserStatusAsync_UTC01()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var adminId = Guid.NewGuid();
+            var user = new User { Id = Guid.NewGuid(), PhoneNumber = "0955555555", Email = "stat@boxora.com", Role = UserRole.Resident, Status = UserStatus.Active };
+            dbContext.Users.Add(user);
+            await dbContext.SaveChangesAsync();
+
+            var updated = await service.UpdateUserStatusAsync(adminId, user.Id, new UpdateUserStatusRequest(UserStatus.Locked, "Tam khoa"), "127.0.0.1");
+            Assert.Equal(UserStatus.Locked, updated.Status);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-05")]
+    public async Task UpdateUserStatusAsync_UTC02()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+                service.UpdateUserStatusAsync(Guid.NewGuid(), Guid.NewGuid(), new UpdateUserStatusRequest(UserStatus.Locked, "Reason"), "127.0.0.1"));
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-06")]
+    public async Task ResetUserCredentialsAsync_UTC01()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var adminId = Guid.NewGuid();
+            var op = new User { Id = Guid.NewGuid(), PhoneNumber = "0966666666", Email = "cred@boxora.com", Role = UserRole.LockerOperator, Status = UserStatus.Active };
+            dbContext.Users.Add(op);
+            await dbContext.SaveChangesAsync();
+
+            var result = await service.ResetCredentialsAsync(adminId, op.Id, "127.0.0.1");
+            Assert.NotNull(result.TemporaryPassword);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-06")]
+    public async Task ResetUserCredentialsAsync_UTC02()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+                service.ResetCredentialsAsync(Guid.NewGuid(), Guid.NewGuid(), "127.0.0.1"));
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-07")]
+    public async Task AssignOperatorScopeAsync_UTC01()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var adminId = Guid.NewGuid();
+            var op = new User { Id = Guid.NewGuid(), PhoneNumber = "0977777777", Email = "op1@boxora.com", Role = UserRole.LockerOperator, Status = UserStatus.Active };
+            var locker = new Locker { Id = Guid.NewGuid(), Code = "LK-OP-01", Address = "A", RecoveryAddress = "R", DeviceIdentifier = "D1" };
+            dbContext.AddRange(op, locker);
+            await dbContext.SaveChangesAsync();
+
+            var result = await service.AssignOperatorScopeAsync(adminId, op.Id, new AssignOperatorScopeRequest(locker.Id, "Phan cong"));
+            Assert.Equal(locker.Id, result.LockerId);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-07")]
+    public async Task AssignOperatorScopeAsync_UTC02()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+                service.AssignOperatorScopeAsync(Guid.NewGuid(), Guid.NewGuid(), new AssignOperatorScopeRequest(Guid.NewGuid(), "Phan cong")));
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-08")]
+    public async Task RevokeOperatorScopeAsync_UTC01()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            var adminId = Guid.NewGuid();
+            var opId = Guid.NewGuid();
+            var assignmentId = Guid.NewGuid();
+            var op = new User { Id = opId, PhoneNumber = "0988888888", Email = "op2@boxora.com", Role = UserRole.LockerOperator, Status = UserStatus.Active };
+            var assignment = new OperatorAssignment { Id = assignmentId, OperatorUserId = opId, LockerId = Guid.NewGuid(), AssignedByUserId = adminId, AssignedAt = DateTimeOffset.UtcNow };
+            dbContext.AddRange(op, assignment);
+            await dbContext.SaveChangesAsync();
+
+            await service.RevokeOperatorScopeAsync(adminId, opId, assignmentId, "Thu hoi", "127.0.0.1");
+            var record = await dbContext.OperatorAssignments.FindAsync(assignmentId);
+            Assert.NotNull(record!.RevokedAt);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "USR-08")]
+    public async Task RevokeOperatorScopeAsync_UTC02()
+    {
+        var (service, dbContext) = CreateTestService();
+        await using (dbContext)
+        {
+            await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+                service.RevokeOperatorScopeAsync(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Reason", "127.0.0.1"));
+        }
+    }
+    #endregion
 }

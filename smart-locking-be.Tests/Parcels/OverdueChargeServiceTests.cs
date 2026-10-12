@@ -11,7 +11,8 @@ public sealed class OverdueChargeServiceTests
     private static readonly DateTimeOffset Now = new(2026, 9, 30, 9, 30, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task CalculateAsync_OverdueParcel_CreatesChargeAndHistory()
+    [Trait("Category", "ODC-01")]
+    public async Task CalculateAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Parcel parcel = await SeedParcelAsync(dbContext, Now.AddHours(-2).AddMinutes(-1));
@@ -31,7 +32,8 @@ public sealed class OverdueChargeServiceTests
     }
 
     [Fact]
-    public async Task CalculateAsync_ExistingCharge_UsesSnapshotAndDoesNotDuplicateHistory()
+    [Trait("Category", "ODC-01")]
+    public async Task CalculateAsync_UTC02()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Parcel parcel = await SeedParcelAsync(dbContext, Now.AddHours(-3), ParcelStatus.Overdue);
@@ -61,7 +63,8 @@ public sealed class OverdueChargeServiceTests
     }
 
     [Fact]
-    public async Task CalculateAsync_PaidCharge_IsNotChanged()
+    [Trait("Category", "ODC-01")]
+    public async Task CalculateAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Parcel parcel = await SeedParcelAsync(dbContext, Now.AddHours(-4), ParcelStatus.Overdue);

@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\smart-locking-be.Infrastructure\smart-locking-be.Infrastructure.csproj" />
+    <ProjectReference Include="..\smart-locking-be.API\smart-locking-be.API.csproj" />
   </ItemGroup>
 
 </Project>

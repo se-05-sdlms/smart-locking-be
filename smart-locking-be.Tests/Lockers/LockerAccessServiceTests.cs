@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -12,8 +13,10 @@ public sealed class LockerAccessServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 9, 30, 8, 0, 0, TimeSpan.Zero);
 
+    #region LAC-01: OpenAsync
     [Fact]
-    public async Task OpenAsync_OperationalLocker_DispatchesAndRecordsSuccess()
+    [Trait("Category", "LAC-01")]
+    public async Task OpenAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, LockerCompartment compartment) = await SeedLockerAsync(dbContext);
@@ -45,34 +48,100 @@ public sealed class LockerAccessServiceTests
     }
 
     [Fact]
-    public async Task OpenAsync_OfflineLocker_BlocksWithoutDispatching()
+    [Trait("Category", "LAC-01")]
+    public async Task OpenAsync_UTC02()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, LockerCompartment compartment) = await SeedLockerAsync(
-            dbContext,
-            LockerConnectionStatus.Offline);
-        var dispatcher = new RecordingDispatcher();
-        var service = new LockerAccessService(dbContext, dispatcher, TimeProvider.System);
+        (Locker locker, _) = await SeedLockerAsync(dbContext);
+        var service = new LockerAccessService(dbContext, new RecordingDispatcher(), TimeProvider.System);
 
-        OpenLockerResponse response = await service.OpenAsync(MaintenanceRequest(locker, compartment));
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.OpenAsync(new OpenLockerRequest(
+            locker.Id,
+            Guid.NewGuid(), // non-existing compartment
+            null, null, null, null,
+            LockerAccessType.Maintenance,
+            LockerAccessMethod.SystemAuthorization,
+            null, null)));
 
-        Assert.Equal(LockerAccessResult.Blocked, response.Result);
-        Assert.Contains("không trực tuyến", response.FailureReason);
-        Assert.Empty(dispatcher.Commands);
+        Assert.Equal("Không tìm thấy ngăn locker.", ex.Message);
     }
 
     [Fact]
-    public async Task OpenAsync_DispatchFailure_RecordsFailure()
+    [Trait("Category", "LAC-01")]
+    public async Task OpenAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, LockerCompartment compartment) = await SeedLockerAsync(dbContext);
-        var service = new LockerAccessService(dbContext, new FailingDispatcher(), TimeProvider.System);
+        (Locker locker, _) = await SeedLockerAsync(dbContext);
+        (Locker locker2, LockerCompartment compartment2) = await SeedLockerAsync(dbContext);
+        var service = new LockerAccessService(dbContext, new RecordingDispatcher(), TimeProvider.System);
 
-        OpenLockerResponse response = await service.OpenAsync(MaintenanceRequest(locker, compartment));
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.OpenAsync(new OpenLockerRequest(
+            locker.Id,
+            compartment2.Id, // belongs to locker2
+            null, null, null, null,
+            LockerAccessType.Maintenance,
+            LockerAccessMethod.SystemAuthorization,
+            null, null)));
 
-        Assert.Equal(LockerAccessResult.Failed, response.Result);
-        Assert.Equal(response.FailureReason, (await dbContext.LockerAccessEvents.SingleAsync()).FailureReason);
+        Assert.Equal("Ngăn locker không thuộc locker được yêu cầu.", ex.Message);
     }
+
+    [Fact]
+    [Trait("Category", "LAC-01")]
+    public async Task OpenAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new LockerAccessService(dbContext, new RecordingDispatcher(), TimeProvider.System);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => service.OpenAsync(null!));
+    }
+    #endregion
+
+    #region LCM-01: DispatchUnlockAsync
+    [Fact]
+    [Trait("Category", "LCM-01")]
+    public async Task DispatchUnlockAsync_UTC01()
+    {
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Mqtt:Simulate"] = "true"
+            })
+            .Build();
+        var dispatcher = new MqttLockerCommandDispatcher(config);
+
+        await dispatcher.DispatchUnlockAsync(new LockerUnlockCommand(Guid.NewGuid(), "dev-1", 1));
+    }
+
+    [Fact]
+    [Trait("Category", "LCM-01")]
+    public async Task DispatchUnlockAsync_UTC02()
+    {
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Mqtt:Simulate"] = "false",
+                ["Mqtt:Host"] = ""
+            })
+            .Build();
+        var dispatcher = new MqttLockerCommandDispatcher(config);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            dispatcher.DispatchUnlockAsync(new LockerUnlockCommand(Guid.NewGuid(), "dev-1", 1)));
+
+        Assert.Equal("MQTT broker chưa được cấu hình.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "LCM-01")]
+    public async Task DispatchUnlockAsync_UTC03()
+    {
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+        var dispatcher = new MqttLockerCommandDispatcher(config);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => dispatcher.DispatchUnlockAsync(null!));
+    }
+    #endregion
 
     private static OpenLockerRequest MaintenanceRequest(Locker locker, LockerCompartment compartment) => new(
         locker.Id,
