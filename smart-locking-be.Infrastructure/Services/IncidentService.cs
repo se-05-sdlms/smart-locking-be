@@ -504,4 +504,80 @@ public sealed class IncidentService(
         }
         return url;
     }
+    public async Task<GuestIncidentResponse> CreateGuestIncidentAsync(
+        CreateGuestIncidentRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        string type = RequireValue(request.Type, nameof(request.Type), 100);
+        if (!SupportedTypes.Contains(type))
+            throw new ArgumentException("Incident type is invalid.", nameof(request.Type));
+        if (request.DeliveryRequestId.HasValue && request.ReturnRequestId.HasValue)
+            throw new ArgumentException("Only one delivery request or return request may be linked.");
+
+        Locker locker = await dbContext.Lockers.SingleOrDefaultAsync(
+            item => item.Code == request.LockerCode.Trim(), cancellationToken)
+            ?? throw new KeyNotFoundException("Locker not found.");
+        Guid? compartmentId = request.LockerCompartmentId;
+        if (request.DeliveryRequestId.HasValue)
+        {
+            DeliveryRequest delivery = await dbContext.DeliveryRequests.SingleOrDefaultAsync(
+                item => item.Id == request.DeliveryRequestId && item.LockerId == locker.Id,
+                cancellationToken) ?? throw new KeyNotFoundException("Delivery request not found.");
+            compartmentId ??= delivery.AllocatedCompartmentId;
+        }
+        if (request.ReturnRequestId.HasValue)
+        {
+            ReturnRequest returnRequest = await dbContext.ReturnRequests.SingleOrDefaultAsync(
+                item => item.Id == request.ReturnRequestId && item.LockerId == locker.Id,
+                cancellationToken) ?? throw new KeyNotFoundException("Return request not found.");
+            compartmentId ??= returnRequest.AllocatedCompartmentId;
+        }
+        if (compartmentId.HasValue && !await dbContext.LockerCompartments.AnyAsync(
+            item => item.Id == compartmentId && item.LockerId == locker.Id, cancellationToken))
+            throw new KeyNotFoundException("Locker compartment not found.");
+
+        Guid? assignedOperatorUserId = await dbContext.OperatorAssignments
+            .Where(item => item.LockerId == locker.Id && item.RevokedAt == null && item.OperatorUser.Status == UserStatus.Active)
+            .Select(item => (Guid?)item.OperatorUserId)
+            .SingleOrDefaultAsync(cancellationToken);
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        Incident incident = new()
+        {
+            Id = Guid.NewGuid(),
+            DeliveryRequestId = request.DeliveryRequestId,
+            ReturnRequestId = request.ReturnRequestId,
+            LockerId = locker.Id,
+            LockerCompartmentId = compartmentId,
+            AssignedOperatorUserId = assignedOperatorUserId,
+            Type = SupportedTypes.Single(candidate => candidate.Equals(type, StringComparison.OrdinalIgnoreCase)),
+            Source = IncidentSource.Guest,
+            Status = IncidentStatus.Open,
+            Title = RequireValue(request.Title, nameof(request.Title), 200),
+            Description = RequireValue(request.Description, nameof(request.Description), 4000),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        dbContext.Incidents.Add(incident);
+
+        IReadOnlyCollection<Guid> recipients = assignedOperatorUserId.HasValue
+            ? [assignedOperatorUserId.Value]
+            : await dbContext.Users.Where(user => user.Role == UserRole.Administrator && user.Status == UserStatus.Active)
+                .Select(user => user.Id).ToListAsync(cancellationToken);
+        foreach (Guid recipient in recipients)
+            dbContext.Notifications.Add(CreateNotification(recipient, incident, "GuestIncidentCreated", "Sự cố khách cần xử lý", incident.Title, now));
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            Action = "Incident.GuestCreated",
+            EntityType = nameof(Incident),
+            EntityId = incident.Id,
+            Result = AuditLogResult.Succeeded,
+            Details = $"LockerId={locker.Id}",
+            OccurredAt = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new GuestIncidentResponse(incident.Id, $"INC-{incident.Id.ToString("N")[..8].ToUpperInvariant()}", incident.Status, now);
+    }
+
+
 }
