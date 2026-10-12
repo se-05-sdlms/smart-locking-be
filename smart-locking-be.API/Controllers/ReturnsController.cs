@@ -12,6 +12,7 @@ public sealed class ReturnsController(IReturnRequestService service) : Controlle
     [HttpPost] public Task<IActionResult> Create(CreateReturnRequest request, CancellationToken ct) => Execute(user => service.CreateAsync(user, request, ct), StatusCodes.Status201Created);
     [HttpGet] public Task<IActionResult> Mine([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default) => Execute(user => service.GetMineAsync(user, ct, pageNumber, pageSize));
     [HttpGet("{id:guid}")] public Task<IActionResult> Get(Guid id, CancellationToken ct) => Execute(user => service.GetAsync(user, id, ct));
+    [HttpPost("{id:guid}:openCompartment")] public Task<IActionResult> OpenCompartment(Guid id, CancellationToken ct) => Execute(user => service.OpenCompartmentAsync(user, id, ct));
 
     private async Task<IActionResult> Execute<T>(Func<Guid, Task<T>> action, int statusCode = StatusCodes.Status200OK)
     {

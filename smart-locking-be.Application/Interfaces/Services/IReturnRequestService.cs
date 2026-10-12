@@ -12,4 +12,7 @@ public interface IReturnRequestService
         int pageNumber = 1,
         int pageSize = 20);
     Task<ReturnRequestResponse> GetAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default);
+    Task<ReturnUnlockResponse> OpenCompartmentAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default);
+    Task FinalizeDepositAsync(Guid id, DateTimeOffset completedAt, CancellationToken cancellationToken = default);
+    Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default);
 }

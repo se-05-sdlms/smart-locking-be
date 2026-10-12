@@ -512,6 +512,8 @@ public sealed class DeliveryRequestServiceTests
             return Guid.NewGuid();
         }
 
+        public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => Guid.NewGuid();
+
         public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
