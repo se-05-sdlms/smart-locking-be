@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.DTOs.Notifications;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -30,6 +31,19 @@ public sealed class ParcelServiceTests
     }
 
     [Fact]
+    public void PagedResult_SerializesPaginationMetadata()
+    {
+        var result = new PagedResult<int>([1, 2], 2, 1, 20);
+
+        string json = JsonSerializer.Serialize(result);
+
+        Assert.Contains("\"Items\":[1,2]", json);
+        Assert.Contains("\"TotalCount\":2", json);
+        Assert.Contains("\"PageNumber\":1", json);
+        Assert.Contains("\"PageSize\":20", json);
+    }
+
+    [Fact]
     public async Task GetParcelsAsync_ForResident_ReturnsOnlyOwnedActiveParcels()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
@@ -40,10 +54,10 @@ public sealed class ParcelServiceTests
         AddParcelGraph(dbContext, other, ParcelStatus.Overdue, "P-OTHER");
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelListItemResponse> result = await CreateService(dbContext)
+        var result = await CreateService(dbContext)
             .GetParcelsAsync(owner.Id, nameof(UserRole.Resident), ParcelListView.Active, null, null, null, default);
 
-        ParcelListItemResponse parcel = Assert.Single(result);
+        ParcelListItemResponse parcel = Assert.Single(result.Items);
         Assert.Equal(active.Id, parcel.Id);
         Assert.Equal("P-OWNED", parcel.ParcelCode);
     }
@@ -66,10 +80,10 @@ public sealed class ParcelServiceTests
         });
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelListItemResponse> result = await CreateService(dbContext)
+        var result = await CreateService(dbContext)
             .GetParcelsAsync(operatorUser.Id, nameof(UserRole.LockerOperator), ParcelListView.All, null, null, null, default);
 
-        Assert.Equal(assigned.Id, Assert.Single(result).Id);
+        Assert.Equal(assigned.Id, Assert.Single(result.Items).Id);
     }
 
     [Fact]
@@ -127,11 +141,11 @@ public sealed class ParcelServiceTests
             });
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelStatusHistoryResponse> result = await CreateService(dbContext)
+        var result = await CreateService(dbContext)
             .GetHistoryAsync(owner.Id, nameof(UserRole.Resident), parcel.Id, default);
 
-        Assert.Equal(ParcelStatus.Overdue, result.First().ToStatus);
-        Assert.Equal(ParcelStatus.Stored, result.Last().ToStatus);
+        Assert.Equal(ParcelStatus.Overdue, result.Items.First().ToStatus);
+        Assert.Equal(ParcelStatus.Stored, result.Items.Last().ToStatus);
     }
 
     [Fact]

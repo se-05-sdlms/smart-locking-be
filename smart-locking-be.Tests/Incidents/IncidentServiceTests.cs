@@ -114,14 +114,14 @@ public sealed class IncidentServiceTests
                 "Màn hình bị đứng.",
                 LockerId: graph.Locker.Id));
 
-        Assert.Single(await service.GetOperationalIncidentsAsync(
+        Assert.Single((await service.GetOperationalIncidentsAsync(
             graph.Operator.Id,
             nameof(UserRole.LockerOperator),
-            null));
-        Assert.Empty(await service.GetOperationalIncidentsAsync(
+            null)).Items);
+        Assert.Empty((await service.GetOperationalIncidentsAsync(
             unassignedOperator.Id,
             nameof(UserRole.LockerOperator),
-            null));
+            null)).Items);
     }
 
     private static ApplicationDbContext CreateDbContext()

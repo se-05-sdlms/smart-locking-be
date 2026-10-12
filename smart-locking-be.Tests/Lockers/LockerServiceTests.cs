@@ -71,7 +71,7 @@ public sealed class LockerServiceTests
         var adminId = Guid.NewGuid();
         var lockers = await service.GetLockersAsync(adminId, nameof(UserRole.Administrator));
 
-        Assert.Equal(2, lockers.Count);
+        Assert.Equal(2, lockers.TotalCount);
     }
 
     [Fact]
@@ -98,8 +98,8 @@ public sealed class LockerServiceTests
 
         var lockers = await service.GetLockersAsync(operatorId, nameof(UserRole.LockerOperator));
 
-        Assert.Single(lockers);
-        Assert.Equal(locker1.Id, lockers.First().Id);
+        Assert.Single(lockers.Items);
+        Assert.Equal(locker1.Id, lockers.Items.First().Id);
     }
 
     [Fact]

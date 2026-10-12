@@ -21,10 +21,10 @@ public sealed class NotificationServiceTests
             CreateNotification(Guid.NewGuid(), NotificationChannel.InApp));
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<NotificationResponse> result = await CreateService(dbContext)
+        var result = await CreateService(dbContext)
             .GetForUserAsync(userId, false, 50, default);
 
-        Assert.Equal(owned.Id, Assert.Single(result).Id);
+        Assert.Equal(owned.Id, Assert.Single(result.Items).Id);
     }
 
     [Fact]
