@@ -15,3 +15,7 @@ public sealed record MaintenanceResponse(Guid Id, string LockerCode, string? Com
 public sealed record MaintenanceActivityResponse(Guid Id, Guid ActionByUserId, string ActionType, MaintenanceStatus? FromStatus, MaintenanceStatus? ToStatus, string? Notes, DateTimeOffset CreatedAt);
 
 public sealed record MaintenanceDetailResponse(MaintenanceResponse Request, IReadOnlyCollection<MaintenanceActivityResponse> Activities);
+
+public sealed record AuditLogResponse(
+    Guid Id, Guid? ActorUserId, string Actor, string Action, string? EntityType,
+    Guid? EntityId, AuditLogResult Result, string? IpAddress, string? Details, DateTimeOffset OccurredAt);
