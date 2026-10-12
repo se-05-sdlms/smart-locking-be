@@ -1,4 +1,5 @@
 using Serilog;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.API.Extensions;
 using smart_locking_be.API.Services;
 
@@ -16,6 +17,7 @@ public static class DependencyInjection
     {
         // 1. Controllers & API Behavior
         services.AddControllers();
+        services.AddScoped<IImageStorageService, LocalImageStorageService>();
         services.AddProblemDetails();
         services.AddExceptionHandler<ApiExceptionHandler>();
 
@@ -74,6 +76,7 @@ public static class DependencyInjection
 
         // 3. Chuyển hướng HTTPS
         app.UseHttpsRedirection();
+        app.UseStaticFiles();
 
         // 4. Routing
         app.UseRouting();
