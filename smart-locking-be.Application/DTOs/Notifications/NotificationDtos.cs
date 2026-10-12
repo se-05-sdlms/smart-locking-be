@@ -8,6 +8,7 @@ public sealed record NotificationResponse(
     string Title,
     string Message,
     Guid? DeliveryRequestId,
+    Guid? ReturnRequestId,
     Guid? ParcelId,
     Guid? IncidentId,
     Guid? PaymentTransactionId,
@@ -31,3 +32,5 @@ public sealed record NotificationRuleResponse(
     NotificationChannel Channel,
     int? LeadTimeMinutes,
     bool IsEnabled);
+
+public sealed record UpdateNotificationRuleRequest(int? LeadTimeMinutes, bool IsEnabled);

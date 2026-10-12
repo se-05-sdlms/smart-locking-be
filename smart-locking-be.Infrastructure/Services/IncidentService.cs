@@ -1,3 +1,4 @@
+using smart_locking_be.Application.DTOs.Notifications;
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Incidents;
 using smart_locking_be.Application.Interfaces.Services;
@@ -9,7 +10,7 @@ namespace smart_locking_be.Infrastructure.Services;
 
 public sealed class IncidentService(
     ApplicationDbContext dbContext,
-    TimeProvider timeProvider) : IIncidentService
+    TimeProvider timeProvider, IOperationsRealtimeNotifier? realtimeNotifier = null) : IIncidentService
 {
     private static readonly HashSet<string> SupportedTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -189,6 +190,7 @@ public sealed class IncidentService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishAsync(incident, cancellationToken);
         return await LoadDetailAsync(incident.Id, cancellationToken);
     }
 
@@ -261,6 +263,7 @@ public sealed class IncidentService(
         });
         incident.UpdatedAt = now;
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishAsync(incident, cancellationToken);
         return await LoadDetailAsync(incidentId, cancellationToken);
     }
 
@@ -341,6 +344,7 @@ public sealed class IncidentService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishAsync(incident, cancellationToken);
         return await LoadDetailAsync(incidentId, cancellationToken);
     }
 
@@ -576,7 +580,20 @@ public sealed class IncidentService(
             OccurredAt = now
         });
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishAsync(incident, cancellationToken);
         return new GuestIncidentResponse(incident.Id, $"INC-{incident.Id.ToString("N")[..8].ToUpperInvariant()}", incident.Status, now);
+    }
+
+
+    private async Task PublishAsync(Incident incident, CancellationToken cancellationToken)
+    {
+        if (realtimeNotifier is null) return;
+        RealtimeEvent message = new("IncidentUpdated", incident.Id, incident.LockerId,
+            incident.Status.ToString(), incident.Title, incident.UpdatedAt);
+        if (incident.LockerId.HasValue)
+            await realtimeNotifier.PublishToLockerAsync(incident.LockerId.Value, message, cancellationToken);
+        if (incident.ReporterUserId.HasValue)
+            await realtimeNotifier.PublishToUserAsync(incident.ReporterUserId.Value, message, cancellationToken);
     }
 
 

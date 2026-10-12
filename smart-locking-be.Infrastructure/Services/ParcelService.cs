@@ -1,3 +1,4 @@
+using smart_locking_be.Application.DTOs.Notifications;
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.Interfaces.Services;
@@ -7,7 +8,7 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificationService pushNotificationService, TimeProvider timeProvider) : IParcelService
+public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificationService pushNotificationService, TimeProvider timeProvider, IOperationsRealtimeNotifier? realtimeNotifier = null) : IParcelService
 {
     public async Task<IReadOnlyCollection<ParcelListItemResponse>> GetParcelsAsync(
         Guid userId,
@@ -190,6 +191,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
         });
         await dbContext.SaveChangesAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushId, cancellationToken);
+        await PublishAsync(parcel, now, cancellationToken);
         return new OverdueTransferResponse(
             parcel.Id,
             parcel.ParcelCode,
@@ -241,7 +243,18 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
             ChangedAt = completedAt,
         });
         await dbContext.SaveChangesAsync(cancellationToken);
+        await PublishAsync(parcel, completedAt, cancellationToken);
     }
+
+
+    private Task PublishAsync(Parcel parcel, DateTimeOffset occurredAt, CancellationToken cancellationToken) =>
+        realtimeNotifier?.PublishToLockerAsync(parcel.DeliveryRequest.LockerId, new RealtimeEvent(
+            "ParcelUpdated",
+            parcel.Id,
+            parcel.DeliveryRequest.LockerId,
+            parcel.Status.ToString(),
+            null,
+            occurredAt), cancellationToken) ?? Task.CompletedTask;
 
 
 }
