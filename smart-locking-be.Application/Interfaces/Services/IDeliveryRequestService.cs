@@ -53,4 +53,6 @@ public interface IDeliveryRequestService
         Guid requestId,
         string guestSessionToken,
         CancellationToken cancellationToken = default);
+    Task FinalizeDropOffAsync(Guid requestId, DateTimeOffset completedAt, CancellationToken cancellationToken = default);
+
 }

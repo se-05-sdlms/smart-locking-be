@@ -562,4 +562,107 @@ public sealed class DeliveryRequestService(
 
     private static DeliveryRequestSummaryResponse MapSummary(DeliveryRequest request) =>
         new(request.Id, request.Status, request.ParcelImageUrl, request.SessionExpiresAt);
+    public async Task FinalizeDropOffAsync(
+        Guid requestId,
+        DateTimeOffset completedAt,
+        CancellationToken cancellationToken = default)
+    {
+        DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests
+            .Include(item => item.SystemPolicy)
+            .Include(item => item.Locker)
+            .SingleOrDefaultAsync(item => item.Id == requestId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu giao hàng.");
+        if (deliveryRequest.Status == DeliveryRequestStatus.Deposited)
+        {
+            return;
+        }
+        if (deliveryRequest.Status != DeliveryRequestStatus.Allocated)
+        {
+            throw new InvalidOperationException($"Không thể xác nhận gửi hàng khi yêu cầu ở trạng thái {deliveryRequest.Status}.");
+        }
+
+        if (!deliveryRequest.AllocatedCompartmentId.HasValue)
+        {
+            throw new InvalidOperationException("Yêu cầu giao hàng chưa được phân bổ ngăn tủ.");
+        }
+
+        DateTimeOffset now = completedAt;
+
+        if (deliveryRequest.ReservationExpiresAt.HasValue && deliveryRequest.ReservationExpiresAt <= now)
+        {
+            deliveryRequest.Status = DeliveryRequestStatus.Expired;
+            deliveryRequest.FailureCode = DeliveryRequestFailureCode.ReservationExpired;
+            deliveryRequest.UpdatedAt = now;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            throw new TimeoutException("Thời gian giữ ngăn tủ đã hết hạn.");
+        }
+
+        (_, DateTimeOffset pickupDueAt, DateTimeOffset transferEligibleAt) = ParcelTimeline.GetDeadlines(
+            now,
+            deliveryRequest.SystemPolicy.OverdueStartAfterHours,
+            deliveryRequest.SystemPolicy.MaxStorageHours);
+        Parcel parcel = new()
+        {
+            Id = Guid.NewGuid(),
+            DeliveryRequestId = deliveryRequest.Id,
+            ParcelCode = $"P-{Guid.NewGuid():N}"[..10].ToUpperInvariant(),
+            Status = ParcelStatus.Stored,
+            StoredAt = now,
+            PickupDueAt = pickupDueAt,
+            MaxStorageUntil = transferEligibleAt,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        ParcelStatusHistory history = new()
+        {
+            Id = Guid.NewGuid(),
+            ParcelId = parcel.Id,
+            FromStatus = null,
+            ToStatus = ParcelStatus.Stored,
+            Reason = "Bưu kiện đã được Shipper đặt vào ngăn tủ thành công.",
+            ChangedAt = now
+        };
+
+        await (compartmentAllocationService ?? new CompartmentAllocationService(dbContext, timeProvider)).ReleaseAsync(deliveryRequest.Id, null, now, cancellationToken);
+
+        deliveryRequest.Status = DeliveryRequestStatus.Deposited;
+        deliveryRequest.DepositedAt = now;
+        deliveryRequest.CompartmentReleasedAt = now;
+        deliveryRequest.LastActivityAt = now;
+        deliveryRequest.UpdatedAt = now;
+
+        dbContext.Parcels.Add(parcel);
+        dbContext.ParcelStatusHistories.Add(history);
+        Guid residentUserId = await dbContext.ResidentProfiles
+            .Where(item => item.Id == deliveryRequest.ResidentProfileId)
+            .Select(item => item.UserId)
+            .SingleAsync(cancellationToken);
+        string compartmentCode = await dbContext.LockerCompartments
+            .Where(item => item.Id == deliveryRequest.AllocatedCompartmentId.Value)
+            .Select(item => item.Code)
+            .SingleAsync(cancellationToken);
+        Guid pushNotificationId = pushNotificationService.EnqueueParcelStored(
+            residentUserId,
+            deliveryRequest.Id,
+            parcel.Id,
+            deliveryRequest.Locker.Code,
+            compartmentCode);
+        AddAudit(null, "DeliveryRequest.Deposited", deliveryRequest, $"ParcelId={parcel.Id}", now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await pushNotificationService.TrySendAsync(pushNotificationId, cancellationToken);
+    }
+
+    private void AddAudit(Guid? actorUserId, string action, DeliveryRequest request, string? details, DateTimeOffset occurredAt) =>
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = actorUserId,
+            Action = action,
+            EntityType = nameof(DeliveryRequest),
+            EntityId = request.Id,
+            Result = AuditLogResult.Succeeded,
+            Details = details,
+            OccurredAt = occurredAt
+        });
 }

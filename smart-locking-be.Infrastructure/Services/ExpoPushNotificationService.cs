@@ -272,4 +272,27 @@ public sealed class ExpoPushNotificationService(
     }
 
 
+    public Guid EnqueueParcelStored(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string lockerCode,
+        string compartmentCode)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        string title = "Kiện hàng đã được lưu";
+        string message = $"Kiện hàng của bạn đã được lưu tại tủ {lockerCode}, ngăn {compartmentCode}.";
+        Notification inAppNotification = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, ParcelStoredType,
+            NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
+        inAppNotification.SentAt = now;
+        Notification pushNotification = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, ParcelStoredType,
+            NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
+
+        dbContext.Notifications.AddRange(inAppNotification, pushNotification);
+        return pushNotification.Id;
+    }
+
+
 }

@@ -208,4 +208,40 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
     }
 
 
+    public async Task FinalizeRetrievalAsync(
+        Guid parcelId,
+        Guid? residentUserId,
+        DateTimeOffset completedAt,
+        CancellationToken cancellationToken = default)
+    {
+        Parcel parcel = await dbContext.Parcels
+            .Include(item => item.DeliveryRequest)
+            .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy bưu kiện.");
+
+        if (parcel.Status == ParcelStatus.Retrieved)
+            return;
+        if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
+            throw new InvalidOperationException("Bưu kiện không còn ở trạng thái có thể hoàn tất lấy hàng.");
+
+        ParcelStatus previousStatus = parcel.Status;
+        parcel.Status = ParcelStatus.Retrieved;
+        parcel.RetrievedAt = completedAt;
+        parcel.UpdatedAt = completedAt;
+        parcel.DeliveryRequest.CompartmentReleasedAt = completedAt;
+        parcel.DeliveryRequest.UpdatedAt = completedAt;
+        dbContext.ParcelStatusHistories.Add(new ParcelStatusHistory
+        {
+            Id = Guid.NewGuid(),
+            ParcelId = parcel.Id,
+            FromStatus = previousStatus,
+            ToStatus = ParcelStatus.Retrieved,
+            Reason = "Cửa ngăn đã đóng sau khi người nhận lấy bưu kiện.",
+            ChangedByUserId = residentUserId,
+            ChangedAt = completedAt,
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+
 }
