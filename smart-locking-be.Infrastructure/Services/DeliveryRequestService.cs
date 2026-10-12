@@ -11,7 +11,8 @@ public sealed class DeliveryRequestService(
     ApplicationDbContext dbContext,
     ITokenHashService tokenHashService,
     IPushNotificationService pushNotificationService,
-    TimeProvider timeProvider) : IDeliveryRequestService
+    TimeProvider timeProvider,
+    ICompartmentAllocationService? compartmentAllocationService = null) : IDeliveryRequestService
 {
     // ==========================================
     // Issue #19: Guest Shipper Initiate & Submit
@@ -316,28 +317,11 @@ public sealed class DeliveryRequestService(
 
         DateTimeOffset now = timeProvider.GetUtcNow();
 
-        List<LockerCompartment> compartments = await dbContext.LockerCompartments
-            .Where(c => c.LockerId == deliveryRequest.LockerId &&
-                        c.OperationalStatus == LockerCompartmentOperationalStatus.Operational)
-            .OrderBy(c => c.Code)
-            .ToListAsync(cancellationToken);
-
-        LockerCompartment? availableCompartment = null;
-        foreach (LockerCompartment compartment in compartments)
-        {
-            bool hasStoredParcel = await dbContext.Parcels.AnyAsync(
-                p => p.DeliveryRequest.AllocatedCompartmentId == compartment.Id && p.Status == ParcelStatus.Stored,
-                cancellationToken);
-            if (hasStoredParcel) continue;
-
-            bool hasActiveReservation = await dbContext.CompartmentReservations.AnyAsync(
-                r => r.LockerCompartmentId == compartment.Id && r.ReleasedAt == null && r.ExpiresAt > now,
-                cancellationToken);
-            if (hasActiveReservation) continue;
-
-            availableCompartment = compartment;
-            break;
-        }
+        ICompartmentAllocationService allocator = compartmentAllocationService ?? new CompartmentAllocationService(dbContext, timeProvider);
+        DateTimeOffset reservationExpiresAt = now.AddMinutes(deliveryRequest.SystemPolicy.CompartmentReservationMinutes);
+        CompartmentReservation? reservation = await allocator.ReserveAvailableAsync(
+            deliveryRequest.LockerId, deliveryRequest.Id, null, reservationExpiresAt, cancellationToken);
+        LockerCompartment? availableCompartment = reservation?.LockerCompartment;
 
         if (availableCompartment is null)
         {
@@ -350,17 +334,6 @@ public sealed class DeliveryRequestService(
             throw new InvalidOperationException("Không tìm thấy ngăn tủ trống khả dụng tại locker này.");
         }
 
-        DateTimeOffset reservationExpiresAt = now.AddMinutes(deliveryRequest.SystemPolicy.CompartmentReservationMinutes);
-        CompartmentReservation reservation = new()
-        {
-            Id = Guid.NewGuid(),
-            LockerCompartmentId = availableCompartment.Id,
-            DeliveryRequestId = deliveryRequest.Id,
-            ReservedAt = now,
-            ExpiresAt = reservationExpiresAt,
-            CreatedAt = now
-        };
-
         deliveryRequest.AllocatedCompartmentId = availableCompartment.Id;
         deliveryRequest.Status = DeliveryRequestStatus.Allocated;
         deliveryRequest.AllocatedAt = now;
@@ -368,12 +341,11 @@ public sealed class DeliveryRequestService(
         deliveryRequest.LastActivityAt = now;
         deliveryRequest.UpdatedAt = now;
 
-        dbContext.CompartmentReservations.Add(reservation);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return new CompartmentReservationResponse(
             deliveryRequest.Id,
-            reservation.Id,
+            reservation!.Id,
             availableCompartment.Id,
             availableCompartment.Code,
             reservation.ReservedAt,

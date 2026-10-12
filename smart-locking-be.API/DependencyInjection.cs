@@ -16,6 +16,8 @@ public static class DependencyInjection
     {
         // 1. Controllers & API Behavior
         services.AddControllers();
+        services.AddProblemDetails();
+        services.AddExceptionHandler<ApiExceptionHandler>();
 
         // 2. CORS Policy Configuration
         services.AddCorsPolicy(configuration, environment);
@@ -64,6 +66,8 @@ public static class DependencyInjection
             app.UseSwagger();
             app.UseSwaggerUI();
         }
+
+        app.UseExceptionHandler();
 
         // 2. Log request bằng Serilog
         app.UseSerilogRequestLogging();

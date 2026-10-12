@@ -22,6 +22,10 @@ public sealed class NotificationConfiguration() : BaseConfiguration<Notification
             .WithMany(request => request.Notifications)
             .HasForeignKey(entity => entity.DeliveryRequestId)
             .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(entity => entity.ReturnRequest)
+            .WithMany(request => request.Notifications)
+            .HasForeignKey(entity => entity.ReturnRequestId)
+            .OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(entity => entity.Parcel)
             .WithMany(parcel => parcel.Notifications)
             .HasForeignKey(entity => entity.ParcelId)
@@ -41,6 +45,8 @@ public sealed class NotificationConfiguration() : BaseConfiguration<Notification
             .HasDatabaseName("IX_Notification_Type_CreatedAt");
         builder.HasIndex(entity => entity.DeliveryRequestId)
             .HasDatabaseName("IX_Notification_DeliveryRequestId");
+        builder.HasIndex(entity => entity.ReturnRequestId)
+            .HasDatabaseName("IX_Notification_ReturnRequestId");
 
         builder.ToTable("Notification", table => table.HasCheckConstraint(
             "CK_Notification_ReadState",

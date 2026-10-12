@@ -192,14 +192,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("SessionExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("ShipperName")
-                        .HasMaxLength(150)
-                        .HasColumnType("character varying");
-
-                    b.Property<string>("ShipperPhone")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying");
-
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("character varying");
@@ -856,6 +848,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("ReadAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("ReturnRequestId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("SentAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -876,6 +871,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("DeliveryRequestId")
                         .HasDatabaseName("IX_Notification_DeliveryRequestId");
+
+                    b.HasIndex("ReturnRequestId")
+                        .HasDatabaseName("IX_Notification_ReturnRequestId");
 
                     b.HasIndex("Type", "CreatedAt")
                         .HasDatabaseName("IX_Notification_Type_CreatedAt");
@@ -1435,10 +1433,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<string>("ReturnReason")
                         .HasColumnType("text");
 
-                    b.Property<string>("ShipperPhone")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying");
-
                     b.Property<DateTimeOffset?>("ShipperPickedUpAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1547,6 +1541,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<int>("OverdueStartAfterHours")
                         .HasColumnType("integer");
 
+                    b.Property<int>("PickupReminderStartDay")
+                        .HasColumnType("integer");
+
                     b.Property<int>("Version")
                         .HasColumnType("integer");
 
@@ -1566,7 +1563,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.ToTable("SystemPolicy", null, t =>
                         {
-                            t.HasCheckConstraint("CK_SystemPolicy_DurationsAndRates", "\"GuestSessionTimeoutMinutes\" > 0 AND \"ManualApprovalTimeoutMinutes\" > 0 AND \"CompartmentReservationMinutes\" > 0 AND \"OtpMaxAttempts\" > 0 AND \"OtpLockoutMinutes\" > 0 AND \"OverdueStartAfterHours\" >= 0 AND \"OverdueFeePerHour\" >= 0 AND \"MaxStorageHours\" > 0 AND \"ClearanceEligibilityAfterHours\" >= 0 AND \"ClearanceNoticeBeforeHours\" >= 0");
+                            t.HasCheckConstraint("CK_SystemPolicy_DurationsAndRates", "\"GuestSessionTimeoutMinutes\" > 0 AND \"ManualApprovalTimeoutMinutes\" > 0 AND \"CompartmentReservationMinutes\" > 0 AND \"OtpMaxAttempts\" > 0 AND \"OtpLockoutMinutes\" > 0 AND \"OverdueStartAfterHours\" >= 0 AND \"OverdueFeePerHour\" >= 0 AND \"MaxStorageHours\" > 0 AND \"ClearanceEligibilityAfterHours\" >= 0 AND \"ClearanceNoticeBeforeHours\" >= 0 AND \"PickupReminderStartDay\" > 0");
                         });
                 });
 
@@ -1983,6 +1980,11 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .HasForeignKey("PaymentTransactionId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("smart_locking_be.Domain.Entities.ReturnRequest", "ReturnRequest")
+                        .WithMany("Notifications")
+                        .HasForeignKey("ReturnRequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("smart_locking_be.Domain.Entities.User", "User")
                         .WithMany("Notifications")
                         .HasForeignKey("UserId")
@@ -1996,6 +1998,8 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("Parcel");
 
                     b.Navigation("PaymentTransaction");
+
+                    b.Navigation("ReturnRequest");
 
                     b.Navigation("User");
                 });
@@ -2323,6 +2327,8 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("AccessEvents");
 
                     b.Navigation("Incidents");
+
+                    b.Navigation("Notifications");
 
                     b.Navigation("Reservations");
                 });

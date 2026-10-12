@@ -50,7 +50,6 @@ public sealed class ReturnRequest
     /// <summary>
     /// Số điện thoại của Shipper đến nhận hàng trả nếu đã xác định.
     /// </summary>
-    public string? ShipperPhone { get; set; }
 
     /// <summary>
     /// Giá trị băm của token phiên làm việc của Shipper khi thực hiện lấy hàng trả nếu dùng guest session token.
@@ -136,4 +135,6 @@ public sealed class ReturnRequest
     /// Các sự cố phát sinh trong quá trình gửi hoặc nhận hàng trả.
     /// </summary>
     public ICollection<Incident> Incidents { get; set; } = new List<Incident>();
+
+    public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
 }
