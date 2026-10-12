@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using smart_locking_be.Application.Interfaces.Services;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
@@ -13,7 +14,8 @@ public sealed class ExpoPushNotificationService(
     ApplicationDbContext dbContext,
     HttpClient httpClient,
     TimeProvider timeProvider,
-    ILogger<ExpoPushNotificationService> logger) : IPushNotificationService
+    ILogger<ExpoPushNotificationService> logger,
+    IOperationsRealtimeNotifier? realtimeNotifier = null) : IPushNotificationService
 {
     private const string ExpoPushEndpoint = "https://exp.host/--/api/v2/push/send";
     private const string DeliveryApprovalRequestType = "DeliveryApprovalRequested";
@@ -57,6 +59,28 @@ public sealed class ExpoPushNotificationService(
         return pushNotification.Id;
     }
 
+    public Guid EnqueueParcelStored(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string lockerCode,
+        string compartmentCode)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        string title = "Kiện hàng đã được lưu";
+        string message = $"Kiện hàng của bạn đã được lưu tại tủ {lockerCode}, ngăn {compartmentCode}.";
+        Notification inAppNotification = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, ParcelStoredType,
+            NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
+        inAppNotification.SentAt = now;
+        Notification pushNotification = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, ParcelStoredType,
+            NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
+
+        dbContext.Notifications.AddRange(inAppNotification, pushNotification);
+        return pushNotification.Id;
+    }
+
     public Guid EnqueueReturnNotification(
         Guid residentUserId,
         Guid returnRequestId,
@@ -71,6 +95,27 @@ public sealed class ExpoPushNotificationService(
         inApp.SentAt = now;
         Notification push = CreateNotification(
             residentUserId, null, returnRequestId, null, type,
+            NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
+        dbContext.Notifications.AddRange(inApp, push);
+        return push.Id;
+    }
+
+    public Guid EnqueueParcelTransferred(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string collectionAddress)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        const string type = "ParcelTransferred";
+        const string title = "Kiện hàng đã chuyển điểm tập kết";
+        string message = $"Nhận kiện tại {collectionAddress}.";
+        Notification inApp = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, type,
+            NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
+        inApp.SentAt = now;
+        Notification push = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, type,
             NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
         dbContext.Notifications.AddRange(inApp, push);
         return push.Id;
@@ -134,7 +179,16 @@ public sealed class ExpoPushNotificationService(
             .SingleOrDefaultAsync(item => item.Id == notificationId, cancellationToken)
             ?? throw new KeyNotFoundException($"Không tìm thấy push notification '{notificationId}'.");
 
-
+        if (realtimeNotifier is not null)
+        {
+            await realtimeNotifier.PublishToUserAsync(notification.UserId, new RealtimeEvent(
+                notification.Type,
+                notification.ParcelId ?? notification.ReturnRequestId ?? notification.DeliveryRequestId ?? notification.IncidentId,
+                null,
+                "Updated",
+                notification.Message,
+                notification.CreatedAt), cancellationToken);
+        }
 
         if (notification.Channel != NotificationChannel.Push ||
             notification.DeliveryStatus == NotificationDeliveryStatus.Sent)
@@ -250,49 +304,4 @@ public sealed class ExpoPushNotificationService(
         ticket.TryGetProperty("details", out JsonElement details) &&
         details.TryGetProperty("error", out JsonElement error) &&
         error.GetString() == "DeviceNotRegistered";
-    public Guid EnqueueParcelTransferred(
-        Guid residentUserId,
-        Guid deliveryRequestId,
-        Guid parcelId,
-        string collectionAddress)
-    {
-        DateTimeOffset now = timeProvider.GetUtcNow();
-        const string type = "ParcelTransferred";
-        const string title = "Kiện hàng đã chuyển điểm tập kết";
-        string message = $"Nhận kiện tại {collectionAddress}.";
-        Notification inApp = CreateNotification(
-            residentUserId, deliveryRequestId, null, parcelId, type,
-            NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
-        inApp.SentAt = now;
-        Notification push = CreateNotification(
-            residentUserId, deliveryRequestId, null, parcelId, type,
-            NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
-        dbContext.Notifications.AddRange(inApp, push);
-        return push.Id;
-    }
-
-
-    public Guid EnqueueParcelStored(
-        Guid residentUserId,
-        Guid deliveryRequestId,
-        Guid parcelId,
-        string lockerCode,
-        string compartmentCode)
-    {
-        DateTimeOffset now = timeProvider.GetUtcNow();
-        string title = "Kiện hàng đã được lưu";
-        string message = $"Kiện hàng của bạn đã được lưu tại tủ {lockerCode}, ngăn {compartmentCode}.";
-        Notification inAppNotification = CreateNotification(
-            residentUserId, deliveryRequestId, null, parcelId, ParcelStoredType,
-            NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
-        inAppNotification.SentAt = now;
-        Notification pushNotification = CreateNotification(
-            residentUserId, deliveryRequestId, null, parcelId, ParcelStoredType,
-            NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
-
-        dbContext.Notifications.AddRange(inAppNotification, pushNotification);
-        return pushNotification.Id;
-    }
-
-
 }

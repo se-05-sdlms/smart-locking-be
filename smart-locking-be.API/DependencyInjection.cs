@@ -1,4 +1,5 @@
 using Serilog;
+using smart_locking_be.API.Hubs;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.API.Extensions;
 using smart_locking_be.API.Services;
@@ -17,6 +18,8 @@ public static class DependencyInjection
     {
         // 1. Controllers & API Behavior
         services.AddControllers();
+        services.AddSignalR();
+        services.AddScoped<IOperationsRealtimeNotifier, SignalROperationsRealtimeNotifier>();
         services.AddScoped<IImageStorageService, LocalImageStorageService>();
         services.AddProblemDetails();
         services.AddExceptionHandler<ApiExceptionHandler>();
@@ -98,6 +101,7 @@ public static class DependencyInjection
 
         // 10. Ánh xạ các Controller endpoints
         app.MapControllers();
+        app.MapHub<OperationsHub>("/hubs/operations");
 
         return app;
     }

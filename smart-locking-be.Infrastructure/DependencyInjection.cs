@@ -67,6 +67,8 @@ public static class DependencyInjection
 
         services.AddHostedService<MqttLockerListenerService>();
 
+        services.AddScoped<INotificationRuleService, NotificationRuleService>();
+
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE TRONG TƯƠNG LAI:
         // Các Service thực thi nghiệp vụ tiêm trực tiếp ApplicationDbContext được ghép cặp như sau:
         //
