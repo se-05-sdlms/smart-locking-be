@@ -30,6 +30,7 @@ public sealed class JwtTokenService(IConfiguration configuration) : IJwtTokenSer
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new(ClaimTypes.Role, user.Role.ToString()),
+            new("must_change_password", user.MustChangePassword ? "true" : "false"),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         ];
 

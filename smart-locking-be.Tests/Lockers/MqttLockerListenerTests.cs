@@ -211,40 +211,15 @@ public sealed class MqttLockerListenerTests
             return Task.CompletedTask;
         }
 
-        public Task<InitiateDeliveryResponse> InitiateAsync(
-        InitiateDeliveryRequest request,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<DeliveryRequestSummaryResponse> UploadImageAsync(
-        Guid id,
-        string guestSessionToken,
-        UploadParcelImageRequest request,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<DeliveryRequestSummaryResponse> SubmitRecipientAsync(
-        Guid id,
-        string guestSessionToken,
-        SubmitRecipientPhoneRequest request,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<InitiateDeliveryResponse> CreateAsync(InitiateDeliveryRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<DeliveryRequestSummaryResponse> SubmitAsync(Guid id, string guestSessionToken, SubmitDeliveryRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<GuestDeliveryStatusResponse> GetAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<int> ExpireStartedSessionsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<IReadOnlyCollection<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(
-        Guid residentUserId,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<DeliveryRequestSummaryResponse> ApproveDeliveryRequestAsync(
-        Guid residentUserId,
-        Guid requestId,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<DeliveryRequestSummaryResponse> RejectDeliveryRequestAsync(
-        Guid residentUserId,
-        Guid requestId,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<PagedResult<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(Guid residentUserId, CancellationToken cancellationToken = default, int pageNumber = 1, int pageSize = 20) => throw new NotSupportedException();
+        public Task<DeliveryRequestSummaryResponse> ApproveDeliveryRequestAsync(Guid residentUserId, Guid requestId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<DeliveryRequestSummaryResponse> RejectDeliveryRequestAsync(Guid residentUserId, Guid requestId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<int> ExpirePendingApprovalsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<CompartmentReservationResponse> ReserveCompartmentAsync(
-        Guid requestId,
-        string guestSessionToken,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<CompartmentReservationResponse> OpenCompartmentAsync(Guid requestId, string guestSessionToken, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<DropOffConfirmationResponse> ConfirmDropOffAsync(
-        Guid requestId,
-        string guestSessionToken,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

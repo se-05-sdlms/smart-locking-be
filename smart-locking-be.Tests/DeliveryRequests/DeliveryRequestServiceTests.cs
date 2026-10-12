@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
+using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -20,7 +21,7 @@ public sealed class DeliveryRequestServiceTests
         var tokenService = new Sha256TokenHashService();
         DeliveryRequestService service = CreateService(dbContext, tokenService);
 
-        InitiateDeliveryResponse response = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
+        InitiateDeliveryResponse response = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
 
         DeliveryRequest persisted = await dbContext.DeliveryRequests.SingleAsync();
         Assert.Equal(DeliveryRequestStatus.Started, response.Status);
@@ -40,73 +41,74 @@ public sealed class DeliveryRequestServiceTests
         DeliveryRequestService service = CreateService(dbContext);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.InitiateAsync(new InitiateDeliveryRequest(locker.Code)));
+            () => service.CreateAsync(new InitiateDeliveryRequest(locker.Code)));
     }
 
     [Fact]
-    public async Task UploadImageAsync_WithHttpsUrl_StoresUrlAndRefreshesSession()
+    public async Task SubmitAsync_WithHttpsUrl_StoresUrlAndRefreshesSession()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
+        await SeedResidentAsync(dbContext, "0901234567");
         DeliveryRequestService service = CreateService(dbContext);
-        InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
+        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
         DateTimeOffset originalExpiry = initiated.SessionExpiresAt;
 
-        DeliveryRequestSummaryResponse response = await service.UploadImageAsync(
+        DeliveryRequestSummaryResponse response = await service.SubmitAsync(
             initiated.Id,
             initiated.GuestSessionToken,
-            new UploadParcelImageRequest("  https://cdn.example.com/parcel.webp  "));
+            new SubmitDeliveryRequest("  https://cdn.example.com/parcel.webp  ", "0901234567"));
 
         Assert.Equal("https://cdn.example.com/parcel.webp", response.ParcelImageUrl);
         Assert.True(response.SessionExpiresAt >= originalExpiry);
     }
 
     [Fact]
-    public async Task UploadImageAsync_WithRelativeUrl_ThrowsArgumentException()
+    public async Task SubmitAsync_WithRelativeUrl_ThrowsArgumentException()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
         DeliveryRequestService service = CreateService(dbContext);
-        InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
+        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
 
-        await Assert.ThrowsAsync<ArgumentException>(() => service.UploadImageAsync(
+        await Assert.ThrowsAsync<ArgumentException>(() => service.SubmitAsync(
             initiated.Id,
             initiated.GuestSessionToken,
-            new UploadParcelImageRequest("/images/parcel.jpg")));
+            new SubmitDeliveryRequest("/images/parcel.jpg", "0901234567")));
     }
 
     [Fact]
-    public async Task UploadImageAsync_WithExpiredSession_PersistsExpirationAndThrowsTimeoutException()
+    public async Task SubmitAsync_WithExpiredSession_PersistsExpirationAndThrowsTimeoutException()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
         DeliveryRequestService service = CreateService(dbContext);
-        InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
+        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
         DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests.SingleAsync();
         deliveryRequest.SessionExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1);
         await dbContext.SaveChangesAsync();
 
-        await Assert.ThrowsAsync<TimeoutException>(() => service.UploadImageAsync(
+        await Assert.ThrowsAsync<TimeoutException>(() => service.SubmitAsync(
             initiated.Id,
             initiated.GuestSessionToken,
-            new UploadParcelImageRequest("https://cdn.example.com/parcel.jpg")));
+            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", "0901234567")));
 
         Assert.Equal(DeliveryRequestStatus.Expired, deliveryRequest.Status);
         Assert.Equal(DeliveryRequestFailureCode.SessionExpired, deliveryRequest.FailureCode);
     }
 
     [Fact]
-    public async Task SubmitRecipientAsync_WithoutImage_ThrowsInvalidOperationException()
+    public async Task SubmitAsync_WithoutImage_ThrowsArgumentException()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
         DeliveryRequestService service = CreateService(dbContext);
-        InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
+        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SubmitRecipientAsync(
+        await Assert.ThrowsAsync<ArgumentException>(() => service.SubmitAsync(
             initiated.Id,
             initiated.GuestSessionToken,
-            new SubmitRecipientPhoneRequest("0901234567")));
+            new SubmitDeliveryRequest("", "0901234567")));
     }
 
     [Fact]
@@ -117,16 +119,11 @@ public sealed class DeliveryRequestServiceTests
         ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234567");
         var pushNotificationService = new RecordingPushNotificationService();
         DeliveryRequestService service = CreateService(dbContext, pushNotificationService: pushNotificationService);
-        InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
-        await service.UploadImageAsync(
+        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
+        DeliveryRequestSummaryResponse response = await service.SubmitAsync(
             initiated.Id,
             initiated.GuestSessionToken,
-            new UploadParcelImageRequest("https://cdn.example.com/parcel.jpg"));
-
-        DeliveryRequestSummaryResponse response = await service.SubmitRecipientAsync(
-            initiated.Id,
-            initiated.GuestSessionToken,
-            new SubmitRecipientPhoneRequest(" 0901234567 "));
+            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", " 0901234567 "));
 
         DeliveryRequest persisted = await dbContext.DeliveryRequests.SingleAsync();
         Assert.Equal(DeliveryRequestStatus.Approved, response.Status);
@@ -146,24 +143,38 @@ public sealed class DeliveryRequestServiceTests
         ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234568", DeliveryApprovalMode.Manual);
         var pushNotificationService = new RecordingPushNotificationService();
         DeliveryRequestService service = CreateService(dbContext, pushNotificationService: pushNotificationService);
-        InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
-        await service.UploadImageAsync(
+        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
+        DeliveryRequestSummaryResponse response = await service.SubmitAsync(
             initiated.Id,
             initiated.GuestSessionToken,
-            new UploadParcelImageRequest("https://cdn.example.com/parcel.jpg"));
-
-        DeliveryRequestSummaryResponse response = await service.SubmitRecipientAsync(
-            initiated.Id,
-            initiated.GuestSessionToken,
-            new SubmitRecipientPhoneRequest(resident.User.PhoneNumber!));
+            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", resident.User.PhoneNumber!));
 
         DeliveryRequest persisted = await dbContext.DeliveryRequests.SingleAsync();
         Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
         Assert.Equal(DeliveryApprovalMode.Manual, persisted.ApprovalModeSnapshot);
-        Assert.Equal(TimeSpan.FromMinutes(30), persisted.ApprovalExpiresAt - persisted.UpdatedAt);
+        Assert.Equal(TimeSpan.FromMinutes(10), persisted.ApprovalExpiresAt - persisted.UpdatedAt);
         Assert.Equal(
             [(resident.UserId, persisted.Id, locker.Code)],
             pushNotificationService.Requests);
+    }
+
+    [Fact]
+    public async Task SubmitRecipientAsync_WhenResidentUsesAnotherLocker_RejectsRequest()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
+        ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234570");
+        resident.RegisteredLockerId = Guid.NewGuid();
+        await dbContext.SaveChangesAsync();
+        DeliveryRequestService service = CreateService(dbContext);
+        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.SubmitAsync(
+                initiated.Id,
+                initiated.GuestSessionToken,
+                new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", resident.User.PhoneNumber!)));
+
+        Assert.Contains("không đăng ký", exception.Message);
     }
 
     [Fact]
@@ -183,16 +194,11 @@ public sealed class DeliveryRequestServiceTests
         DeliveryRequestService service = CreateService(
             dbContext,
             pushNotificationService: notificationService);
-        InitiateDeliveryResponse initiated = await service.InitiateAsync(new InitiateDeliveryRequest(locker.Code));
-        await service.UploadImageAsync(
+        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
+        DeliveryRequestSummaryResponse response = await service.SubmitAsync(
             initiated.Id,
             initiated.GuestSessionToken,
-            new UploadParcelImageRequest("https://cdn.example.com/parcel.jpg"));
-
-        DeliveryRequestSummaryResponse response = await service.SubmitRecipientAsync(
-            initiated.Id,
-            initiated.GuestSessionToken,
-            new SubmitRecipientPhoneRequest(resident.User.PhoneNumber!));
+            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", resident.User.PhoneNumber!));
 
         Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
         Assert.Equal(DeliveryRequestStatus.PendingApproval, (await dbContext.DeliveryRequests.SingleAsync()).Status);
@@ -285,7 +291,7 @@ public sealed class DeliveryRequestServiceTests
         await dbContext.SaveChangesAsync();
         DeliveryRequestService service = CreateService(dbContext, tokenService);
 
-        CompartmentReservationResponse response = await service.ReserveCompartmentAsync(request.Id, token);
+        CompartmentReservationResponse response = await service.OpenCompartmentAsync(request.Id, token);
 
         Assert.Equal(request.Id, response.RequestId);
         Assert.Equal(compartment.Id, response.CompartmentId);
@@ -324,9 +330,8 @@ public sealed class DeliveryRequestServiceTests
         await dbContext.SaveChangesAsync();
         DeliveryRequestService service = CreateService(dbContext, tokenService);
 
-        DropOffConfirmationResponse response = await service.ConfirmDropOffAsync(request.Id, token);
+        await service.FinalizeDropOffAsync(request.Id, DateTimeOffset.UtcNow);
 
-        Assert.Equal(DeliveryRequestStatus.Deposited, response.Status);
         Assert.Equal(DeliveryRequestStatus.Deposited, request.Status);
         Assert.NotNull(reservation.ReleasedAt);
 
@@ -337,6 +342,30 @@ public sealed class DeliveryRequestServiceTests
         ParcelStatusHistory history = await dbContext.ParcelStatusHistories.SingleAsync();
         Assert.Equal(parcel.Id, history.ParcelId);
         Assert.Equal(ParcelStatus.Stored, history.ToStatus);
+    }
+
+    [Fact]
+    public async Task FinalizeDropOffAsync_DoesNotDependOnStaleDoorState()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
+        LockerCompartment compartment = SeedCompartment(dbContext, locker.Id, 1);
+        ResidentProfile resident = await SeedResidentAsync(dbContext, "0909999998");
+        compartment.DoorStatus = DoorStatus.Open;
+        string token = "valid-token";
+        var tokenService = new Sha256TokenHashService();
+        DeliveryRequest request = CreateDeliveryRequest(
+            locker.Id, policy.Id, tokenService.HashToken(token), DeliveryRequestStatus.Allocated,
+            DateTimeOffset.UtcNow.AddMinutes(10));
+        request.ResidentProfileId = resident.Id;
+        request.AllocatedCompartmentId = compartment.Id;
+        request.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
+        dbContext.DeliveryRequests.Add(request);
+        await dbContext.SaveChangesAsync();
+
+        await CreateService(dbContext, tokenService).FinalizeDropOffAsync(request.Id, DateTimeOffset.UtcNow);
+
+        Assert.Single(dbContext.Parcels);
     }
 
     [Fact]
@@ -376,6 +405,8 @@ public sealed class DeliveryRequestServiceTests
             dbContext,
             tokenHashService ?? new Sha256TokenHashService(),
             pushNotificationService ?? new RecordingPushNotificationService(),
+            new SuccessfulLockerAccessService(),
+            new CompartmentAllocationService(dbContext, timeProvider ?? TimeProvider.System),
             timeProvider ?? TimeProvider.System);
 
     private static async Task<(Locker Locker, SystemPolicy Policy)> SeedLockerAndPolicyAsync(ApplicationDbContext dbContext)
@@ -409,7 +440,7 @@ public sealed class DeliveryRequestServiceTests
             Version = 1,
             DefaultApprovalMode = DeliveryApprovalMode.Manual,
             GuestSessionTimeoutMinutes = 15,
-            ManualApprovalTimeoutMinutes = 30,
+            ManualApprovalTimeoutMinutes = 10,
             CompartmentReservationMinutes = 10,
             OverdueStartAfterHours = 24,
             Currency = "VND",
@@ -433,6 +464,7 @@ public sealed class DeliveryRequestServiceTests
         DeliveryApprovalMode approvalMode = DeliveryApprovalMode.Auto)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        Guid registeredLockerId = await dbContext.Lockers.Select(locker => locker.Id).SingleAsync();
         User user = new()
         {
             Id = Guid.NewGuid(),
@@ -447,6 +479,7 @@ public sealed class DeliveryRequestServiceTests
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
+            RegisteredLockerId = registeredLockerId,
             FullName = "Cư Dân",
             DeliveryApprovalMode = approvalMode,
             User = user,
@@ -512,20 +545,27 @@ public sealed class DeliveryRequestServiceTests
             return Guid.NewGuid();
         }
 
-        public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => Guid.NewGuid();
+        public Guid EnqueueParcelStored(
+            Guid residentUserId,
+            Guid deliveryRequestId,
+            Guid parcelId,
+            string lockerCode,
+            string compartmentCode) => Guid.NewGuid();
+
+        public Guid EnqueueReturnNotification(
+            Guid residentUserId,
+            Guid returnRequestId,
+            string type,
+            string title,
+            string message) => Guid.NewGuid();
 
         public Guid EnqueueParcelTransferred(
-        Guid residentUserId,
-        Guid deliveryRequestId,
-        Guid parcelId,
-        string collectionAddress) => Guid.NewGuid();
+            Guid residentUserId,
+            Guid deliveryRequestId,
+            Guid parcelId,
+            string collectionAddress) => Guid.NewGuid();
 
-        public Guid EnqueueParcelStored(
-        Guid residentUserId,
-        Guid deliveryRequestId,
-        Guid parcelId,
-        string lockerCode,
-        string compartmentCode) => Guid.NewGuid();
+        public Guid EnqueueParcelPickupReminder(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, int daysUntilTransfer, bool isOverdue) => Guid.NewGuid();
 
         public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default)
         {
@@ -534,6 +574,21 @@ public sealed class DeliveryRequestServiceTests
 
         public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(
             CancellationToken cancellationToken = default) => Task.FromResult(0);
+    }
+
+    private sealed class SuccessfulLockerAccessService : ILockerAccessService
+    {
+        public Task<OpenLockerResponse> OpenAsync(
+            OpenLockerRequest request,
+            CancellationToken cancellationToken = default) => Task.FromResult(new OpenLockerResponse(
+                Guid.NewGuid(),
+                request.LockerId,
+                request.LockerCompartmentId,
+                "simulator",
+                1,
+                LockerAccessResult.Succeeded,
+                null,
+                DateTimeOffset.UtcNow));
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
