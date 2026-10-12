@@ -15,7 +15,8 @@ public sealed class ReturnRequestService(
     ILockerAccessService lockerAccessService,
     ICompartmentAllocationService compartmentAllocationService,
     IPushNotificationService pushNotificationService,
-    TimeProvider timeProvider) : IReturnRequestService
+    ITokenHashService tokenHashService,
+    TimeProvider timeProvider) : IReturnRequestService, IReturnPickupSessionService
 {
     public async Task<ReturnRequestResponse> CreateAsync(Guid residentUserId, CreateReturnRequest request, CancellationToken cancellationToken = default)
     {
@@ -129,6 +130,63 @@ public sealed class ReturnRequestService(
         await pushNotificationService.TrySendAsync(pushId, cancellationToken);
     }
 
+    public async Task<ReturnPickupSessionResponse> CreateAsync(ValidateReturnPickupRequest request, CancellationToken cancellationToken = default)
+    {
+        string code = request.PickupCode.Trim();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(code, "^[0-9]{6}$")) throw new ArgumentException("Mã lấy hàng phải gồm đúng 6 chữ số.");
+        ReturnRequest entity = await FullQuery().SingleOrDefaultAsync(item => item.ReturnCode == code && item.Locker.Code == request.LockerCode.Trim(), cancellationToken)
+            ?? throw new KeyNotFoundException("Mã lấy hàng không hợp lệ tại tủ này.");
+        if (entity.Status != ReturnRequestStatus.Deposited || entity.AllocatedCompartment is null)
+            throw new InvalidOperationException("Mã lấy hàng đã dùng hoặc chưa sẵn sàng.");
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
+        string token = tokenHashService.CreateSecureToken();
+        entity.ShipperSessionTokenHash = tokenHashService.HashToken(token);
+        entity.UpdatedAt = now;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new ReturnPickupSessionResponse(entity.Id, token, entity.Locker.Code, entity.AllocatedCompartment.Code, entity.ReturnImageUrl!, now.AddMinutes(policy.GuestSessionTimeoutMinutes));
+    }
+
+    public async Task<ReturnPickupSessionResponse> GetAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default)
+    {
+        ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
+        SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl!, entity.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes));
+    }
+
+    public async Task<ReturnPickupSessionResponse> OpenCompartmentAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default)
+    {
+        ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
+        OpenLockerResponse opened = await lockerAccessService.OpenAsync(new OpenLockerRequest(
+            entity.LockerId, entity.AllocatedCompartmentId!.Value, null, null, null, entity.Id,
+            LockerAccessType.ShipperReturnPickup, LockerAccessMethod.GuestSession, null, "Shipper Guest Web"), cancellationToken);
+        if (opened.Result != LockerAccessResult.Succeeded) throw new InvalidOperationException(opened.FailureReason ?? "Không thể mở ngăn tủ.");
+        SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
+        return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl!, timeProvider.GetUtcNow().AddMinutes(policy.GuestSessionTimeoutMinutes));
+    }
+
+    public async Task FinalizePickupAsync(Guid id, DateTimeOffset completedAt, CancellationToken cancellationToken = default)
+    {
+        ReturnRequest entity = await FullQuery().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu gửi hàng trả.");
+        if (entity.Status == ReturnRequestStatus.Completed) return;
+        if (entity.Status != ReturnRequestStatus.Deposited || entity.AllocatedCompartment is null)
+            throw new InvalidOperationException("Yêu cầu không ở trạng thái có thể hoàn tất lấy hàng.");
+        DateTimeOffset now = completedAt;
+        entity.Status = ReturnRequestStatus.Completed;
+        entity.ShipperPickedUpAt = now;
+        entity.CompartmentReleasedAt = now;
+        entity.ShipperSessionTokenHash = null;
+        entity.UpdatedAt = now;
+        Guid pushId = pushNotificationService.EnqueueReturnNotification(
+            entity.ResidentProfile.UserId, entity.Id, "ReturnPickedUp", "Shipper đã lấy hàng gửi",
+            $"Shipper đã lấy kiện hàng gửi tại tủ {entity.Locker.Code}, ngăn {entity.AllocatedCompartment.Code}.");
+        AddAudit(null, "ReturnRequest.PickedUp", nameof(ReturnRequest), entity.Id, entity.AllocatedCompartment.Code, now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await pushNotificationService.TrySendAsync(pushId, cancellationToken);
+    }
+
     public async Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -151,6 +209,20 @@ public sealed class ReturnRequestService(
     private IQueryable<ReturnRequest> FullQuery() => dbContext.ReturnRequests
         .Include(item => item.ResidentProfile).ThenInclude(profile => profile.User)
         .Include(item => item.Locker).Include(item => item.AllocatedCompartment);
+
+    private async Task<ReturnRequest> GetValidGuestReturnAsync(Guid id, string token, CancellationToken cancellationToken)
+    {
+        ReturnRequest entity = await FullQuery().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu gửi hàng trả.");
+        if (entity.Status != ReturnRequestStatus.Deposited || string.IsNullOrWhiteSpace(entity.ShipperSessionTokenHash))
+            throw new InvalidOperationException("Phiên lấy hàng không còn hiệu lực.");
+        if (!string.Equals(entity.ShipperSessionTokenHash, tokenHashService.HashToken(token.Trim()), StringComparison.Ordinal))
+            throw new System.Security.Authentication.AuthenticationException("Guest session token không hợp lệ.");
+        SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
+        if (entity.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes) <= timeProvider.GetUtcNow()) throw new TimeoutException("Phiên lấy hàng đã hết hạn.");
+        entity.UpdatedAt = timeProvider.GetUtcNow();
+        return entity;
+    }
 
     private async Task<SystemPolicy> ActivePolicyAsync(CancellationToken cancellationToken)
     {
