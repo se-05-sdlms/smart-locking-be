@@ -61,6 +61,8 @@ public static class DependencyInjection
 
         services.AddScoped<IOperationalRecordService, OperationalRecordService>();
 
+        services.AddScoped<IReportService, ReportService>();
+
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE TRONG TƯƠNG LAI:
         // Các Service thực thi nghiệp vụ tiêm trực tiếp ApplicationDbContext được ghép cặp như sau:
         //

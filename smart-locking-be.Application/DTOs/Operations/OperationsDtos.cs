@@ -31,3 +31,5 @@ public sealed record OperationalRecordDetailResponse(
     string LockerCode,
     DateTimeOffset OccurredAt,
     IReadOnlyDictionary<string, string?> Details);
+
+public sealed record OperationsReportResponse(DateTimeOffset From, DateTimeOffset To, int Deliveries, int Returns, int RetrievedParcels, int OpenIncidents, int MaintenanceRequests, int EmergencyUnlocks);
