@@ -22,6 +22,8 @@ public sealed class Notification
     /// </summary>
     public Guid? DeliveryRequestId { get; set; }
 
+    public Guid? ReturnRequestId { get; set; }
+
     /// <summary>
     /// Mã loại thông báo phục vụ phân loại và hiển thị giao diện.
     /// </summary>
@@ -91,6 +93,8 @@ public sealed class Notification
     /// Yêu cầu giao hàng liên quan nếu có.
     /// </summary>
     public DeliveryRequest? DeliveryRequest { get; set; }
+
+    public ReturnRequest? ReturnRequest { get; set; }
 
     /// <summary>
     /// Kiện hàng liên quan nếu có.

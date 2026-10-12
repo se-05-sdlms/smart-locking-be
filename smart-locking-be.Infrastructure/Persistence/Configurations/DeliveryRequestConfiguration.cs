@@ -9,8 +9,6 @@ public sealed class DeliveryRequestConfiguration() : BaseConfiguration<DeliveryR
     protected override void ConfigureEntity(EntityTypeBuilder<DeliveryRequest> builder)
     {
         Varchar(builder.Property(entity => entity.GuestSessionTokenHash)).IsRequired().HasMaxLength(256);
-        Varchar(builder.Property(entity => entity.ShipperName)).HasMaxLength(150);
-        Varchar(builder.Property(entity => entity.ShipperPhone)).HasMaxLength(20);
         Varchar(builder.Property(entity => entity.RecipientPhoneSnapshot)).HasMaxLength(20);
         Varchar(builder.Property(entity => entity.ParcelImageUrl)).HasMaxLength(2048);
         Varchar(builder.Property(entity => entity.OcrExtractedPhone)).HasMaxLength(20);

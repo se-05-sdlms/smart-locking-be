@@ -38,6 +38,7 @@ public sealed class SystemPolicyConfiguration() : BaseConfiguration<SystemPolicy
             "\"OverdueFeePerHour\" >= 0 AND " +
             "\"MaxStorageHours\" > 0 AND " +
             "\"ClearanceEligibilityAfterHours\" >= 0 AND " +
-            "\"ClearanceNoticeBeforeHours\" >= 0"));
+            "\"ClearanceNoticeBeforeHours\" >= 0 AND " +
+            "\"PickupReminderStartDay\" > 0"));
     }
 }

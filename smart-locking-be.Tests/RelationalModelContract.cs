@@ -67,6 +67,7 @@ internal static class RelationalModelContract
         I("Notification", "IX_Notification_UserId_IsRead_CreatedAt", false, null, "UserId", "IsRead", "CreatedAt"),
         I("Notification", "IX_Notification_Type_CreatedAt", false, null, "Type", "CreatedAt"),
         I("Notification", "IX_Notification_DeliveryRequestId", false, null, "DeliveryRequestId"),
+        I("Notification", "IX_Notification_ReturnRequestId", false, null, "ReturnRequestId"),
         I("Incident", "IX_Incident_Status_AssignedOperator", false, null, "Status", "AssignedOperatorUserId"),
         I("Incident", "IX_Incident_ParcelId", false, null, "ParcelId"),
         I("Incident", "IX_Incident_ReturnRequestId", false, null, "ReturnRequestId"),
