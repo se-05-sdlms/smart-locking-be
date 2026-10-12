@@ -27,7 +27,7 @@ public sealed class ReturnDepositTests
             db,
             new SuccessfulAccess(),
             new CompartmentAllocationService(db, TimeProvider.System),
-            new NoopPush(),
+            new NoopPush(), new Sha256TokenHashService(),
             TimeProvider.System);
 
         ReturnRequestResponse created = await service.CreateAsync(userId, new CreateReturnRequest("https://example.com/return.jpg", null));

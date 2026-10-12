@@ -51,6 +51,8 @@ public static class DependencyInjection
 
         services.AddScoped<IReturnRequestService, ReturnRequestService>();
 
+        services.AddScoped<IReturnPickupSessionService, ReturnRequestService>();
+
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE TRONG TƯƠNG LAI:
         // Các Service thực thi nghiệp vụ tiêm trực tiếp ApplicationDbContext được ghép cặp như sau:
         //
