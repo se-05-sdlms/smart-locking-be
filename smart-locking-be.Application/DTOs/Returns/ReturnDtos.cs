@@ -3,6 +3,7 @@ using smart_locking_be.Domain.Enums;
 namespace smart_locking_be.Application.DTOs.Returns;
 
 public sealed record CreateReturnRequest(string ImageUrl, string? Note);
+public sealed record ReturnUnlockResponse(Guid ReturnRequestId, string CompartmentCode, Guid AccessEventId, DateTimeOffset ReservationExpiresAt);
 public sealed record ReturnRequestResponse(
     Guid Id,
     string PickupCode,
