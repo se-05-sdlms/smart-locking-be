@@ -250,4 +250,26 @@ public sealed class ExpoPushNotificationService(
         ticket.TryGetProperty("details", out JsonElement details) &&
         details.TryGetProperty("error", out JsonElement error) &&
         error.GetString() == "DeviceNotRegistered";
+    public Guid EnqueueParcelTransferred(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string collectionAddress)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        const string type = "ParcelTransferred";
+        const string title = "Kiện hàng đã chuyển điểm tập kết";
+        string message = $"Nhận kiện tại {collectionAddress}.";
+        Notification inApp = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, type,
+            NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
+        inApp.SentAt = now;
+        Notification push = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, type,
+            NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
+        dbContext.Notifications.AddRange(inApp, push);
+        return push.Id;
+    }
+
+
 }

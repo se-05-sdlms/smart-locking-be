@@ -20,4 +20,10 @@ public interface IPushNotificationService
 
     Task<int> RetryPendingDeliveryApprovalNotificationsAsync(
         CancellationToken cancellationToken = default);
+    Guid EnqueueParcelTransferred(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string collectionAddress);
+
 }
