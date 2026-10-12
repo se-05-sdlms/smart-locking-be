@@ -56,3 +56,9 @@ public sealed record ParcelStatusHistoryResponse(
     [property: JsonConverter(typeof(JsonStringEnumConverter))] ParcelStatus ToStatus,
     string? Reason,
     DateTimeOffset ChangedAt);
+
+public sealed record OverdueTransferResponse(
+    Guid ParcelId,
+    string ParcelCode,
+    string CollectionAddress,
+    string Status);

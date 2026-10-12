@@ -12,12 +12,13 @@ namespace smart_locking_be.API.Controllers;
 
 [ApiController]
 [Route("api/parcels")]
-[Authorize(Roles = "Resident,LockerOperator")]
+[Authorize]
 public sealed class ParcelsController(
     IParcelService parcelService,
     IParcelPickupService parcelPickupService) : ControllerBase
 {
     [HttpGet]
+    [Authorize(Roles = "Resident,LockerOperator")]
     public async Task<IActionResult> GetParcels(
         [FromQuery] ParcelListView view = ParcelListView.Active,
         [FromQuery] string? search = null,
@@ -28,11 +29,13 @@ public sealed class ParcelsController(
             parcelService.GetParcelsAsync(userId, role, view, search, from, to, cancellationToken));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Roles = "Resident,LockerOperator")]
     public async Task<IActionResult> GetParcel(Guid id, CancellationToken cancellationToken) =>
         await ExecuteAsync((userId, role) =>
             parcelService.GetParcelAsync(userId, role, id, cancellationToken));
 
     [HttpGet("{id:guid}/history")]
+    [Authorize(Roles = "Resident,LockerOperator")]
     public async Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken) =>
         await ExecuteAsync((userId, role) =>
             parcelService.GetHistoryAsync(userId, role, id, cancellationToken));
@@ -108,4 +111,11 @@ public sealed class ParcelsController(
             return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
         }
     }
+    [HttpPost("{id:guid}:transferToCollectionPoint")]
+    [Authorize(Roles = "Administrator,LockerOperator")]
+    public async Task<IActionResult> TransferToCollectionPoint(Guid id, CancellationToken cancellationToken) =>
+        await ExecuteAsync((userId, role) =>
+            parcelService.TransferOverdueAsync(userId, role, id, cancellationToken));
+
+
 }

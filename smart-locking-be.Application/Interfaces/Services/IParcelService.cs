@@ -24,4 +24,10 @@ public interface IParcelService
         string role,
         Guid parcelId,
         CancellationToken cancellationToken);
+    Task<OverdueTransferResponse> TransferOverdueAsync(
+        Guid userId,
+        string role,
+        Guid parcelId,
+        CancellationToken cancellationToken = default);
+
 }

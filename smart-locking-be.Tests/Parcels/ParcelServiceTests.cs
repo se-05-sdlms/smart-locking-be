@@ -5,6 +5,7 @@ using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
 using smart_locking_be.Infrastructure.Services;
 using System.Text.Json;
+using smart_locking_be.Application.Interfaces.Services;
 
 namespace smart_locking_be.Tests.Parcels;
 
@@ -37,7 +38,7 @@ public sealed class ParcelServiceTests
         AddParcelGraph(dbContext, other, ParcelStatus.Overdue, "P-OTHER");
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelListItemResponse> result = await new ParcelService(dbContext)
+        IReadOnlyCollection<ParcelListItemResponse> result = await new ParcelService(dbContext, new TransferPush(), TimeProvider.System)
             .GetParcelsAsync(owner.Id, nameof(UserRole.Resident), ParcelListView.Active, null, null, null, default);
 
         ParcelListItemResponse parcel = Assert.Single(result);
@@ -63,7 +64,7 @@ public sealed class ParcelServiceTests
         });
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelListItemResponse> result = await new ParcelService(dbContext)
+        IReadOnlyCollection<ParcelListItemResponse> result = await new ParcelService(dbContext, new TransferPush(), TimeProvider.System)
             .GetParcelsAsync(operatorUser.Id, nameof(UserRole.LockerOperator), ParcelListView.All, null, null, null, default);
 
         Assert.Equal(assigned.Id, Assert.Single(result).Id);
@@ -78,7 +79,7 @@ public sealed class ParcelServiceTests
         Parcel parcel = AddParcelGraph(dbContext, owner, ParcelStatus.Stored, "P-PRIVATE");
         await dbContext.SaveChangesAsync();
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => new ParcelService(dbContext)
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => new ParcelService(dbContext, new TransferPush(), TimeProvider.System)
             .GetParcelAsync(requester.Id, nameof(UserRole.Resident), parcel.Id, default));
     }
 
@@ -89,7 +90,7 @@ public sealed class ParcelServiceTests
         User resident = CreateUser(UserRole.Resident);
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        await Assert.ThrowsAsync<ArgumentException>(() => new ParcelService(dbContext).GetParcelsAsync(
+        await Assert.ThrowsAsync<ArgumentException>(() => new ParcelService(dbContext, new TransferPush(), TimeProvider.System).GetParcelsAsync(
             resident.Id,
             nameof(UserRole.Resident),
             ParcelListView.History,
@@ -124,7 +125,7 @@ public sealed class ParcelServiceTests
             });
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyCollection<ParcelStatusHistoryResponse> result = await new ParcelService(dbContext)
+        IReadOnlyCollection<ParcelStatusHistoryResponse> result = await new ParcelService(dbContext, new TransferPush(), TimeProvider.System)
             .GetHistoryAsync(owner.Id, nameof(UserRole.Resident), parcel.Id, default);
 
         Assert.Equal(ParcelStatus.Overdue, result.First().ToStatus);
@@ -211,4 +212,36 @@ public sealed class ParcelServiceTests
         dbContext.AddRange(locker, compartment, deliveryRequest, parcel);
         return parcel;
     }
+    private sealed class TransferPush : IPushNotificationService
+    {
+        public Guid EnqueueDeliveryApprovalRequest(Guid residentUserId, Guid deliveryRequestId, string lockerCode) => Guid.NewGuid();
+        public Guid EnqueueParcelStored(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, string compartmentCode) => Guid.NewGuid();
+        public Guid EnqueueReturnNotification(Guid residentUserId, Guid returnRequestId, string type, string title, string message) => Guid.NewGuid();
+        public Guid EnqueueParcelTransferred(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string collectionAddress) => Guid.NewGuid();
+        public Guid EnqueueParcelPickupReminder(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, int daysUntilTransfer, bool isOverdue) => Guid.NewGuid();
+        public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
+    }
+
+    [Fact]
+    public async Task TransferOverdue_checks_scope_and_deadline_then_records_removal()
+    {
+        using var dbContext = CreateDbContext();
+        var owner = CreateUser(UserRole.Resident);
+        var parcel = AddParcelGraph(dbContext, owner, ParcelStatus.Stored, "TRANSFER");
+        parcel.MaxStorageUntil = DateTimeOffset.UtcNow.AddDays(1);
+        await dbContext.SaveChangesAsync();
+        var service = new ParcelService(dbContext, new TransferPush(), TimeProvider.System);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.TransferOverdueAsync(Guid.NewGuid(), "Administrator", parcel.Id));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.TransferOverdueAsync(Guid.NewGuid(), "LockerOperator", parcel.Id));
+        parcel.MaxStorageUntil = DateTimeOffset.UtcNow.AddDays(-1);
+        await dbContext.SaveChangesAsync();
+        var response = await service.TransferOverdueAsync(Guid.NewGuid(), "Administrator", parcel.Id);
+        Assert.Equal(ParcelStatus.Removed, parcel.Status);
+        Assert.NotNull(parcel.RemovedAt);
+        Assert.Equal(parcel.DeliveryRequest.Locker.RecoveryAddress, response.CollectionAddress);
+        Assert.Single(dbContext.AuditLogs);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.TransferOverdueAsync(Guid.NewGuid(), "Administrator", parcel.Id));
+    }
+
 }

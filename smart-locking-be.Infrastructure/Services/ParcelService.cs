@@ -7,7 +7,7 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class ParcelService(ApplicationDbContext dbContext) : IParcelService
+public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificationService pushNotificationService, TimeProvider timeProvider) : IParcelService
 {
     public async Task<IReadOnlyCollection<ParcelListItemResponse>> GetParcelsAsync(
         Guid userId,
@@ -149,4 +149,63 @@ public sealed class ParcelService(ApplicationDbContext dbContext) : IParcelServi
 
         throw new UnauthorizedAccessException("Role cannot access parcels.");
     }
+    public async Task<OverdueTransferResponse> TransferOverdueAsync(
+        Guid userId,
+        string role,
+        Guid parcelId,
+        CancellationToken cancellationToken = default)
+    {
+        Parcel parcel = await dbContext.Parcels
+            .Include(item => item.DeliveryRequest).ThenInclude(request => request.Locker)
+            .Include(item => item.DeliveryRequest).ThenInclude(request => request.ResidentProfile)
+            .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy kiện hàng.");
+        await EnsureOperationalAccessAsync(userId, role, parcel.DeliveryRequest.LockerId, cancellationToken);
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        if (parcel.MaxStorageUntil > now || parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
+            throw new InvalidOperationException("Kiện hàng chưa đủ điều kiện chuyển điểm tập kết.");
+
+        ResidentProfile resident = parcel.DeliveryRequest.ResidentProfile
+            ?? throw new InvalidOperationException("Kiện hàng không có cư dân nhận.");
+        parcel.Status = ParcelStatus.Removed;
+        parcel.RemovedAt = now;
+        parcel.RemovedByUserId = userId;
+        parcel.RemovalReason = "Transferred to overdue collection point";
+        parcel.UpdatedAt = now;
+        Guid pushId = pushNotificationService.EnqueueParcelTransferred(
+            resident.UserId,
+            parcel.DeliveryRequestId,
+            parcel.Id,
+            parcel.DeliveryRequest.Locker.RecoveryAddress);
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = userId,
+            Action = "Parcel.Transferred",
+            EntityType = nameof(Parcel),
+            EntityId = parcel.Id,
+            Result = AuditLogResult.Succeeded,
+            Details = parcel.DeliveryRequest.Locker.RecoveryAddress,
+            OccurredAt = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await pushNotificationService.TrySendAsync(pushId, cancellationToken);
+        return new OverdueTransferResponse(
+            parcel.Id,
+            parcel.ParcelCode,
+            parcel.DeliveryRequest.Locker.RecoveryAddress,
+            parcel.Status.ToString());
+    }
+
+    private async Task EnsureOperationalAccessAsync(Guid userId, string role, Guid lockerId, CancellationToken cancellationToken)
+    {
+        if (role == nameof(UserRole.Administrator)) return;
+        if (role != nameof(UserRole.LockerOperator) ||
+            !await dbContext.OperatorAssignments.AnyAsync(item =>
+                item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
+                cancellationToken))
+            throw new UnauthorizedAccessException("Tủ không thuộc phạm vi vận hành.");
+    }
+
+
 }
