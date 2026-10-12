@@ -19,3 +19,15 @@ public sealed record MaintenanceDetailResponse(MaintenanceResponse Request, IRea
 public sealed record AuditLogResponse(
     Guid Id, Guid? ActorUserId, string Actor, string Action, string? EntityType,
     Guid? EntityId, AuditLogResult Result, string? IpAddress, string? Details, DateTimeOffset OccurredAt);
+
+public sealed record OperationalRecordResponse(string Kind, Guid Id, string Code, string Status, string LockerCode, string Summary, DateTimeOffset OccurredAt);
+
+public sealed record OperationalRecordDetailResponse(
+    string Kind,
+    Guid Id,
+    string Code,
+    string Status,
+    Guid LockerId,
+    string LockerCode,
+    DateTimeOffset OccurredAt,
+    IReadOnlyDictionary<string, string?> Details);
