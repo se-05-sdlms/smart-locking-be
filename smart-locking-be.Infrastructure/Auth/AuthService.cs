@@ -275,6 +275,7 @@ public sealed class AuthService(
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         user.PasswordHash = passwordHashService.HashPassword(request.NewPassword);
+        user.MustChangePassword = false;
         user.UpdatedAt = now;
         dbContext.AuditLogs.Add(new AuditLog
         {
@@ -344,4 +345,49 @@ public sealed class AuthService(
 
     private static string? NormalizePhone(string? phoneNumber) =>
         string.IsNullOrWhiteSpace(phoneNumber) ? null : phoneNumber.Trim();
+    public async Task<AuthTokenResponse> ChangePasswordAsync(
+        Guid userId,
+        ChangePasswordRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken)
+    {
+        User user = await dbContext.Users
+            .Include(candidate => candidate.RefreshTokens)
+            .SingleOrDefaultAsync(candidate => candidate.Id == userId, cancellationToken)
+            ?? throw new KeyNotFoundException("User not found.");
+
+        if (!passwordHashService.VerifyPassword(request.CurrentPassword, user.PasswordHash))
+            throw new InvalidOperationException("Current password is incorrect.");
+        if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
+            throw new ArgumentException("Password must contain at least 8 characters.", nameof(request.NewPassword));
+        if (passwordHashService.VerifyPassword(request.NewPassword, user.PasswordHash))
+            throw new ArgumentException("New password must be different from the current password.", nameof(request.NewPassword));
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        user.PasswordHash = passwordHashService.HashPassword(request.NewPassword);
+        user.MustChangePassword = false;
+        user.UpdatedAt = now;
+        foreach (RefreshToken token in user.RefreshTokens.Where(token => token.RevokedAt == null))
+        {
+            token.RevokedAt = now;
+            token.RevokedByIp = ipAddress;
+        }
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = user.Id,
+            Action = "Auth.PasswordChanged",
+            EntityType = nameof(User),
+            EntityId = user.Id,
+            Result = AuditLogResult.Succeeded,
+            IpAddress = ipAddress,
+            OccurredAt = now
+        });
+        (AuthTokenResponse response, _) = IssueTokens(user, ipAddress, now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return response;
+    }
+
+
 }

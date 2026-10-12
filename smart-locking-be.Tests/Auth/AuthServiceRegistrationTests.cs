@@ -241,4 +241,24 @@ public sealed class AuthServiceRegistrationTests
             CreatedAt = now
         };
     }
+    [Fact]
+    public async Task ChangePassword_replaces_hash_clears_requirement_and_revokes_old_refresh_tokens()
+    {
+        using var dbContext = CreateDbContext();
+        var passwords = new Pbkdf2PasswordHashService();
+        var user = new User { Id = Guid.NewGuid(), PhoneNumber = "0912345678", PasswordHash = passwords.HashPassword("old-password"), Role = UserRole.Resident, Status = UserStatus.Active, MustChangePassword = true };
+        var oldToken = new RefreshToken { Id = Guid.NewGuid(), UserId = user.Id, User = user, TokenHash = "old-refresh", ExpiresAt = DateTimeOffset.UtcNow.AddDays(1), CreatedAt = DateTimeOffset.UtcNow };
+        dbContext.AddRange(user, oldToken);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ChangePasswordAsync(user.Id, new ChangePasswordRequest("incorrect", "new-password"), null, default));
+        Assert.True(user.MustChangePassword);
+        var response = await service.ChangePasswordAsync(user.Id, new ChangePasswordRequest("old-password", "new-password"), "127.0.0.1", default);
+        Assert.True(passwords.VerifyPassword("new-password", user.PasswordHash));
+        Assert.False(user.MustChangePassword);
+        Assert.False(response.User.MustChangePassword);
+        Assert.NotNull(oldToken.RevokedAt);
+        Assert.Equal("Auth.PasswordChanged", (await dbContext.AuditLogs.SingleAsync()).Action);
+    }
+
 }

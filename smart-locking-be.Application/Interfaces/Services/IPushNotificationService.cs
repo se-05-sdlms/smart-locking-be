@@ -33,4 +33,12 @@ public interface IPushNotificationService
         string lockerCode,
         string compartmentCode);
 
+    Guid EnqueueParcelPickupReminder(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string lockerCode,
+        int daysUntilTransfer,
+        bool isOverdue);
+
 }

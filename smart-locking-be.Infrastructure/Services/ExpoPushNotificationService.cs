@@ -304,4 +304,30 @@ public sealed class ExpoPushNotificationService(
         ticket.TryGetProperty("details", out JsonElement details) &&
         details.TryGetProperty("error", out JsonElement error) &&
         error.GetString() == "DeviceNotRegistered";
+    public Guid EnqueueParcelPickupReminder(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string lockerCode,
+        int daysUntilTransfer,
+        bool isOverdue)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        const string type = "ParcelPickupReminder";
+        string title = isOverdue ? "Kiện hàng đã quá hạn" : "Nhắc nhận kiện hàng";
+        string message = isOverdue
+            ? $"Kiện tại tủ {lockerCode} đã quá hạn. Còn {daysUntilTransfer} ngày trước khi chuyển điểm tập kết."
+            : $"Vui lòng nhận kiện tại tủ {lockerCode}. Còn {daysUntilTransfer} ngày trước khi chuyển điểm tập kết.";
+        Notification inApp = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, type,
+            NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
+        inApp.SentAt = now;
+        Notification push = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, type,
+            NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
+        dbContext.Notifications.AddRange(inApp, push);
+        return push.Id;
+    }
+
+
 }
