@@ -30,4 +30,6 @@ public interface IParcelService
         Guid parcelId,
         CancellationToken cancellationToken = default);
 
+    Task FinalizeRetrievalAsync(Guid parcelId, Guid? residentUserId, DateTimeOffset completedAt, CancellationToken cancellationToken = default);
+
 }

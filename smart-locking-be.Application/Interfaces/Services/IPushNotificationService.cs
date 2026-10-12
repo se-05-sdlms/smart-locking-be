@@ -26,4 +26,11 @@ public interface IPushNotificationService
         Guid parcelId,
         string collectionAddress);
 
+    Guid EnqueueParcelStored(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string lockerCode,
+        string compartmentCode);
+
 }

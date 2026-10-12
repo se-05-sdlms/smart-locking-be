@@ -520,6 +520,13 @@ public sealed class DeliveryRequestServiceTests
         Guid parcelId,
         string collectionAddress) => Guid.NewGuid();
 
+        public Guid EnqueueParcelStored(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string lockerCode,
+        string compartmentCode) => Guid.NewGuid();
+
         public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
