@@ -30,7 +30,8 @@ public sealed class AuthServiceTests
             "127.0.0.1",
             default);
 
-        Assert.NotNull(response.AccessToken);
+        Assert.NotEmpty(response.AccessToken);
+        Assert.NotEmpty(response.RefreshToken);
         Assert.Equal("0912345678", response.User.PhoneNumber);
         Assert.Contains(dbContext.AuditLogs, a => a.Action == "RegisterResident" && a.Result == AuditLogResult.Succeeded);
     }
@@ -50,6 +51,7 @@ public sealed class AuthServiceTests
             null,
             default));
         Assert.Contains("Phone number is required", ex.Message);
+        Assert.Empty(dbContext.AuditLogs);
     }
 
     [Fact]
@@ -67,6 +69,7 @@ public sealed class AuthServiceTests
             null,
             default));
         Assert.Contains("Phone number must contain 10 digits and start with 0", ex.Message);
+        Assert.Empty(dbContext.AuditLogs);
     }
 
     [Fact]
@@ -84,6 +87,7 @@ public sealed class AuthServiceTests
             null,
             default));
         Assert.Contains("Phone number must contain 10 digits and start with 0", ex.Message);
+        Assert.Empty(dbContext.AuditLogs);
     }
 
     [Fact]
@@ -101,6 +105,7 @@ public sealed class AuthServiceTests
             null,
             default));
         Assert.Contains("Phone number must contain 10 digits and start with 0", ex.Message);
+        Assert.Empty(dbContext.AuditLogs);
     }
 
     [Fact]
@@ -118,6 +123,7 @@ public sealed class AuthServiceTests
             null,
             default));
         Assert.Contains("Password must contain at least 8 characters", ex.Message);
+        Assert.Empty(dbContext.AuditLogs);
     }
 
     [Fact]
@@ -135,6 +141,7 @@ public sealed class AuthServiceTests
             null,
             default));
         Assert.Contains("Full name must contain between 1 and 150 characters", ex.Message);
+        Assert.Empty(dbContext.AuditLogs);
     }
 
     [Fact]
@@ -152,6 +159,7 @@ public sealed class AuthServiceTests
             null,
             default));
         Assert.Contains("Full name must contain between 1 and 150 characters", ex.Message);
+        Assert.Empty(dbContext.AuditLogs);
     }
 
     [Fact]
@@ -177,6 +185,7 @@ public sealed class AuthServiceTests
             null,
             default));
         Assert.Equal("User already exists.", ex.Message);
+        Assert.Empty(dbContext.AuditLogs);
     }
 
     [Fact]
@@ -194,6 +203,7 @@ public sealed class AuthServiceTests
             null,
             default));
         Assert.Equal("Registered locker is not operational.", ex.Message);
+        Assert.Empty(dbContext.AuditLogs);
     }
 
     [Fact]
@@ -211,6 +221,7 @@ public sealed class AuthServiceTests
             null,
             default));
         Assert.Equal("Invalid OTP.", ex.Message);
+        Assert.Empty(dbContext.AuditLogs);
     }
 
     [Fact]
@@ -350,8 +361,8 @@ public sealed class AuthServiceTests
             "127.0.0.1",
             default);
 
-        Assert.NotNull(response.AccessToken);
-        Assert.NotNull(response.RefreshToken);
+        Assert.NotEmpty(response.AccessToken);
+        Assert.NotEmpty(response.RefreshToken);
         Assert.NotNull(user.LastLoginAt);
         Assert.NotEqual(default, user.UpdatedAt);
         Assert.NotEmpty(dbContext.RefreshTokens);
@@ -381,8 +392,8 @@ public sealed class AuthServiceTests
             "127.0.0.1",
             default);
 
-        Assert.NotNull(response.AccessToken);
-        Assert.NotNull(response.RefreshToken);
+        Assert.NotEmpty(response.AccessToken);
+        Assert.NotEmpty(response.RefreshToken);
         Assert.NotNull(user.LastLoginAt);
         Assert.NotEqual(default, user.UpdatedAt);
         Assert.NotEmpty(dbContext.RefreshTokens);
@@ -507,7 +518,8 @@ public sealed class AuthServiceTests
             "127.0.0.1",
             default);
 
-        Assert.NotNull(response.AccessToken);
+        Assert.NotEmpty(response.AccessToken);
+        Assert.NotEmpty(response.RefreshToken);
         Assert.NotNull(token.RevokedAt);
         Assert.Equal("127.0.0.1", token.RevokedByIp);
         Assert.NotNull(token.ReplacedByTokenId);
@@ -1108,7 +1120,8 @@ public sealed class AuthServiceTests
             "127.0.0.1",
             default);
 
-        Assert.NotNull(response.AccessToken);
+        Assert.NotEmpty(response.AccessToken);
+        Assert.NotEmpty(response.RefreshToken);
         Assert.True(hashService.VerifyPassword("NewPass123", user.PasswordHash));
         Assert.NotNull(token1.RevokedAt);
         Assert.Equal("127.0.0.1", token1.RevokedByIp);
@@ -1236,7 +1249,8 @@ public sealed class AuthServiceTests
             "127.0.0.1",
             default);
 
-        Assert.NotNull(response.AccessToken);
+        Assert.NotEmpty(response.AccessToken);
+        Assert.NotEmpty(response.RefreshToken);
         Assert.True(hashService.VerifyPassword("Pass1234", user.PasswordHash));
     }
     #endregion
