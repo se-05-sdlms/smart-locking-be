@@ -58,7 +58,7 @@ public sealed class PersistenceModelTests
             "Notification.Message", "Incident.Description", "Incident.ResolutionSummary", "IncidentAction.Notes",
             "LockerEvent.Reason", "LockerEvent.Details", "EmergencyUnlock.Reason",
             "MaintenanceRequest.Description", "MaintenanceRequest.ResolutionSummary",
-            "MaintenanceActivity.Notes", "AuditLog.Details"
+            "MaintenanceActivity.Notes", "AuditLog.Details", "SubscriptionPlan.Description"
         };
 
         foreach (var entityType in context.Model.GetEntityTypes())

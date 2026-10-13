@@ -9,7 +9,7 @@ internal static class ModelContract
         "LockerCompartment", "LockerEvent", "MaintenanceActivity", "MaintenanceRequest", "Notification",
         "NotificationRule", "OperatorAssignment", "OtpChallenge", "OverdueCharge", "Parcel",
         "ParcelStatusHistory", "PaymentTransaction", "RefreshToken", "ResidentBiometric", "ResidentProfile",
-        "ReturnRequest", "SystemPolicy", "User"
+        "ResidentSubscription", "ReturnRequest", "SubscriptionPlan", "SystemPolicy", "User"
     ];
 
     internal static readonly IReadOnlyDictionary<string, PropertyExpectation[]> Properties =
@@ -228,6 +228,20 @@ internal static class ModelContract
                 P("Id", "Guid"), P("ActorUserId", "Guid", true), P("Action", "String"),
                 P("EntityType", "String", true), P("EntityId", "Guid", true), P("Result", "AuditLogResult"),
                 P("IpAddress", "String", true), P("Details", "String", true), P("OccurredAt", "DateTimeOffset")
+            ],
+            ["SubscriptionPlan"] =
+            [
+                P("Id", "Guid"), P("Code", "String"), P("Name", "String"), P("Description", "String", true),
+                P("Price", "Decimal"), P("DurationDays", "Int32"), P("MaxActiveParcels", "Int32"),
+                P("IsActive", "Boolean"), P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
+            ],
+            ["ResidentSubscription"] =
+            [
+                P("Id", "Guid"), P("ResidentProfileId", "Guid"), P("SubscriptionPlanId", "Guid"),
+                P("StartDate", "DateTimeOffset"), P("EndDate", "DateTimeOffset"),
+                P("Status", "SubscriptionStatus"), P("PriceSnapshot", "Decimal"),
+                P("ExternalOrderCode", "String", true), P("ExternalTransactionId", "String", true),
+                P("PaidAt", "DateTimeOffset", true), P("CreatedAt", "DateTimeOffset"), P("UpdatedAt", "DateTimeOffset")
             ]
         };
 
