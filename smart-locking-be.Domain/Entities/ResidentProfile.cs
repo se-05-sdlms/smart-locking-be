@@ -81,4 +81,9 @@ public sealed class ResidentProfile
     /// Các yêu cầu gửi trả hàng do Cư dân này tạo.
     /// </summary>
     public ICollection<ReturnRequest> ReturnRequests { get; set; } = new List<ReturnRequest>();
+
+    /// <summary>
+    /// Các gói cước cư dân đã đăng ký.
+    /// </summary>
+    public ICollection<ResidentSubscription> Subscriptions { get; set; } = new List<ResidentSubscription>();
 }
