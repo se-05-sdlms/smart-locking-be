@@ -22,7 +22,7 @@ public sealed class DeviceInstallationsController(IDeviceInstallationService dev
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => deviceInstallationService.RegisterAsync(userId, request, cancellationToken));
+        return Ok(await deviceInstallationService.RegisterAsync(userId, request, cancellationToken));
     }
 
     [HttpDelete("{installationId}")]
@@ -33,19 +33,8 @@ public sealed class DeviceInstallationsController(IDeviceInstallationService dev
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        try
-        {
-            await deviceInstallationService.DeactivateAsync(userId, installationId, cancellationToken);
-            return NoContent();
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
+        await deviceInstallationService.DeactivateAsync(userId, installationId, cancellationToken);
+        return NoContent();
     }
 
     private bool TryGetUserId(out Guid userId)
@@ -54,26 +43,4 @@ public sealed class DeviceInstallationsController(IDeviceInstallationService dev
         return Guid.TryParse(claimValue, out userId);
     }
 
-    private static async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
-    {
-        try
-        {
-            return new OkObjectResult(await action());
-        }
-        catch (ArgumentException exception)
-        {
-            return new BadRequestObjectResult(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return new ObjectResult(new { message = exception.Message })
-            {
-                StatusCode = StatusCodes.Status403Forbidden
-            };
-        }
-        catch (InvalidOperationException exception)
-        {
-            return new ConflictObjectResult(new { message = exception.Message });
-        }
-    }
 }

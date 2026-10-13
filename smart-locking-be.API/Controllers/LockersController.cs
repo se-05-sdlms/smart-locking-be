@@ -22,7 +22,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => lockerService.GetLockersAsync(userId, userRole, search, cancellationToken));
+        return Ok(await lockerService.GetLockersAsync(userId, userRole, search, cancellationToken));
     }
 
     /// <summary>
@@ -34,11 +34,8 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         [FromBody] CreateLockerRequest request,
         CancellationToken cancellationToken)
     {
-        return await ExecuteAsync(async () =>
-        {
-            var result = await lockerService.CreateLockerAsync(request, cancellationToken);
-            return CreatedAtAction(nameof(GetLockerById), new { id = result.Id }, result);
-        });
+        var result = await lockerService.CreateLockerAsync(request, cancellationToken);
+        return CreatedAtAction(nameof(GetLockerById), new { id = result.Id }, result);
     }
 
     /// <summary>
@@ -52,7 +49,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => lockerService.GetLockerByIdAsync(userId, userRole, id, cancellationToken));
+        return Ok(await lockerService.GetLockerByIdAsync(userId, userRole, id, cancellationToken));
     }
 
     /// <summary>
@@ -65,7 +62,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         [FromBody] UpdateLockerRequest request,
         CancellationToken cancellationToken)
     {
-        return await ExecuteAsync(() => lockerService.UpdateLockerAsync(id, request, cancellationToken));
+        return Ok(await lockerService.UpdateLockerAsync(id, request, cancellationToken));
     }
 
     /// <summary>
@@ -75,11 +72,8 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     [Authorize(Roles = "Administrator")]
     public async Task<IActionResult> SoftDeleteLocker(Guid id, CancellationToken cancellationToken)
     {
-        return await ExecuteAsync(async () =>
-        {
-            await lockerService.SoftDeleteLockerAsync(id, cancellationToken);
-            return NoContent();
-        });
+        await lockerService.SoftDeleteLockerAsync(id, cancellationToken);
+        return NoContent();
     }
 
     /// <summary>
@@ -93,7 +87,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => lockerService.GetCompartmentsAsync(userId, userRole, id, cancellationToken));
+        return Ok(await lockerService.GetCompartmentsAsync(userId, userRole, id, cancellationToken));
     }
 
     /// <summary>
@@ -106,11 +100,8 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         [FromBody] CreateCompartmentRequest request,
         CancellationToken cancellationToken)
     {
-        return await ExecuteAsync(async () =>
-        {
-            var result = await lockerService.CreateCompartmentAsync(id, request, cancellationToken);
-            return StatusCode(StatusCodes.Status201Created, result);
-        });
+        var result = await lockerService.CreateCompartmentAsync(id, request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, result);
     }
 
     /// <summary>
@@ -129,7 +120,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => lockerService.UpdateCompartmentStatusAsync(userId, userRole, id, compartmentId, request, cancellationToken));
+        return Ok(await lockerService.UpdateCompartmentStatusAsync(userId, userRole, id, compartmentId, request, cancellationToken));
     }
 
     private bool TryGetUserIdAndRole(out Guid userId, out string userRole)
@@ -137,35 +128,5 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         userRole = User.FindFirstValue(ClaimTypes.Role) ?? string.Empty;
         string? claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(claimValue, out userId);
-    }
-
-    private async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
-    {
-        try
-        {
-            TResponse result = await action();
-            if (result is IActionResult actionResult)
-            {
-                return actionResult;
-            }
-
-            return Ok(result);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
     }
 }

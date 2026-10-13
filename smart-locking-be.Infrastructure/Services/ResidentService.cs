@@ -97,22 +97,22 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
     {
         if (user.Status == UserStatus.Locked)
         {
-            throw new InvalidOperationException("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Quản trị viên.");
+            throw new UnauthorizedAccessException("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Quản trị viên.");
         }
 
         if (user.Status == UserStatus.Disabled)
         {
-            throw new InvalidOperationException("Tài khoản của bạn đã bị vô hiệu hóa.");
+            throw new UnauthorizedAccessException("Tài khoản của bạn đã bị vô hiệu hóa.");
         }
 
         if (user.Status != UserStatus.Active)
         {
-            throw new InvalidOperationException("Tài khoản của bạn hiện không thể thực hiện thao tác.");
+            throw new UnauthorizedAccessException("Tài khoản của bạn hiện không thể thực hiện thao tác.");
         }
 
         if (user.Role != UserRole.Resident)
         {
-            throw new InvalidOperationException("Người dùng không mang vai trò Cư dân.");
+            throw new UnauthorizedAccessException("Người dùng không mang vai trò Cư dân.");
         }
     }
 

@@ -17,56 +17,37 @@ public sealed class IncidentsController(IIncidentService incidentService) : Cont
     [Authorize(Roles = "Resident")]
     public async Task<IActionResult> Create(
         [FromBody] CreateIncidentRequest request,
-        CancellationToken cancellationToken) =>
-        await ExecuteAsync(async (userId, _) =>
-        {
-            IncidentDetailResponse response = await incidentService.CreateResidentIncidentAsync(
-                userId,
-                request,
-                cancellationToken);
-            return CreatedAtAction(nameof(GetById), new { id = response.Id }, response);
-        });
+        CancellationToken cancellationToken)
+    {
+        var (userId, _) = GetIdentity();
+        IncidentDetailResponse response = await incidentService.CreateResidentIncidentAsync(userId, request, cancellationToken);
+        return CreatedAtAction(nameof(GetById), new { id = response.Id }, response);
+    }
 
     [HttpGet("mine")]
     [Authorize(Roles = "Resident")]
     public async Task<IActionResult> GetMine(CancellationToken cancellationToken) =>
-        await ExecuteAsync(async (userId, _) =>
-            Ok(await incidentService.GetResidentIncidentsAsync(userId, cancellationToken)));
+        Ok(await incidentService.GetResidentIncidentsAsync(GetIdentity().UserId, cancellationToken));
 
     [HttpGet("{id:guid}")]
-    public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken) =>
-        await ExecuteAsync(async (userId, role) =>
-            Ok(await incidentService.GetIncidentAsync(userId, role, id, cancellationToken)));
-
-    private async Task<IActionResult> ExecuteAsync(Func<Guid, string, Task<IActionResult>> action)
+    public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
+        var (userId, role) = GetIdentity();
+        return Ok(await incidentService.GetIncidentAsync(userId, role, id, cancellationToken));
+    }
+
+    private (Guid UserId, string Role) GetIdentity()
+    {
+        string? role = User.FindFirstValue(ClaimTypes.Role);
         if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId) ||
-            string.IsNullOrWhiteSpace(User.FindFirstValue(ClaimTypes.Role)))
+            string.IsNullOrWhiteSpace(role))
         {
-            return Unauthorized(new { message = "Invalid authentication token." });
+            throw new System.Security.Authentication.AuthenticationException("Invalid authentication token.");
         }
 
-        try
-        {
-            return await action(userId, User.FindFirstValue(ClaimTypes.Role)!);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
-        }
+        return (userId, role);
     }
+
     [HttpPost("guest")]
     [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicyNames.PublicApi)]
@@ -77,5 +58,4 @@ public sealed class IncidentsController(IIncidentService incidentService) : Cont
         GuestIncidentResponse response = await incidentService.CreateGuestIncidentAsync(request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, response);
     }
-
 }

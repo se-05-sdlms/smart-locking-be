@@ -26,6 +26,9 @@ public sealed class ApiExceptionHandler(
         if (statusCode == StatusCodes.Status500InternalServerError)
             logger.LogError(exception, "Unhandled API exception");
 
+        string detail = statusCode == StatusCodes.Status500InternalServerError
+            ? "An unexpected error occurred."
+            : exception.Message;
         httpContext.Response.StatusCode = statusCode;
         return await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
         {
@@ -34,9 +37,8 @@ public sealed class ApiExceptionHandler(
             {
                 Status = statusCode,
                 Title = ReasonPhrases.GetReasonPhrase(statusCode),
-                Detail = statusCode == StatusCodes.Status500InternalServerError
-                    ? "An unexpected error occurred."
-                    : exception.Message
+                Detail = detail,
+                Extensions = { ["message"] = detail }
             },
             Exception = exception
         });
