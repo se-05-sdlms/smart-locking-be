@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using smart_locking_be.Application.DTOs.Payments;
@@ -9,6 +7,8 @@ using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Options;
 using smart_locking_be.Infrastructure.Persistence;
+using System.Globalization;
+using System.Security.Cryptography;
 
 namespace smart_locking_be.Infrastructure.Services;
 

@@ -1,5 +1,5 @@
-using smart_locking_be.Application.DTOs.Notifications;
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;

@@ -1,9 +1,9 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.Application.DTOs.Operations;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Enums;
+using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 

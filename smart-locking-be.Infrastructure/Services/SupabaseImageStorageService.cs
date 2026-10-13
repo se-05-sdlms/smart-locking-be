@@ -1,8 +1,8 @@
-using System.Net;
-using System.Net.Http.Headers;
 using Microsoft.Extensions.Options;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Infrastructure.Options;
+using System.Net;
+using System.Net.Http.Headers;
 
 namespace smart_locking_be.Infrastructure.Services;
 
