@@ -33,6 +33,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<MaintenanceRequest> MaintenanceRequests => Set<MaintenanceRequest>();
     public DbSet<MaintenanceActivity> MaintenanceActivities => Set<MaintenanceActivity>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+    public DbSet<ResidentSubscription> ResidentSubscriptions => Set<ResidentSubscription>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {

@@ -88,7 +88,10 @@ internal static class RelationalModelContract
         I("MaintenanceActivity", "IX_MaintenanceActivity_User_CreatedAt", false, null, "ActionByUserId", "CreatedAt"),
         I("AuditLog", "IX_AuditLog_OccurredAt", false, null, "OccurredAt"),
         I("AuditLog", "IX_AuditLog_Actor_Action_OccurredAt", false, null, "ActorUserId", "Action", "OccurredAt"),
-        I("AuditLog", "IX_AuditLog_EntityType_EntityId", false, null, "EntityType", "EntityId")
+        I("AuditLog", "IX_AuditLog_EntityType_EntityId", false, null, "EntityType", "EntityId"),
+        I("SubscriptionPlan", "UX_SubscriptionPlan_Code", true, null, "Code"),
+        I("ResidentSubscription", "IX_ResidentSubscription_ResidentProfileId", false, null, "ResidentProfileId"),
+        I("ResidentSubscription", "UX_ResidentSubscription_ExternalOrderCode", true, "\"ExternalOrderCode\" IS NOT NULL", "ExternalOrderCode")
     ];
 
     internal static readonly ForeignKeyExpectation[] ForeignKeys =
@@ -128,7 +131,9 @@ internal static class RelationalModelContract
         F("MaintenanceRequest", "Locker", "LockerId"), F("MaintenanceRequest", "LockerCompartment", "LockerCompartmentId"),
         F("MaintenanceRequest", "User", "CreatedByUserId"), F("MaintenanceRequest", "Incident", "IncidentId"),
         F("MaintenanceActivity", "MaintenanceRequest", "MaintenanceRequestId"),
-        F("MaintenanceActivity", "User", "ActionByUserId"), F("AuditLog", "User", "ActorUserId")
+        F("MaintenanceActivity", "User", "ActionByUserId"), F("AuditLog", "User", "ActorUserId"),
+        F("ResidentSubscription", "ResidentProfile", "ResidentProfileId"),
+        F("ResidentSubscription", "SubscriptionPlan", "SubscriptionPlanId")
     ];
 
     internal static readonly IReadOnlyDictionary<string, string[]> CheckConstraints =
@@ -148,7 +153,8 @@ internal static class RelationalModelContract
             ["PaymentTransaction"] = ["CK_PaymentTransaction_Amount"],
             ["Notification"] = ["CK_Notification_ReadState"],
             ["Incident"] = ["CK_Incident_ResolvedAt"],
-            ["MaintenanceRequest"] = ["CK_MaintenanceRequest_ClosedAt"]
+            ["MaintenanceRequest"] = ["CK_MaintenanceRequest_ClosedAt"],
+            ["SubscriptionPlan"] = ["CK_SubscriptionPlan_PriceAndDuration"]
         };
 
     private static IndexExpectation I(

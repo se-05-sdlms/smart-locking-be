@@ -10,6 +10,25 @@ public sealed class OverdueChargeServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 9, 30, 9, 30, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CalculateAsync_PastMaxStorage_CapsNewAndExistingCharges(bool existing)
+    {
+        await using var db = CreateDbContext();
+        var parcel = await SeedParcelAsync(db, Now.AddDays(-6));
+        if (existing)
+        {
+            await new OverdueChargeService(db, new FixedTimeProvider(Now.AddDays(-5))).CalculateAsync();
+            parcel.DeliveryRequest.SystemPolicy.OverdueFeePerHour = 99_000m;
+            await db.SaveChangesAsync();
+        }
+        await new OverdueChargeService(db, new FixedTimeProvider(Now)).CalculateAsync();
+        var charge = await db.OverdueCharges.SingleAsync();
+        Assert.Equal(360_000m, charge.Amount);
+        Assert.Equal(Now.AddDays(-3), charge.CalculatedThrough);
+    }
+
     [Fact]
     public async Task CalculateAsync_OverdueParcel_CreatesChargeAndHistory()
     {

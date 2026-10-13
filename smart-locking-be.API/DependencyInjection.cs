@@ -49,6 +49,7 @@ public static class DependencyInjection
         // 9. Periodic overdue parcel fee calculation
         services.AddHostedService<OverdueChargeWorker>();
         services.AddHostedService<ParcelReminderWorker>();
+        services.AddHostedService<SubscriptionExpirationWorker>();
 
         // HƯỚNG DẪN ĐĂNG KÝ SERVICE CẤP API TRONG TƯƠNG LAI:
         // Khi cần tạo các service hoặc BackgroundWorker ở tầng API, thực hiện đăng ký tại đây:

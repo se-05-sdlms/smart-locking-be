@@ -48,7 +48,8 @@ public sealed class OverdueChargeService(
 
             if (policy.OverdueFeePerHour > 0 && parcel.OverdueCharge?.Status != OverdueChargeStatus.Paid)
             {
-                int billableHours = (int)Math.Ceiling((now - parcel.PickupDueAt).TotalHours);
+                DateTimeOffset calculationCutoff = now > parcel.MaxStorageUntil ? parcel.MaxStorageUntil : now;
+                int billableHours = (int)Math.Ceiling((calculationCutoff - parcel.PickupDueAt).TotalHours);
                 if (parcel.OverdueCharge is null)
                 {
                     OverdueCharge charge = new()
@@ -59,7 +60,7 @@ public sealed class OverdueChargeService(
                         RatePerHourSnapshot = policy.OverdueFeePerHour,
                         Currency = policy.Currency.ToUpperInvariant(),
                         ChargeStartAt = parcel.PickupDueAt,
-                        CalculatedThrough = now,
+                        CalculatedThrough = calculationCutoff,
                         Status = OverdueChargeStatus.Outstanding,
                         CreatedAt = now,
                         UpdatedAt = now,
@@ -70,7 +71,7 @@ public sealed class OverdueChargeService(
                 else
                 {
                     parcel.OverdueCharge.Amount = billableHours * parcel.OverdueCharge.RatePerHourSnapshot;
-                    parcel.OverdueCharge.CalculatedThrough = now;
+                    parcel.OverdueCharge.CalculatedThrough = calculationCutoff;
                     parcel.OverdueCharge.UpdatedAt = now;
                 }
             }

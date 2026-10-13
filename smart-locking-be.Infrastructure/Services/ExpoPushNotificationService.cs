@@ -313,9 +313,13 @@ public sealed class ExpoPushNotificationService(
         bool isOverdue)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
-        const string type = "ParcelPickupReminder";
-        string title = isOverdue ? "Kiện hàng đã quá hạn" : "Nhắc nhận kiện hàng";
-        string message = isOverdue
+        bool clearanceWarning = daysUntilTransfer <= 1;
+        string type = clearanceWarning ? "ParcelClearanceWarning" : "ParcelPickupReminder";
+        string title = clearanceWarning ? "Cảnh báo thu hồi kiện hàng trong 24 giờ" :
+            isOverdue ? "Kiện hàng đã quá hạn" : "Nhắc nhận kiện hàng";
+        string message = clearanceWarning
+            ? $"Vui lòng nhận kiện tại tủ {lockerCode} ngay. Kiện sẽ được chuyển điểm tập kết trong vòng 24 giờ và không thể mở tủ từ xa sau hạn lưu trữ."
+            : isOverdue
             ? $"Kiện tại tủ {lockerCode} đã quá hạn. Còn {daysUntilTransfer} ngày trước khi chuyển điểm tập kết."
             : $"Vui lòng nhận kiện tại tủ {lockerCode}. Còn {daysUntilTransfer} ngày trước khi chuyển điểm tập kết.";
         Notification inApp = CreateNotification(

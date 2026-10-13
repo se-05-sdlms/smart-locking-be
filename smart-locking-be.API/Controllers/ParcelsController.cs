@@ -18,7 +18,7 @@ public sealed class ParcelsController(
     IParcelPickupService parcelPickupService) : ControllerBase
 {
     [HttpGet]
-    [Authorize(Roles = "Resident,LockerOperator")]
+    [Authorize(Roles = "Resident,LockerOperator,Administrator")]
     public async Task<IActionResult> GetParcels(
         [FromQuery] ParcelListView view = ParcelListView.Active,
         [FromQuery] string? search = null,

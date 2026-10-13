@@ -7,7 +7,8 @@ public enum ParcelListView
 {
     Active,
     History,
-    All
+    All,
+    ClearancePending
 }
 
 public sealed record ParcelListItemResponse(

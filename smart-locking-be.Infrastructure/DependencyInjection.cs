@@ -32,6 +32,17 @@ public static class DependencyInjection
         services.AddScoped<IPasswordHashService, Pbkdf2PasswordHashService>();
         services.AddScoped<ITokenHashService, Sha256TokenHashService>();
         services.AddScoped<IResidentService, ResidentService>();
+        services.Configure<Options.PayOSOptions>(options =>
+        {
+            options.ClientId = configuration["PayOS:ClientId"] ?? string.Empty;
+            options.ApiKey = configuration["PayOS:ApiKey"] ?? string.Empty;
+            options.ChecksumKey = configuration["PayOS:ChecksumKey"] ?? string.Empty;
+            options.ReturnUrl = configuration["PayOS:ReturnUrl"] ?? string.Empty;
+            options.CancelUrl = configuration["PayOS:CancelUrl"] ?? string.Empty;
+        });
+        services.AddScoped<ISubscriptionPlanService, SubscriptionPlanService>();
+        services.AddScoped<IResidentSubscriptionService, ResidentSubscriptionService>();
+        services.AddScoped<IPaymentGatewayService, PayOSPaymentGatewayService>();
         services.AddScoped<ILockerService, LockerService>();
         services.AddScoped<ILockerAccessService, LockerAccessService>();
         services.AddScoped<ILockerCommandDispatcher, MqttLockerCommandDispatcher>();
