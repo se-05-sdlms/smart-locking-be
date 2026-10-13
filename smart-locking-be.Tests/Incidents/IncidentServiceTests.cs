@@ -122,6 +122,109 @@ public sealed class IncidentServiceTests
 
         await Assert.ThrowsAsync<NullReferenceException>(() => service.CreateGuestIncidentAsync(null!));
     }
+
+    [Fact]
+    [Trait("Category", "INC-01")]
+    public async Task CreateGuestIncidentAsync_UTC07()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        TestGraph graph = await SeedGraphAsync(dbContext);
+        var returnReq = new ReturnRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = graph.Locker.Id,
+            Locker = graph.Locker,
+            AllocatedCompartmentId = graph.Compartment.Id,
+            AllocatedCompartment = graph.Compartment,
+            ResidentProfileId = graph.Resident.ResidentProfile!.Id,
+            ReturnCode = "RET-INC-01",
+            Status = ReturnRequestStatus.Deposited,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.ReturnRequests.Add(returnReq);
+        await dbContext.SaveChangesAsync();
+
+        var service = new IncidentService(dbContext, TimeProvider.System);
+        GuestIncidentResponse response = await service.CreateGuestIncidentAsync(new CreateGuestIncidentRequest(
+            graph.Locker.Code,
+            "Return",
+            "Sự cố trả hàng",
+            "Mô tả sự cố",
+            ReturnRequestId: returnReq.Id,
+            LockerCompartmentId: null));
+
+        Assert.NotNull(response);
+        var incidentInDb = await dbContext.Incidents.SingleAsync(i => i.Id == response.Id);
+        Assert.Equal(graph.Compartment.Id, incidentInDb.LockerCompartmentId);
+        Assert.Contains(dbContext.AuditLogs, a => a.Action == "Incident.GuestCreated");
+    }
+
+    [Fact]
+    [Trait("Category", "INC-01")]
+    public async Task CreateGuestIncidentAsync_UTC08()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        TestGraph graph = await SeedGraphAsync(dbContext);
+        var otherLocker = new Locker
+        {
+            Id = Guid.NewGuid(),
+            Code = "LOCKER-OTHER",
+            Address = "Address",
+            RecoveryAddress = "Recovery",
+            DeviceIdentifier = "dev-other"
+        };
+        var returnReq = new ReturnRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = otherLocker.Id,
+            ResidentProfileId = graph.Resident.ResidentProfile!.Id,
+            ReturnCode = "RET-INC-02",
+            Status = ReturnRequestStatus.Deposited,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AddRange(otherLocker, returnReq);
+        await dbContext.SaveChangesAsync();
+
+        var service = new IncidentService(dbContext, TimeProvider.System);
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.CreateGuestIncidentAsync(new CreateGuestIncidentRequest(
+            graph.Locker.Code,
+            "Return",
+            "Title",
+            "Desc",
+            ReturnRequestId: returnReq.Id)));
+
+        Assert.Equal("Return request not found.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "INC-01")]
+    public async Task CreateGuestIncidentAsync_UTC09()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        TestGraph graph = await SeedGraphAsync(dbContext);
+        var otherCompartment = new LockerCompartment
+        {
+            Id = Guid.NewGuid(),
+            LockerId = Guid.NewGuid(),
+            Code = "B01",
+            HardwareCode = "B01",
+            HardwareChannel = 1
+        };
+        dbContext.LockerCompartments.Add(otherCompartment);
+        await dbContext.SaveChangesAsync();
+
+        var service = new IncidentService(dbContext, TimeProvider.System);
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.CreateGuestIncidentAsync(new CreateGuestIncidentRequest(
+            graph.Locker.Code,
+            "Compartment",
+            "Title",
+            "Desc",
+            LockerCompartmentId: otherCompartment.Id)));
+
+        Assert.Equal("Locker compartment not found.", ex.Message);
+    }
     #endregion
 
     #region INC-02: CreateResidentIncidentAsync
@@ -223,6 +326,112 @@ public sealed class IncidentServiceTests
         var service = new IncidentService(dbContext, TimeProvider.System);
 
         await Assert.ThrowsAnyAsync<Exception>(() => service.CreateResidentIncidentAsync(Guid.Empty, null!));
+    }
+
+    [Fact]
+    [Trait("Category", "INC-02")]
+    public async Task CreateResidentIncidentAsync_UTC07()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        TestGraph graph = await SeedGraphAsync(dbContext);
+        var returnReq = new ReturnRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = graph.Locker.Id,
+            Locker = graph.Locker,
+            AllocatedCompartmentId = graph.Compartment.Id,
+            AllocatedCompartment = graph.Compartment,
+            ResidentProfileId = graph.Resident.ResidentProfile!.Id,
+            ReturnCode = "RET-RES-01",
+            Status = ReturnRequestStatus.Deposited,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.ReturnRequests.Add(returnReq);
+        await dbContext.SaveChangesAsync();
+
+        var service = new IncidentService(dbContext, TimeProvider.System);
+        IncidentDetailResponse response = await service.CreateResidentIncidentAsync(
+            graph.Resident.Id,
+            new CreateIncidentRequest(
+                "Return",
+                "Không mở được ngăn trả",
+                "Mô tả",
+                ReturnRequestId: returnReq.Id,
+                LockerId: null,
+                LockerCompartmentId: null));
+
+        Assert.Equal(graph.Locker.Id, response.LockerId);
+        Assert.Equal(graph.Compartment.Id, response.LockerCompartmentId);
+    }
+
+    [Fact]
+    [Trait("Category", "INC-02")]
+    public async Task CreateResidentIncidentAsync_UTC08()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        TestGraph graph = await SeedGraphAsync(dbContext);
+        var returnReq = new ReturnRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = graph.Locker.Id,
+            ResidentProfileId = Guid.NewGuid(),
+            ReturnCode = "RET-OTHER",
+            Status = ReturnRequestStatus.Deposited,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.ReturnRequests.Add(returnReq);
+        await dbContext.SaveChangesAsync();
+
+        var service = new IncidentService(dbContext, TimeProvider.System);
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.CreateResidentIncidentAsync(
+            graph.Resident.Id,
+            new CreateIncidentRequest("Return", "Title", "Desc", ReturnRequestId: returnReq.Id)));
+
+        Assert.Equal("Return request not found.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "INC-02")]
+    public async Task CreateResidentIncidentAsync_UTC09()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        TestGraph graph = await SeedGraphAsync(dbContext);
+        var charge = new OverdueCharge
+        {
+            Id = Guid.NewGuid(),
+            ParcelId = graph.Parcel.Id,
+            Parcel = graph.Parcel,
+            Amount = 10000,
+            RatePerHourSnapshot = 5000,
+            Currency = "VND",
+            ChargeStartAt = DateTimeOffset.UtcNow.AddHours(-2),
+            CalculatedThrough = DateTimeOffset.UtcNow,
+            Status = OverdueChargeStatus.Paid,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        var tx = new PaymentTransaction
+        {
+            Id = Guid.NewGuid(),
+            OverdueChargeId = charge.Id,
+            OverdueCharge = charge,
+            Amount = 10000,
+            Currency = "VND",
+            Status = PaymentTransactionStatus.Success,
+            RequestedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AddRange(charge, tx);
+        await dbContext.SaveChangesAsync();
+
+        var service = new IncidentService(dbContext, TimeProvider.System);
+        IncidentDetailResponse response = await service.CreateResidentIncidentAsync(
+            graph.Resident.Id,
+            new CreateIncidentRequest("Payment", "Lỗi trừ tiền", "Mô tả", PaymentTransactionId: tx.Id));
+
+        Assert.Equal(graph.Parcel.Id, response.ParcelId);
+        Assert.Equal(graph.Locker.Id, response.LockerId);
     }
     #endregion
 
@@ -436,6 +645,26 @@ public sealed class IncidentServiceTests
         await Assert.ThrowsAnyAsync<Exception>(() => service.AddActionAsync(
             Guid.Empty, "", Guid.Empty, null!));
     }
+
+    [Fact]
+    [Trait("Category", "INC-06")]
+    public async Task AddActionAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        TestGraph graph = await SeedGraphAsync(dbContext);
+        var service = new IncidentService(dbContext, TimeProvider.System);
+        IncidentDetailResponse created = await service.CreateResidentIncidentAsync(
+            graph.Resident.Id,
+            new CreateIncidentRequest("Locker", "Kẹt cánh cửa", "Cửa bị lệch", LockerId: graph.Locker.Id));
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.AddActionAsync(
+            graph.Operator.Id,
+            nameof(UserRole.LockerOperator),
+            created.Id,
+            new AddIncidentActionRequest("")));
+
+        Assert.Contains("Value is required.", ex.Message);
+    }
     #endregion
 
     #region INC-07: UpdateStatusAsync
@@ -551,6 +780,32 @@ public sealed class IncidentServiceTests
 
         await Assert.ThrowsAnyAsync<Exception>(() => service.UpdateStatusAsync(
             Guid.Empty, "", Guid.Empty, null!));
+    }
+
+    [Fact]
+    [Trait("Category", "INC-07")]
+    public async Task UpdateStatusAsync_UTC07()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        TestGraph graph = await SeedGraphAsync(dbContext);
+        User anotherAdmin = CreateUser(UserRole.Administrator, "otheradmin@boxora.test");
+        dbContext.Users.Add(anotherAdmin);
+        await dbContext.SaveChangesAsync();
+
+        var service = new IncidentService(dbContext, TimeProvider.System);
+        IncidentDetailResponse created = await service.CreateResidentIncidentAsync(
+            graph.Resident.Id,
+            new CreateIncidentRequest("Compartment", "Cửa kẹt", "Không đóng được", LockerId: graph.Locker.Id));
+
+        IncidentDetailResponse result = await service.UpdateStatusAsync(
+            graph.Operator.Id,
+            nameof(UserRole.LockerOperator),
+            created.Id,
+            new UpdateIncidentStatusRequest(IncidentStatus.Escalated, Notes: "Escalate to administrator"));
+
+        Assert.Equal(IncidentStatus.Escalated, result.Status);
+        Assert.Contains(dbContext.Notifications, n => n.Type == "IncidentEscalated" && n.UserId == anotherAdmin.Id);
+        Assert.Contains(dbContext.AuditLogs, a => a.Action == "Incident.StatusChanged");
     }
     #endregion
 

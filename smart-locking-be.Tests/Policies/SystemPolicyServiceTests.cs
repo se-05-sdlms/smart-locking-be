@@ -108,7 +108,19 @@ public sealed class SystemPolicyServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         var service = new SystemPolicyService(dbContext, TimeProvider.System);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetByIdAsync(Guid.NewGuid(), default));
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetByIdAsync(Guid.NewGuid(), default));
+        Assert.Equal("System policy not found.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "POL-02")]
+    public async Task GetByIdAsync_UTC03()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new SystemPolicyService(dbContext, TimeProvider.System);
+
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetByIdAsync(Guid.Empty, default));
+        Assert.Equal("System policy not found.", ex.Message);
     }
     #endregion
 
@@ -137,6 +149,16 @@ public sealed class SystemPolicyServiceTests
         var invalidRequest = CreateValidRequest() with { Currency = "" };
         await Assert.ThrowsAsync<ArgumentException>(() => service.CreateAsync(Guid.NewGuid(), invalidRequest, default));
     }
+
+    [Fact]
+    [Trait("Category", "POL-03")]
+    public async Task CreateAsync_UTC03()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new SystemPolicyService(dbContext, TimeProvider.System);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => service.CreateAsync(Guid.Empty, null!, default));
+    }
     #endregion
 
     #region POL-04: UpdateAsync
@@ -160,12 +182,34 @@ public sealed class SystemPolicyServiceTests
     public async Task UpdateAsync_UTC02()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new SystemPolicyService(dbContext, TimeProvider.System);
+
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.UpdateAsync(Guid.NewGuid(), Guid.NewGuid(), CreateValidRequest(), default));
+        Assert.Equal("System policy not found.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "POL-04")]
+    public async Task UpdateAsync_UTC03()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
         var policy = new SystemPolicy { Id = Guid.NewGuid(), Version = 1, IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
         dbContext.SystemPolicies.Add(policy);
         await dbContext.SaveChangesAsync();
 
         var service = new SystemPolicyService(dbContext, TimeProvider.System);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.UpdateAsync(Guid.NewGuid(), policy.Id, CreateValidRequest(), default));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.UpdateAsync(Guid.NewGuid(), policy.Id, CreateValidRequest(), default));
+        Assert.Equal("Active policy is immutable. Create a new version instead.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "POL-04")]
+    public async Task UpdateAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new SystemPolicyService(dbContext, TimeProvider.System);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => service.UpdateAsync(Guid.Empty, Guid.Empty, null!, default));
     }
     #endregion
 
@@ -175,14 +219,16 @@ public sealed class SystemPolicyServiceTests
     public async Task ActivateAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        var policy = new SystemPolicy { Id = Guid.NewGuid(), Version = 1, IsActive = false, CreatedAt = DateTimeOffset.UtcNow };
-        dbContext.SystemPolicies.Add(policy);
+        var oldPolicy = new SystemPolicy { Id = Guid.NewGuid(), Version = 1, IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
+        var newPolicy = new SystemPolicy { Id = Guid.NewGuid(), Version = 2, IsActive = false, CreatedAt = DateTimeOffset.UtcNow };
+        dbContext.SystemPolicies.AddRange(oldPolicy, newPolicy);
         await dbContext.SaveChangesAsync();
 
         var service = new SystemPolicyService(dbContext, TimeProvider.System);
-        SystemPolicyResponse result = await service.ActivateAsync(Guid.NewGuid(), policy.Id, default);
+        SystemPolicyResponse result = await service.ActivateAsync(Guid.NewGuid(), newPolicy.Id, default);
 
         Assert.True(result.IsActive);
+        Assert.False(dbContext.SystemPolicies.Single(p => p.Id == oldPolicy.Id).IsActive);
     }
 
     [Fact]
@@ -192,7 +238,19 @@ public sealed class SystemPolicyServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         var service = new SystemPolicyService(dbContext, TimeProvider.System);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.ActivateAsync(Guid.NewGuid(), Guid.NewGuid(), default));
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.ActivateAsync(Guid.NewGuid(), Guid.NewGuid(), default));
+        Assert.Equal("System policy not found.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "POL-05")]
+    public async Task ActivateAsync_UTC03()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new SystemPolicyService(dbContext, TimeProvider.System);
+
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.ActivateAsync(Guid.Empty, Guid.Empty, default));
+        Assert.Equal("System policy not found.", ex.Message);
     }
     #endregion
 }

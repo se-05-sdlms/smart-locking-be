@@ -25,18 +25,7 @@ public sealed class MaintenanceServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         var adminId = Guid.NewGuid();
-        var locker = new Locker
-        {
-            Id = Guid.NewGuid(),
-            Code = "LK-MNT-01",
-            Address = "Address",
-            RecoveryAddress = "Recovery",
-            DeviceIdentifier = "DEV-MNT-01",
-            OperationalStatus = LockerOperationalStatus.Operational,
-            ConnectionStatus = LockerConnectionStatus.Online,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+        var locker = CreateLocker("LK-MNT-01");
         var mnt = new MaintenanceRequest
         {
             Id = Guid.NewGuid(),
@@ -84,6 +73,31 @@ public sealed class MaintenanceServiceTests
         Assert.Equal(1, result.PageNumber);
         Assert.Equal(1, result.PageSize);
     }
+
+    [Fact]
+    [Trait("Category", "MNT-01")]
+    public async Task GetAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new MaintenanceService(dbContext, TimeProvider.System);
+
+        PagedResult<MaintenanceResponse> result = await service.GetAsync(
+            Guid.NewGuid(), nameof(UserRole.Administrator), null, null, null, null, null, null, default, 0, 101);
+
+        Assert.Equal(1, result.PageNumber);
+        Assert.Equal(100, result.PageSize);
+    }
+
+    [Fact]
+    [Trait("Category", "MNT-01")]
+    public async Task GetAsync_UTC05()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new MaintenanceService(dbContext, TimeProvider.System);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetAsync(
+            Guid.NewGuid(), "Resident", null, null, null, null, null, null, default, 1, 10));
+    }
     #endregion
 
     #region MNT-02: GetByIdAsync
@@ -93,18 +107,7 @@ public sealed class MaintenanceServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         var adminId = Guid.NewGuid();
-        var locker = new Locker
-        {
-            Id = Guid.NewGuid(),
-            Code = "LK-MNT-02",
-            Address = "Address",
-            RecoveryAddress = "Recovery",
-            DeviceIdentifier = "DEV-MNT-02",
-            OperationalStatus = LockerOperationalStatus.Operational,
-            ConnectionStatus = LockerConnectionStatus.Online,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+        var locker = CreateLocker("LK-MNT-02");
         var mnt = new MaintenanceRequest
         {
             Id = Guid.NewGuid(),
@@ -132,8 +135,21 @@ public sealed class MaintenanceServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         var service = new MaintenanceService(dbContext, TimeProvider.System);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() =>
             service.GetByIdAsync(Guid.NewGuid(), nameof(UserRole.Administrator), Guid.NewGuid(), default));
+        Assert.Equal("Không tìm thấy yêu cầu bảo trì.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "MNT-02")]
+    public async Task GetByIdAsync_UTC03()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new MaintenanceService(dbContext, TimeProvider.System);
+
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.GetByIdAsync(Guid.NewGuid(), nameof(UserRole.Administrator), Guid.Empty, default));
+        Assert.Equal("Không tìm thấy yêu cầu bảo trì.", ex.Message);
     }
     #endregion
 
@@ -144,18 +160,7 @@ public sealed class MaintenanceServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         var adminId = Guid.NewGuid();
-        var locker = new Locker
-        {
-            Id = Guid.NewGuid(),
-            Code = "LK-MNT-03",
-            Address = "Address",
-            RecoveryAddress = "Recovery",
-            DeviceIdentifier = "DEV-MNT-03",
-            OperationalStatus = LockerOperationalStatus.Operational,
-            ConnectionStatus = LockerConnectionStatus.Online,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+        var locker = CreateLocker("LK-MNT-03");
         dbContext.Add(locker);
         await dbContext.SaveChangesAsync();
 
@@ -168,6 +173,7 @@ public sealed class MaintenanceServiceTests
 
         Assert.Equal("Kiểm tra bản lề cửa", created.Description);
         Assert.Single(dbContext.MaintenanceRequests);
+        Assert.Contains(dbContext.AuditLogs, a => a.Action == "Maintenance.Created" && a.Result == AuditLogResult.Succeeded);
     }
 
     [Fact]
@@ -191,18 +197,7 @@ public sealed class MaintenanceServiceTests
     public async Task CreateAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        var locker = new Locker
-        {
-            Id = Guid.NewGuid(),
-            Code = "LK-MNT-03C",
-            Address = "Address",
-            RecoveryAddress = "Recovery",
-            DeviceIdentifier = "DEV-MNT-03C",
-            OperationalStatus = LockerOperationalStatus.Operational,
-            ConnectionStatus = LockerConnectionStatus.Online,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+        var locker = CreateLocker("LK-MNT-03C");
         dbContext.Add(locker);
         await dbContext.SaveChangesAsync();
         var service = new MaintenanceService(dbContext, TimeProvider.System);
@@ -221,18 +216,7 @@ public sealed class MaintenanceServiceTests
     public async Task CreateAsync_UTC04()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        var locker = new Locker
-        {
-            Id = Guid.NewGuid(),
-            Code = "LK-MNT-03D",
-            Address = "Address",
-            RecoveryAddress = "Recovery",
-            DeviceIdentifier = "DEV-MNT-03D",
-            OperationalStatus = LockerOperationalStatus.Operational,
-            ConnectionStatus = LockerConnectionStatus.Online,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+        var locker = CreateLocker("LK-MNT-03D");
         var incident = new Incident
         {
             Id = Guid.NewGuid(),
@@ -267,6 +251,28 @@ public sealed class MaintenanceServiceTests
         await Assert.ThrowsAnyAsync<Exception>(() => service.CreateAsync(
             Guid.Empty, "", null!, default));
     }
+
+    [Fact]
+    [Trait("Category", "MNT-03")]
+    public async Task CreateAsync_UTC06()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var locker = CreateLocker("LK-MNT-03F");
+        dbContext.Add(locker);
+        await dbContext.SaveChangesAsync();
+
+        var service = new MaintenanceService(dbContext, TimeProvider.System);
+        Guid operatorId = Guid.NewGuid();
+
+        // Operator has no assignment for locker
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.CreateAsync(
+            operatorId,
+            nameof(UserRole.LockerOperator),
+            new CreateMaintenanceRequest(locker.Id, null, null, MaintenancePriority.Low, "Bảo trì cửa"),
+            default));
+
+        Assert.Equal("Tủ không thuộc phạm vi vận hành.", ex.Message);
+    }
     #endregion
 
     #region MNT-04: UpdateAsync
@@ -275,18 +281,7 @@ public sealed class MaintenanceServiceTests
     public async Task UpdateAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        var locker = new Locker
-        {
-            Id = Guid.NewGuid(),
-            Code = "LK-MNT-04",
-            Address = "Address",
-            RecoveryAddress = "Recovery",
-            DeviceIdentifier = "DEV-MNT-04",
-            OperationalStatus = LockerOperationalStatus.Operational,
-            ConnectionStatus = LockerConnectionStatus.Online,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+        var locker = CreateLocker("LK-MNT-04");
         var mnt = new MaintenanceRequest
         {
             Id = Guid.NewGuid(),
@@ -311,7 +306,7 @@ public sealed class MaintenanceServiceTests
 
         Assert.Equal(MaintenanceStatus.Closed, response.Status);
         Assert.Equal("Khắc phục hoàn tất", response.ResolutionSummary);
-        Assert.Contains(dbContext.AuditLogs, a => a.Action == "Maintenance.StatusChanged");
+        Assert.Contains(dbContext.AuditLogs, a => a.Action == "Maintenance.StatusChanged" && a.Result == AuditLogResult.Succeeded);
     }
 
     [Fact]
@@ -336,18 +331,7 @@ public sealed class MaintenanceServiceTests
     public async Task UpdateAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        var locker = new Locker
-        {
-            Id = Guid.NewGuid(),
-            Code = "LK-MNT-04C",
-            Address = "Address",
-            RecoveryAddress = "Recovery",
-            DeviceIdentifier = "DEV-MNT-04C",
-            OperationalStatus = LockerOperationalStatus.Operational,
-            ConnectionStatus = LockerConnectionStatus.Online,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+        var locker = CreateLocker("LK-MNT-04C");
         var mnt = new MaintenanceRequest
         {
             Id = Guid.NewGuid(),
@@ -383,5 +367,83 @@ public sealed class MaintenanceServiceTests
         await Assert.ThrowsAnyAsync<Exception>(() => service.UpdateAsync(
             Guid.Empty, "", Guid.Empty, null!, default));
     }
+
+    [Fact]
+    [Trait("Category", "MNT-04")]
+    public async Task UpdateAsync_UTC05()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var locker = CreateLocker("LK-MNT-04E");
+        var mnt = new MaintenanceRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            Locker = locker,
+            Priority = MaintenancePriority.Normal,
+            Status = MaintenanceStatus.Open,
+            Description = "Sửa khóa",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AddRange(locker, mnt);
+        await dbContext.SaveChangesAsync();
+        var service = new MaintenanceService(dbContext, TimeProvider.System);
+
+        MaintenanceResponse response = await service.UpdateAsync(
+            Guid.NewGuid(),
+            nameof(UserRole.Administrator),
+            mnt.Id,
+            new UpdateMaintenanceRequest(MaintenanceStatus.InProgress, "Đang sửa", null),
+            default);
+
+        Assert.Equal(MaintenanceStatus.InProgress, response.Status);
+        Assert.Null(response.ResolutionSummary);
+        Assert.Contains(dbContext.AuditLogs, a => a.Action == "Maintenance.StatusChanged");
+    }
+
+    [Fact]
+    [Trait("Category", "MNT-04")]
+    public async Task UpdateAsync_UTC06()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var locker = CreateLocker("LK-MNT-04F");
+        var mnt = new MaintenanceRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            Locker = locker,
+            Priority = MaintenancePriority.Normal,
+            Status = MaintenanceStatus.Open,
+            Description = "Sửa khóa",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AddRange(locker, mnt);
+        await dbContext.SaveChangesAsync();
+        var service = new MaintenanceService(dbContext, TimeProvider.System);
+        Guid operatorId = Guid.NewGuid();
+
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.UpdateAsync(
+            operatorId,
+            nameof(UserRole.LockerOperator),
+            mnt.Id,
+            new UpdateMaintenanceRequest(MaintenanceStatus.InProgress, "Đang sửa", null),
+            default));
+
+        Assert.Equal("Tủ không thuộc phạm vi vận hành.", ex.Message);
+    }
     #endregion
+
+    private static Locker CreateLocker(string code) => new()
+    {
+        Id = Guid.NewGuid(),
+        Code = code,
+        Address = "Address",
+        RecoveryAddress = "Recovery",
+        DeviceIdentifier = $"DEV-{code}",
+        OperationalStatus = LockerOperationalStatus.Operational,
+        ConnectionStatus = LockerConnectionStatus.Online,
+        CreatedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = DateTimeOffset.UtcNow
+    };
 }

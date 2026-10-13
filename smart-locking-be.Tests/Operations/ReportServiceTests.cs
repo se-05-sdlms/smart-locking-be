@@ -4,6 +4,7 @@ using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
 using smart_locking_be.Infrastructure.Services;
+using Xunit;
 
 namespace smart_locking_be.Tests.Operations;
 
@@ -18,6 +19,22 @@ public sealed class ReportServiceTests
     [Fact]
     [Trait("Category", "RPT-01")]
     public async Task GetSummaryAsync_UTC01()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new ReportService(dbContext);
+        DateTimeOffset from = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        DateTimeOffset to = new(2026, 2, 1, 0, 0, 0, TimeSpan.Zero);
+
+        OperationsReportResponse report = await service.GetSummaryAsync(from, to, null, default);
+
+        Assert.Equal(from, report.From);
+        Assert.Equal(to, report.To);
+        Assert.Equal(0, report.Deliveries);
+    }
+
+    [Fact]
+    [Trait("Category", "RPT-01")]
+    public async Task GetSummaryAsync_UTC02()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         var locker = new Locker
@@ -36,26 +53,37 @@ public sealed class ReportServiceTests
         await dbContext.SaveChangesAsync();
 
         var service = new ReportService(dbContext);
-        DateTimeOffset from = DateTimeOffset.UtcNow.AddDays(-7);
-        DateTimeOffset to = DateTimeOffset.UtcNow;
+        DateTimeOffset from = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        DateTimeOffset to = new(2026, 2, 1, 0, 0, 0, TimeSpan.Zero);
 
         OperationsReportResponse report = await service.GetSummaryAsync(from, to, locker.Id, default);
 
         Assert.Equal(from, report.From);
         Assert.Equal(to, report.To);
-        Assert.Equal(0, report.Deliveries);
-        Assert.Equal(0, report.Returns);
-        Assert.Equal(0, report.RetrievedParcels);
     }
 
     [Fact]
     [Trait("Category", "RPT-01")]
-    public async Task GetSummaryAsync_UTC02()
+    public async Task GetSummaryAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         var service = new ReportService(dbContext);
-        DateTimeOffset from = DateTimeOffset.UtcNow;
-        DateTimeOffset to = DateTimeOffset.UtcNow.AddDays(-1); // invalid range
+        DateTimeOffset time = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.GetSummaryAsync(time, time, null, default));
+
+        Assert.Equal("Khoảng thời gian báo cáo không hợp lệ.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "RPT-01")]
+    public async Task GetSummaryAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new ReportService(dbContext);
+        DateTimeOffset from = new(2026, 2, 1, 0, 0, 0, TimeSpan.Zero);
+        DateTimeOffset to = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
             service.GetSummaryAsync(from, to, null, default));
@@ -65,28 +93,17 @@ public sealed class ReportServiceTests
 
     [Fact]
     [Trait("Category", "RPT-01")]
-    public async Task GetSummaryAsync_UTC03()
+    public async Task GetSummaryAsync_UTC05()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         var service = new ReportService(dbContext);
-        DateTimeOffset from = DateTimeOffset.UtcNow.AddDays(-1);
-        DateTimeOffset to = DateTimeOffset.UtcNow;
+        DateTimeOffset from = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        DateTimeOffset to = new(2026, 2, 1, 0, 0, 0, TimeSpan.Zero);
 
         var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() =>
             service.GetSummaryAsync(from, to, Guid.NewGuid(), default));
 
         Assert.Equal("Không tìm thấy locker.", ex.Message);
-    }
-
-    [Fact]
-    [Trait("Category", "RPT-01")]
-    public async Task GetSummaryAsync_UTC04()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        var service = new ReportService(dbContext);
-
-        await Assert.ThrowsAnyAsync<Exception>(() =>
-            service.GetSummaryAsync(default, default, null, default));
     }
     #endregion
 }

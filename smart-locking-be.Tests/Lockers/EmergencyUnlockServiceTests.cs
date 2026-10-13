@@ -119,5 +119,67 @@ public sealed class EmergencyUnlockServiceTests
             new EmergencyUnlockRequest(locker.Id, Guid.NewGuid(), null, "Valid reason"),
             default));
     }
+
+    [Fact]
+    [Trait("Category", "EMG-01")]
+    public async Task CreateAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var locker = new Locker
+        {
+            Id = Guid.NewGuid(),
+            Code = "LK-01",
+            Address = "123 Street",
+            RecoveryAddress = "Recovery",
+            DeviceIdentifier = "DEV-01",
+            OperationalStatus = LockerOperationalStatus.Operational,
+            ConnectionStatus = LockerConnectionStatus.Online,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        var comp = new LockerCompartment
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            Code = "C01",
+            HardwareCode = "HW-01",
+            HardwareChannel = 1,
+            OperationalStatus = LockerCompartmentOperationalStatus.Operational
+        };
+        var incident = new Incident
+        {
+            Id = Guid.NewGuid(),
+            Title = "Incident 1",
+            Description = "Desc",
+            LockerId = Guid.NewGuid(), // different locker
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AddRange(locker, comp, incident);
+        await dbContext.SaveChangesAsync();
+
+        var service = new EmergencyUnlockService(dbContext, new FakeLockerAccessService(), TimeProvider.System);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.CreateAsync(
+            Guid.NewGuid(),
+            nameof(UserRole.Administrator),
+            new EmergencyUnlockRequest(locker.Id, comp.Id, incident.Id, "Valid reason"),
+            default));
+        Assert.Equal("Sự cố không thuộc đúng tủ hoặc ngăn được mở khẩn cấp.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "EMG-01")]
+    public async Task CreateAsync_UTC05()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = new EmergencyUnlockService(dbContext, new FakeLockerAccessService(), TimeProvider.System);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => service.CreateAsync(
+            Guid.Empty,
+            nameof(UserRole.Administrator),
+            null!,
+            default));
+    }
     #endregion
 }

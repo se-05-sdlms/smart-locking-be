@@ -232,6 +232,64 @@ public sealed class NotificationRuleServiceTests
         await Assert.ThrowsAnyAsync<Exception>(() => service.CreateAsync(
             Guid.Empty, null!, default));
     }
+
+    [Fact]
+    [Trait("Category", "NRL-03")]
+    public async Task CreateAsync_UTC07()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var policy = CreatePolicy(false);
+        var rule = CreateRule(policy.Id, "ParcelStored", NotificationChannel.Push, true);
+        dbContext.AddRange(policy, rule);
+        await dbContext.SaveChangesAsync();
+
+        var service = new NotificationRuleService(dbContext);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(
+            Guid.NewGuid(),
+            new CreateNotificationRuleRequest(policy.Id, "ParcelStored", NotificationChannel.Push, 10, true),
+            default));
+
+        Assert.Equal("Notification rule already exists.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "NRL-03")]
+    public async Task CreateAsync_UTC08()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var policy = CreatePolicy(true);
+        dbContext.Add(policy);
+        await dbContext.SaveChangesAsync();
+
+        var service = new NotificationRuleService(dbContext);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(
+            Guid.NewGuid(),
+            new CreateNotificationRuleRequest(policy.Id, "ParcelStored", NotificationChannel.Push, 10, true),
+            default));
+
+        Assert.Equal("Rules of an active policy are immutable.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "NRL-03")]
+    public async Task CreateAsync_UTC09()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var policy = CreatePolicy(false);
+        dbContext.Add(policy);
+        await dbContext.SaveChangesAsync();
+
+        var service = new NotificationRuleService(dbContext);
+        string eventType100 = new string('A', 100);
+        var response = await service.CreateAsync(
+            Guid.NewGuid(),
+            new CreateNotificationRuleRequest(policy.Id, eventType100, NotificationChannel.Push, 10, true),
+            default);
+
+        Assert.NotNull(response);
+        Assert.Equal(eventType100, response.EventType);
+        Assert.Contains(dbContext.AuditLogs, a => a.Action == "NotificationRule.Created");
+    }
     #endregion
 
     #region NRL-04: UpdateAsync

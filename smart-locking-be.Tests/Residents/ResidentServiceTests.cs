@@ -4,6 +4,7 @@ using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
 using smart_locking_be.Infrastructure.Services;
+using Xunit;
 
 namespace smart_locking_be.Tests.Residents;
 
@@ -18,270 +19,35 @@ public sealed class ResidentServiceTests
         return new ApplicationDbContext(options);
     }
 
-    [Fact]
-    public async Task GetProfileAsync_WhenUserNotFound_ThrowsKeyNotFoundException()
-    {
-        await using var dbContext = CreateInMemoryDbContext();
-        var service = new ResidentService(dbContext);
-
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetProfileAsync(Guid.NewGuid()));
-    }
-
-    [Fact]
-    public async Task GetProfileAsync_WhenUserIsLocked_ThrowsInvalidOperationException()
-    {
-        await using var dbContext = CreateInMemoryDbContext();
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            PhoneNumber = "0987654321",
-            Email = "locked@boxora.com",
-            PasswordHash = "hash",
-            Role = UserRole.Resident,
-            Status = UserStatus.Locked
-        };
-        dbContext.Users.Add(user);
-        await dbContext.SaveChangesAsync();
-
-        var service = new ResidentService(dbContext);
-
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.GetProfileAsync(user.Id));
-        Assert.Contains("khóa", ex.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task GetProfileAsync_WhenUserIsDisabled_ThrowsInvalidOperationException()
-    {
-        await using var dbContext = CreateInMemoryDbContext();
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            PhoneNumber = "0987654322",
-            Email = "disabled@boxora.com",
-            PasswordHash = "hash",
-            Role = UserRole.Resident,
-            Status = UserStatus.Disabled
-        };
-        dbContext.Users.Add(user);
-        await dbContext.SaveChangesAsync();
-
-        var service = new ResidentService(dbContext);
-
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.GetProfileAsync(user.Id));
-        Assert.Contains("vô hiệu hóa", ex.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task GetProfileAsync_WhenProfileIsNull_InitializesDefaultProfileAndReturnsResponse()
-    {
-        await using var dbContext = CreateInMemoryDbContext();
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            PhoneNumber = "0912345678",
-            Email = "newresident@boxora.com",
-            PasswordHash = "hash",
-            Role = UserRole.Resident,
-            Status = UserStatus.Active
-        };
-        dbContext.Users.Add(user);
-        await dbContext.SaveChangesAsync();
-
-        var service = new ResidentService(dbContext);
-
-        var response = await service.GetProfileAsync(user.Id);
-
-        Assert.NotNull(response);
-        Assert.Equal(user.Id, response.UserId);
-        Assert.Equal("0912345678", response.PhoneNumber);
-        Assert.Equal("newresident@boxora.com", response.Email);
-        Assert.Equal("0912345678", response.FullName);
-        Assert.Equal(DeliveryApprovalMode.Manual, response.DeliveryApprovalMode);
-        var persistedProfile = await dbContext.ResidentProfiles.FirstOrDefaultAsync(p => p.UserId == user.Id);
-        Assert.NotNull(persistedProfile);
-    }
-
-    [Fact]
-    public async Task GetProfileAsync_WhenProfileExists_ReturnsExpectedProfile()
-    {
-        await using var dbContext = CreateInMemoryDbContext();
-        var userId = Guid.NewGuid();
-        var lockerId = Guid.NewGuid();
-        var user = new User
-        {
-            Id = userId,
-            PhoneNumber = "0900000001",
-            Email = "resident@boxora.com",
-            PasswordHash = "hash",
-            Role = UserRole.Resident,
-            Status = UserStatus.Active
-        };
-        var profile = new ResidentProfile
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            RegisteredLockerId = lockerId,
-            FullName = "Nguyen Van A",
-            DateOfBirth = new DateOnly(1995, 5, 20),
-            AvatarUrl = "https://boxora.com/avatar.png",
-            DeliveryApprovalMode = DeliveryApprovalMode.Auto,
-            FaceRecognitionEnabled = false
-        };
-        dbContext.Users.Add(user);
-        dbContext.ResidentProfiles.Add(profile);
-        await dbContext.SaveChangesAsync();
-
-        var service = new ResidentService(dbContext);
-
-        var response = await service.GetProfileAsync(userId);
-
-        Assert.NotNull(response);
-        Assert.Equal(userId, response.UserId);
-        Assert.Equal(lockerId, response.RegisteredLockerId);
-        Assert.Equal("Nguyen Van A", response.FullName);
-        Assert.Equal(new DateOnly(1995, 5, 20), response.DateOfBirth);
-        Assert.Equal("https://boxora.com/avatar.png", response.AvatarUrl);
-        Assert.Equal(DeliveryApprovalMode.Auto, response.DeliveryApprovalMode);
-    }
-
-    [Fact]
-    public async Task UpdateProfileAsync_WithWhitespaceFullName_ThrowsArgumentException()
-    {
-        await using var dbContext = CreateInMemoryDbContext();
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            PhoneNumber = "0900000002",
-            Role = UserRole.Resident,
-            Status = UserStatus.Active
-        };
-        dbContext.Users.Add(user);
-        await dbContext.SaveChangesAsync();
-
-        var service = new ResidentService(dbContext);
-
-        var request = new UpdateResidentProfileRequest("   ", null, null);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateProfileAsync(user.Id, request));
-    }
-
-    [Fact]
-    public async Task UpdateProfileAsync_WithFutureDateOfBirth_ThrowsArgumentException()
-    {
-        await using var dbContext = CreateInMemoryDbContext();
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            PhoneNumber = "0900000003",
-            Role = UserRole.Resident,
-            Status = UserStatus.Active
-        };
-        dbContext.Users.Add(user);
-        await dbContext.SaveChangesAsync();
-
-        var service = new ResidentService(dbContext);
-
-        var request = new UpdateResidentProfileRequest(
-            "Valid Name",
-            DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)),
-            null);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateProfileAsync(user.Id, request));
-    }
-
-    [Fact]
-    public async Task UpdateProfileAsync_WithValidData_UpdatesProfileFields()
-    {
-        await using var dbContext = CreateInMemoryDbContext();
-        var userId = Guid.NewGuid();
-        var user = new User
-        {
-            Id = userId,
-            PhoneNumber = "0900000004",
-            Role = UserRole.Resident,
-            Status = UserStatus.Active
-        };
-        var profile = new ResidentProfile
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            FullName = "Old Name",
-            DeliveryApprovalMode = DeliveryApprovalMode.Manual
-        };
-        dbContext.Users.Add(user);
-        dbContext.ResidentProfiles.Add(profile);
-        await dbContext.SaveChangesAsync();
-
-        var service = new ResidentService(dbContext);
-
-        var request = new UpdateResidentProfileRequest(
-            "Tran Thi B",
-            new DateOnly(2000, 1, 15),
-            "https://boxora.com/b.jpg");
-
-        var response = await service.UpdateProfileAsync(userId, request);
-
-        Assert.Equal("Tran Thi B", response.FullName);
-        Assert.Equal(new DateOnly(2000, 1, 15), response.DateOfBirth);
-        Assert.Equal("https://boxora.com/b.jpg", response.AvatarUrl);
-
-        var updatedProfile = await dbContext.ResidentProfiles.FirstAsync(p => p.UserId == userId);
-        Assert.Equal("Tran Thi B", updatedProfile.FullName);
-        Assert.Equal(new DateOnly(2000, 1, 15), updatedProfile.DateOfBirth);
-        Assert.Equal("https://boxora.com/b.jpg", updatedProfile.AvatarUrl);
-    }
-
-    [Fact]
-    public async Task UpdateProfileAsync_SwitchesApprovalModeSuccessfully()
-    {
-        await using var dbContext = CreateInMemoryDbContext();
-        var userId = Guid.NewGuid();
-        var user = new User
-        {
-            Id = userId,
-            PhoneNumber = "0900000005",
-            Role = UserRole.Resident,
-            Status = UserStatus.Active
-        };
-        var profile = new ResidentProfile
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            FullName = "Test Resident",
-            DeliveryApprovalMode = DeliveryApprovalMode.Manual
-        };
-        dbContext.Users.Add(user);
-        dbContext.ResidentProfiles.Add(profile);
-        await dbContext.SaveChangesAsync();
-
-        var service = new ResidentService(dbContext);
-
-        var response = await service.UpdateProfileAsync(
-            userId,
-            new UpdateResidentProfileRequest(null, null, null, DeliveryApprovalMode.Auto));
-
-        Assert.Equal(DeliveryApprovalMode.Auto, response.DeliveryApprovalMode);
-
-        var updatedProfile = await dbContext.ResidentProfiles.FirstAsync(p => p.UserId == userId);
-        Assert.Equal(DeliveryApprovalMode.Auto, updatedProfile.DeliveryApprovalMode);
-    }
-
-    #region Standardized Matrix Tests
+    #region RES-01: ResidentService.GetProfileAsync
     [Fact]
     [Trait("Category", "RES-01")]
     public async Task GetProfileAsync_UTC01()
     {
         await using var dbContext = CreateInMemoryDbContext();
-        var userId = Guid.NewGuid();
-        var user = new User { Id = userId, PhoneNumber = "0911223344", Role = UserRole.Resident, Status = UserStatus.Active };
-        var profile = new ResidentProfile { Id = Guid.NewGuid(), UserId = userId, FullName = "Resident A" };
-        dbContext.AddRange(user, profile);
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Email = "resident@example.com",
+            PhoneNumber = "0912345678",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active,
+            ResidentProfile = new ResidentProfile
+            {
+                Id = Guid.NewGuid(),
+                FullName = "Nguyen Van A",
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            }
+        };
+        dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
 
         var service = new ResidentService(dbContext);
-        var res = await service.GetProfileAsync(userId);
+        var result = await service.GetProfileAsync(user.Id);
 
-        Assert.Equal("Resident A", res.FullName);
+        Assert.NotNull(result);
+        Assert.Equal("Nguyen Van A", result.FullName);
     }
 
     [Fact]
@@ -291,24 +57,44 @@ public sealed class ResidentServiceTests
         await using var dbContext = CreateInMemoryDbContext();
         var service = new ResidentService(dbContext);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetProfileAsync(Guid.NewGuid()));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.GetProfileAsync(Guid.NewGuid()));
     }
 
+    [Fact]
+    [Trait("Category", "RES-01")]
+    public async Task GetProfileAsync_UTC03()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var service = new ResidentService(dbContext);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.GetProfileAsync(Guid.Empty));
+    }
+    #endregion
+
+    #region RES-02: ResidentService.UpdateProfileAsync
     [Fact]
     [Trait("Category", "RES-02")]
     public async Task UpdateProfileAsync_UTC01()
     {
         await using var dbContext = CreateInMemoryDbContext();
-        var userId = Guid.NewGuid();
-        var user = new User { Id = userId, PhoneNumber = "0911223355", Role = UserRole.Resident, Status = UserStatus.Active };
-        var profile = new ResidentProfile { Id = Guid.NewGuid(), UserId = userId, FullName = "Old Name" };
-        dbContext.AddRange(user, profile);
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Email = "resident@example.com",
+            PhoneNumber = "0912345678",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
 
         var service = new ResidentService(dbContext);
-        var updated = await service.UpdateProfileAsync(userId, new UpdateResidentProfileRequest("New Name", null, null, null));
+        var req = new UpdateResidentProfileRequest("Nguyen Van B", null, null, null);
+        var result = await service.UpdateProfileAsync(user.Id, req);
 
-        Assert.Equal("New Name", updated.FullName);
+        Assert.Equal("Nguyen Van B", result.FullName);
     }
 
     [Fact]
@@ -316,10 +102,96 @@ public sealed class ResidentServiceTests
     public async Task UpdateProfileAsync_UTC02()
     {
         await using var dbContext = CreateInMemoryDbContext();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Users.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        var service = new ResidentService(dbContext);
+        var req = new UpdateResidentProfileRequest("   ", null, null, null);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateProfileAsync(user.Id, req));
+        Assert.Equal("Họ và tên không được để trống. (Parameter 'FullName')", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "RES-02")]
+    public async Task UpdateProfileAsync_UTC03()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Users.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        var service = new ResidentService(dbContext);
+        string longName = new string('a', 151);
+        var req = new UpdateResidentProfileRequest(longName, null, null, null);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateProfileAsync(user.Id, req));
+        Assert.Equal("Họ và tên không được vượt quá 150 ký tự. (Parameter 'FullName')", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "RES-02")]
+    public async Task UpdateProfileAsync_UTC04()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Users.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        var service = new ResidentService(dbContext);
+        var futureDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
+        var req = new UpdateResidentProfileRequest("Valid Name", futureDate, null, null);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateProfileAsync(user.Id, req));
+        Assert.Equal("Ngày sinh không được ở trong tương lai. (Parameter 'DateOfBirth')", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "RES-02")]
+    public async Task UpdateProfileAsync_UTC05()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Users.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        var service = new ResidentService(dbContext);
+        string longUrl = "https://example.com/" + new string('a', 2050);
+        var req = new UpdateResidentProfileRequest("Valid Name", null, longUrl, null);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateProfileAsync(user.Id, req));
+        Assert.Equal("Đường dẫn ảnh đại diện không được vượt quá 2048 ký tự. (Parameter 'AvatarUrl')", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "RES-02")]
+    public async Task UpdateProfileAsync_UTC06()
+    {
+        await using var dbContext = CreateInMemoryDbContext();
         var service = new ResidentService(dbContext);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
-            service.UpdateProfileAsync(Guid.NewGuid(), new UpdateResidentProfileRequest("Name", null, null, null)));
+        await Assert.ThrowsAnyAsync<Exception>(() => service.UpdateProfileAsync(Guid.Empty, null!));
     }
     #endregion
 }

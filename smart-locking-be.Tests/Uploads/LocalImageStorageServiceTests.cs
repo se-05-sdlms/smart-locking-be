@@ -72,5 +72,21 @@ public sealed class LocalImageStorageServiceTests
         await Assert.ThrowsAnyAsync<Exception>(() =>
             service.UploadAsync(null!, "", ""));
     }
+
+    [Fact]
+    [Trait("Category", "IMG-01")]
+    public async Task UploadAsync_UTC05()
+    {
+        var env = new TestWebHostEnvironment();
+        var service = new LocalImageStorageService(env);
+        // WEBP signature: RIFF (4 bytes), size (4 bytes), WEBP (4 bytes)
+        byte[] webpBytes = [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x00, 0x00];
+        using var stream = new MemoryStream(webpBytes);
+
+        string result = await service.UploadAsync(stream, "parcel.webp", "image/webp");
+
+        Assert.StartsWith("/uploads/images/", result);
+        Assert.EndsWith(".webp", result);
+    }
     #endregion
 }

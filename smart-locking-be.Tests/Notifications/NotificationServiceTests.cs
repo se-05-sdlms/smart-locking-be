@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -16,17 +17,16 @@ public sealed class NotificationServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Guid userId = Guid.NewGuid();
-        Notification owned = CreateNotification(userId, NotificationChannel.InApp);
-        dbContext.Notifications.AddRange(
-            owned,
-            CreateNotification(userId, NotificationChannel.Push),
-            CreateNotification(Guid.NewGuid(), NotificationChannel.InApp));
+        Notification unread = CreateNotification(userId, NotificationChannel.InApp, isRead: false);
+        Notification read = CreateNotification(userId, NotificationChannel.InApp, isRead: true);
+        dbContext.Notifications.AddRange(unread, read);
         await dbContext.SaveChangesAsync();
 
-        var result = await CreateService(dbContext)
-            .GetForUserAsync(userId, false, 50, default);
+        var service = CreateService(dbContext);
+        PagedResult<NotificationResponse> result = await service.GetForUserAsync(userId, false, 20, default, 1);
 
-        Assert.Equal(owned.Id, Assert.Single(result.Items).Id);
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(2, result.Items.Count);
     }
 
     [Fact]
@@ -35,12 +35,17 @@ public sealed class NotificationServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Guid userId = Guid.NewGuid();
+        Notification unread = CreateNotification(userId, NotificationChannel.InApp, isRead: false);
+        Notification read = CreateNotification(userId, NotificationChannel.InApp, isRead: true);
+        dbContext.Notifications.AddRange(unread, read);
+        await dbContext.SaveChangesAsync();
+
         var service = CreateService(dbContext);
+        PagedResult<NotificationResponse> result = await service.GetForUserAsync(userId, true, 20, default, 1);
 
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
-            service.GetForUserAsync(userId, false, 0, default));
-
-        Assert.Equal("Limit must be between 1 and 100. (Parameter 'limit')", ex.Message);
+        Assert.Equal(1, result.TotalCount);
+        Assert.Single(result.Items);
+        Assert.False(result.Items[0].IsRead);
     }
 
     [Fact]
@@ -50,8 +55,54 @@ public sealed class NotificationServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         var service = CreateService(dbContext);
 
-        var result = await service.GetForUserAsync(Guid.Empty, false, 10, default);
-        Assert.Empty(result.Items);
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.GetForUserAsync(Guid.NewGuid(), false, 0, default, 1));
+
+        Assert.Contains("Limit must be between 1 and 100", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "NOT-01")]
+    public async Task GetForUserAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var service = CreateService(dbContext);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.GetForUserAsync(Guid.NewGuid(), false, 101, default, 1));
+
+        Assert.Contains("Limit must be between 1 and 100", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "NOT-01")]
+    public async Task GetForUserAsync_UTC05()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Guid userId = Guid.NewGuid();
+        dbContext.Notifications.AddRange(
+            CreateNotification(userId, NotificationChannel.InApp, isRead: false),
+            CreateNotification(userId, NotificationChannel.InApp, isRead: true));
+        await dbContext.SaveChangesAsync();
+
+        var service = CreateService(dbContext);
+        PagedResult<NotificationResponse> result = await service.GetForUserAsync(userId, false, 1, default, 1);
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Single(result.Items);
+    }
+
+    [Fact]
+    [Trait("Category", "NOT-01")]
+    public async Task GetForUserAsync_UTC06()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Guid userId = Guid.NewGuid();
+        var service = CreateService(dbContext);
+
+        PagedResult<NotificationResponse> result = await service.GetForUserAsync(userId, false, 20, default, 0);
+
+        Assert.Equal(1, result.PageNumber);
     }
     #endregion
 
@@ -62,18 +113,16 @@ public sealed class NotificationServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Guid userId = Guid.NewGuid();
-        Notification notification = CreateNotification(userId, NotificationChannel.InApp);
+        Notification notification = CreateNotification(userId, NotificationChannel.InApp, isRead: false);
         dbContext.Notifications.Add(notification);
         await dbContext.SaveChangesAsync();
 
-        NotificationResponse first = await CreateService(dbContext)
-            .SetReadStateAsync(userId, notification.Id, true, default);
-        NotificationResponse second = await CreateService(dbContext)
+        NotificationResponse response = await CreateService(dbContext)
             .SetReadStateAsync(userId, notification.Id, true, default);
 
-        Assert.True(first.IsRead);
-        Assert.NotNull(first.ReadAt);
-        Assert.Equal(first.ReadAt, second.ReadAt);
+        Assert.True(response.IsRead);
+        Assert.NotNull(response.ReadAt);
+        Assert.True(notification.IsRead);
     }
 
     [Fact]
@@ -81,14 +130,18 @@ public sealed class NotificationServiceTests
     public async Task SetReadStateAsync_UTC02()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        Notification notification = CreateNotification(Guid.NewGuid(), NotificationChannel.InApp);
+        Guid userId = Guid.NewGuid();
+        Notification notification = CreateNotification(userId, NotificationChannel.InApp, isRead: true);
+        notification.ReadAt = DateTimeOffset.UtcNow;
         dbContext.Notifications.Add(notification);
         await dbContext.SaveChangesAsync();
 
-        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => CreateService(dbContext)
-            .SetReadStateAsync(Guid.NewGuid(), notification.Id, true, default));
+        NotificationResponse response = await CreateService(dbContext)
+            .SetReadStateAsync(userId, notification.Id, false, default);
 
-        Assert.Equal("Notification not found.", ex.Message);
+        Assert.False(response.IsRead);
+        Assert.Null(response.ReadAt);
+        Assert.False(notification.IsRead);
     }
 
     [Fact]
@@ -96,10 +149,36 @@ public sealed class NotificationServiceTests
     public async Task SetReadStateAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
+        Guid userId = Guid.NewGuid();
+        DateTimeOffset readAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        Notification notification = CreateNotification(userId, NotificationChannel.InApp, isRead: true);
+        notification.ReadAt = readAt;
+        dbContext.Notifications.Add(notification);
+        await dbContext.SaveChangesAsync();
+
+        NotificationResponse response = await CreateService(dbContext)
+            .SetReadStateAsync(userId, notification.Id, true, default);
+
+        Assert.True(response.IsRead);
+        Assert.Equal(readAt, notification.ReadAt);
+    }
+
+    [Fact]
+    [Trait("Category", "NOT-02")]
+    public async Task SetReadStateAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Guid userId = Guid.NewGuid();
+        Notification pushNotif = CreateNotification(userId, NotificationChannel.Push, isRead: false);
+        dbContext.Notifications.Add(pushNotif);
+        await dbContext.SaveChangesAsync();
+
         var service = CreateService(dbContext);
 
-        await Assert.ThrowsAnyAsync<KeyNotFoundException>(() =>
-            service.SetReadStateAsync(Guid.Empty, Guid.Empty, false, default));
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.SetReadStateAsync(userId, pushNotif.Id, true, default));
+
+        Assert.Equal("Notification not found.", ex.Message);
     }
     #endregion
 
@@ -110,9 +189,9 @@ public sealed class NotificationServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Guid userId = Guid.NewGuid();
-        Notification first = CreateNotification(userId, NotificationChannel.InApp);
-        Notification second = CreateNotification(userId, NotificationChannel.InApp);
-        Notification push = CreateNotification(userId, NotificationChannel.Push);
+        Notification first = CreateNotification(userId, NotificationChannel.InApp, isRead: false);
+        Notification second = CreateNotification(userId, NotificationChannel.InApp, isRead: false);
+        Notification push = CreateNotification(userId, NotificationChannel.Push, isRead: false);
         dbContext.Notifications.AddRange(first, second, push);
         await dbContext.SaveChangesAsync();
 
@@ -159,15 +238,17 @@ public sealed class NotificationServiceTests
     private static NotificationService CreateService(ApplicationDbContext dbContext) =>
         new(dbContext, TimeProvider.System);
 
-    private static Notification CreateNotification(Guid userId, NotificationChannel channel) => new()
-    {
-        Id = Guid.NewGuid(),
-        UserId = userId,
-        Type = "ParcelStored",
-        Channel = channel,
-        Title = "Bưu kiện mới",
-        Message = "Bưu kiện đã được gửi vào locker.",
-        DeliveryStatus = NotificationDeliveryStatus.Sent,
-        CreatedAt = DateTimeOffset.UtcNow
-    };
+    private static Notification CreateNotification(Guid userId, NotificationChannel channel, bool isRead = false) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Channel = channel,
+            Type = "DeliveryApprovalRequest",
+            Title = "Yêu cầu giao hàng",
+            Message = "Shipper đang chờ bạn xác nhận",
+            DeliveryStatus = NotificationDeliveryStatus.Pending,
+            IsRead = isRead,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
 }

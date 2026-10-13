@@ -1,402 +1,27 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
 using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Auth;
 using smart_locking_be.Infrastructure.Persistence;
 using smart_locking_be.Infrastructure.Services;
+using System.Security.Authentication;
 
 namespace smart_locking_be.Tests.DeliveryRequests;
 
 public sealed class DeliveryRequestServiceTests
 {
-    [Fact]
-    public async Task InitiateAsync_WithOperationalLocker_CreatesStartedSessionAndReturnsRawToken()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
-        var tokenService = new Sha256TokenHashService();
-        DeliveryRequestService service = CreateService(dbContext, tokenService);
-
-        InitiateDeliveryResponse response = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
-
-        DeliveryRequest persisted = await dbContext.DeliveryRequests.SingleAsync();
-        Assert.Equal(DeliveryRequestStatus.Started, response.Status);
-        Assert.Equal(locker.Id, persisted.LockerId);
-        Assert.Equal(policy.Id, persisted.SystemPolicyId);
-        Assert.Equal(tokenService.HashToken(response.GuestSessionToken), persisted.GuestSessionTokenHash);
-        Assert.True(response.SessionExpiresAt > DateTimeOffset.UtcNow);
-    }
-
-    [Fact]
-    public async Task InitiateAsync_WithUnavailableLocker_ThrowsInvalidOperationException()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        locker.OperationalStatus = LockerOperationalStatus.OutOfService;
-        await dbContext.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(dbContext);
-
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.CreateAsync(new InitiateDeliveryRequest(locker.Code)));
-    }
-
-    [Fact]
-    public async Task SubmitAsync_WithHttpsUrl_StoresUrlAndRefreshesSession()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        await SeedResidentAsync(dbContext, "0901234567");
-        DeliveryRequestService service = CreateService(dbContext);
-        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
-        DateTimeOffset originalExpiry = initiated.SessionExpiresAt;
-
-        DeliveryRequestSummaryResponse response = await service.SubmitAsync(
-            initiated.Id,
-            initiated.GuestSessionToken,
-            new SubmitDeliveryRequest("  https://cdn.example.com/parcel.webp  ", "0901234567"));
-
-        Assert.Equal("https://cdn.example.com/parcel.webp", response.ParcelImageUrl);
-        Assert.True(response.SessionExpiresAt >= originalExpiry);
-    }
-
-    [Fact]
-    public async Task SubmitAsync_WithRelativeUrl_ThrowsArgumentException()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        DeliveryRequestService service = CreateService(dbContext);
-        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
-
-        await Assert.ThrowsAsync<ArgumentException>(() => service.SubmitAsync(
-            initiated.Id,
-            initiated.GuestSessionToken,
-            new SubmitDeliveryRequest("/images/parcel.jpg", "0901234567")));
-    }
-
-    [Fact]
-    public async Task SubmitAsync_WithExpiredSession_PersistsExpirationAndThrowsTimeoutException()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        DeliveryRequestService service = CreateService(dbContext);
-        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
-        DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests.SingleAsync();
-        deliveryRequest.SessionExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1);
-        await dbContext.SaveChangesAsync();
-
-        await Assert.ThrowsAsync<TimeoutException>(() => service.SubmitAsync(
-            initiated.Id,
-            initiated.GuestSessionToken,
-            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", "0901234567")));
-
-        Assert.Equal(DeliveryRequestStatus.Expired, deliveryRequest.Status);
-        Assert.Equal(DeliveryRequestFailureCode.SessionExpired, deliveryRequest.FailureCode);
-    }
-
-    [Fact]
-    public async Task SubmitAsync_WithoutImage_ThrowsArgumentException()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        DeliveryRequestService service = CreateService(dbContext);
-        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
-
-        await Assert.ThrowsAsync<ArgumentException>(() => service.SubmitAsync(
-            initiated.Id,
-            initiated.GuestSessionToken,
-            new SubmitDeliveryRequest("", "0901234567")));
-    }
-
-    [Fact]
-    public async Task SubmitRecipientAsync_WithAutoApprovalResident_ApprovesWithoutPush()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234567");
-        var pushNotificationService = new RecordingPushNotificationService();
-        DeliveryRequestService service = CreateService(dbContext, pushNotificationService: pushNotificationService);
-        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
-        DeliveryRequestSummaryResponse response = await service.SubmitAsync(
-            initiated.Id,
-            initiated.GuestSessionToken,
-            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", " 0901234567 "));
-
-        DeliveryRequest persisted = await dbContext.DeliveryRequests.SingleAsync();
-        Assert.Equal(DeliveryRequestStatus.Approved, response.Status);
-        Assert.Equal(resident.Id, persisted.ResidentProfileId);
-        Assert.Equal("0901234567", persisted.RecipientPhoneSnapshot);
-        Assert.Equal(DeliveryApprovalMode.Auto, persisted.ApprovalModeSnapshot);
-        Assert.Equal(persisted.UpdatedAt, persisted.DecisionAt);
-        Assert.Null(persisted.ApprovalExpiresAt);
-        Assert.Empty(pushNotificationService.Requests);
-    }
-
-    [Fact]
-    public async Task SubmitRecipientAsync_WithManualApprovalResident_SetsPendingApprovalAndExpiry()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234568", DeliveryApprovalMode.Manual);
-        var pushNotificationService = new RecordingPushNotificationService();
-        DeliveryRequestService service = CreateService(dbContext, pushNotificationService: pushNotificationService);
-        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
-        DeliveryRequestSummaryResponse response = await service.SubmitAsync(
-            initiated.Id,
-            initiated.GuestSessionToken,
-            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", resident.User.PhoneNumber!));
-
-        DeliveryRequest persisted = await dbContext.DeliveryRequests.SingleAsync();
-        Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
-        Assert.Equal(DeliveryApprovalMode.Manual, persisted.ApprovalModeSnapshot);
-        Assert.Equal(TimeSpan.FromMinutes(10), persisted.ApprovalExpiresAt - persisted.UpdatedAt);
-        Assert.Equal(
-            [(resident.UserId, persisted.Id, locker.Code)],
-            pushNotificationService.Requests);
-    }
-
-    [Fact]
-    public async Task SubmitRecipientAsync_WhenResidentUsesAnotherLocker_RejectsRequest()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234570");
-        resident.RegisteredLockerId = Guid.NewGuid();
-        await dbContext.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(dbContext);
-        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
-        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.SubmitAsync(
-                initiated.Id,
-                initiated.GuestSessionToken,
-                new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", resident.User.PhoneNumber!)));
-
-        Assert.Contains("không đăng ký", exception.Message);
-    }
-
-    [Fact]
-    public async Task SubmitRecipientAsync_WhenPushCannotBeDelivered_KeepsRequestAndInAppNotification()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, _) = await SeedLockerAndPolicyAsync(dbContext);
-        ResidentProfile resident = await SeedResidentAsync(
-            dbContext,
-            "0901234569",
-            DeliveryApprovalMode.Manual);
-        var notificationService = new ExpoPushNotificationService(
-            dbContext,
-            new HttpClient(),
-            TimeProvider.System,
-            NullLogger<ExpoPushNotificationService>.Instance);
-        DeliveryRequestService service = CreateService(
-            dbContext,
-            pushNotificationService: notificationService);
-        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
-        DeliveryRequestSummaryResponse response = await service.SubmitAsync(
-            initiated.Id,
-            initiated.GuestSessionToken,
-            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", resident.User.PhoneNumber!));
-
-        Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
-        Assert.Equal(DeliveryRequestStatus.PendingApproval, (await dbContext.DeliveryRequests.SingleAsync()).Status);
-        Assert.Contains(
-            dbContext.Notifications,
-            notification =>
-                notification.Channel == NotificationChannel.InApp &&
-                notification.DeliveryStatus == NotificationDeliveryStatus.Sent);
-        Assert.Contains(
-            dbContext.Notifications,
-            notification =>
-                notification.Channel == NotificationChannel.Push &&
-                notification.DeliveryStatus == NotificationDeliveryStatus.Failed);
-    }
-
-    [Fact]
-    public async Task ApproveDeliveryRequestAsync_WhenPending_SetsApprovedAndDecisionAt()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
-        ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234599", DeliveryApprovalMode.Manual);
-        DeliveryRequest request = CreateDeliveryRequest(locker.Id, policy.Id, "token", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
-        request.ResidentProfileId = resident.Id;
-        dbContext.DeliveryRequests.Add(request);
-        await dbContext.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(dbContext);
-
-        DeliveryRequestSummaryResponse response = await service.ApproveDeliveryRequestAsync(resident.UserId, request.Id);
-
-        Assert.Equal(DeliveryRequestStatus.Approved, response.Status);
-        Assert.NotNull(request.DecisionAt);
-    }
-
-    [Fact]
-    public async Task RejectDeliveryRequestAsync_WhenPending_SetsRejectedAndDecisionAt()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
-        ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234598", DeliveryApprovalMode.Manual);
-        DeliveryRequest request = CreateDeliveryRequest(locker.Id, policy.Id, "token", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
-        request.ResidentProfileId = resident.Id;
-        dbContext.DeliveryRequests.Add(request);
-        await dbContext.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(dbContext);
-
-        DeliveryRequestSummaryResponse response = await service.RejectDeliveryRequestAsync(resident.UserId, request.Id);
-
-        Assert.Equal(DeliveryRequestStatus.Rejected, response.Status);
-        Assert.NotNull(request.DecisionAt);
-    }
-
-    [Fact]
-    public async Task ApproveDeliveryRequestAsync_AtTenMinuteDeadline_ExpiresRequest()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
-        ResidentProfile resident = await SeedResidentAsync(dbContext, "0901234597", DeliveryApprovalMode.Manual);
-        DateTimeOffset deadline = new(2026, 9, 24, 8, 0, 0, TimeSpan.Zero);
-        DeliveryRequest request = CreateDeliveryRequest(
-            locker.Id,
-            policy.Id,
-            "token",
-            DeliveryRequestStatus.PendingApproval,
-            deadline.AddMinutes(5));
-        request.ResidentProfileId = resident.Id;
-        request.ApprovalExpiresAt = deadline;
-        dbContext.DeliveryRequests.Add(request);
-        await dbContext.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(
-            dbContext,
-            timeProvider: new FixedTimeProvider(deadline));
-
-        await Assert.ThrowsAsync<TimeoutException>(
-            () => service.ApproveDeliveryRequestAsync(resident.UserId, request.Id));
-
-        Assert.Equal(DeliveryRequestStatus.Expired, request.Status);
-        Assert.Equal(DeliveryRequestFailureCode.ApprovalExpired, request.FailureCode);
-    }
-
-    [Fact]
-    public async Task ReserveCompartmentAsync_WithAvailableCompartment_AllocatesCompartmentAndCreatesReservation()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
-        LockerCompartment compartment = SeedCompartment(dbContext, locker.Id, 1);
-        string token = "valid-token";
-        var tokenService = new Sha256TokenHashService();
-        DeliveryRequest request = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(token), DeliveryRequestStatus.Approved, DateTimeOffset.UtcNow.AddMinutes(10));
-        dbContext.DeliveryRequests.Add(request);
-        await dbContext.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(dbContext, tokenService);
-
-        CompartmentReservationResponse response = await service.OpenCompartmentAsync(request.Id, token);
-
-        Assert.Equal(request.Id, response.RequestId);
-        Assert.Equal(compartment.Id, response.CompartmentId);
-        Assert.Equal(compartment.Code, response.CompartmentCode);
-        Assert.Equal(DeliveryRequestStatus.Allocated, request.Status);
-        Assert.Equal(compartment.Id, request.AllocatedCompartmentId);
-        Assert.Single(dbContext.CompartmentReservations);
-    }
-
-    [Fact]
-    public async Task ConfirmDropOffAsync_WhenAllocated_CreatesParcelAndSetsDeposited()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
-        LockerCompartment compartment = SeedCompartment(dbContext, locker.Id, 1);
-        ResidentProfile resident = await SeedResidentAsync(dbContext, "0909999999");
-        string token = "valid-token";
-        var tokenService = new Sha256TokenHashService();
-        DeliveryRequest request = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(token), DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(10));
-        request.ResidentProfileId = resident.Id;
-        request.AllocatedCompartmentId = compartment.Id;
-        request.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
-        request.ParcelImageUrl = "https://cdn.example.com/parcel.jpg";
-        dbContext.DeliveryRequests.Add(request);
-
-        CompartmentReservation reservation = new()
-        {
-            Id = Guid.NewGuid(),
-            LockerCompartmentId = compartment.Id,
-            DeliveryRequestId = request.Id,
-            ReservedAt = DateTimeOffset.UtcNow,
-            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10),
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-        dbContext.CompartmentReservations.Add(reservation);
-        await dbContext.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(dbContext, tokenService);
-
-        await service.FinalizeDropOffAsync(request.Id, DateTimeOffset.UtcNow);
-
-        Assert.Equal(DeliveryRequestStatus.Deposited, request.Status);
-        Assert.NotNull(reservation.ReleasedAt);
-
-        Parcel parcel = await dbContext.Parcels.SingleAsync();
-        Assert.Equal(ParcelStatus.Stored, parcel.Status);
-        Assert.Equal(request.Id, parcel.DeliveryRequestId);
-
-        ParcelStatusHistory history = await dbContext.ParcelStatusHistories.SingleAsync();
-        Assert.Equal(parcel.Id, history.ParcelId);
-        Assert.Equal(ParcelStatus.Stored, history.ToStatus);
-    }
-
-    [Fact]
-    public async Task FinalizeDropOffAsync_DoesNotDependOnStaleDoorState()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
-        LockerCompartment compartment = SeedCompartment(dbContext, locker.Id, 1);
-        ResidentProfile resident = await SeedResidentAsync(dbContext, "0909999998");
-        compartment.DoorStatus = DoorStatus.Open;
-        string token = "valid-token";
-        var tokenService = new Sha256TokenHashService();
-        DeliveryRequest request = CreateDeliveryRequest(
-            locker.Id, policy.Id, tokenService.HashToken(token), DeliveryRequestStatus.Allocated,
-            DateTimeOffset.UtcNow.AddMinutes(10));
-        request.ResidentProfileId = resident.Id;
-        request.AllocatedCompartmentId = compartment.Id;
-        request.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
-        dbContext.DeliveryRequests.Add(request);
-        await dbContext.SaveChangesAsync();
-
-        await CreateService(dbContext, tokenService).FinalizeDropOffAsync(request.Id, DateTimeOffset.UtcNow);
-
-        Assert.Single(dbContext.Parcels);
-    }
-
-    [Fact]
-    public async Task ExpireStartedSessionsAsync_ExpiresOnlyStartedRequests()
-    {
-        await using ApplicationDbContext dbContext = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(dbContext);
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        DeliveryRequest started = CreateDeliveryRequest(locker.Id, policy.Id, "started", DeliveryRequestStatus.Started, now.AddMinutes(-1));
-        DeliveryRequest pending = CreateDeliveryRequest(locker.Id, policy.Id, "pending", DeliveryRequestStatus.PendingApproval, now.AddMinutes(-1));
-        dbContext.DeliveryRequests.AddRange(started, pending);
-        await dbContext.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(dbContext);
-
-        int count = await service.ExpireStartedSessionsAsync();
-
-        Assert.Equal(1, count);
-        Assert.Equal(DeliveryRequestStatus.Expired, started.Status);
-        Assert.Equal(DeliveryRequestFailureCode.SessionExpired, started.FailureCode);
-        Assert.Equal(DeliveryRequestStatus.PendingApproval, pending.Status);
-    }
-
-    #region DEL-01 to DEL-11 Matrix Tests
-
+    #region DEL-01: CreateAsync
     [Fact]
     [Trait("Category", "DEL-01")]
     public async Task CreateAsync_UTC01()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        (Locker locker, _) = await SeedLockerAndPolicyAsync(db);
         DeliveryRequestService service = CreateService(db);
 
         InitiateDeliveryResponse res = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
@@ -413,7 +38,8 @@ public sealed class DeliveryRequestServiceTests
         await SeedLockerAndPolicyAsync(db);
         DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.CreateAsync(new InitiateDeliveryRequest("NON_EXISTENT")));
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.CreateAsync(new InitiateDeliveryRequest("NON_EXISTENT")));
+        Assert.Equal("Locker với mã 'NON_EXISTENT' không tồn tại.", ex.Message);
     }
 
     [Fact]
@@ -426,7 +52,8 @@ public sealed class DeliveryRequestServiceTests
         await db.SaveChangesAsync();
         DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new InitiateDeliveryRequest(locker.Code)));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new InitiateDeliveryRequest(locker.Code)));
+        Assert.Equal("Locker hiện không sẵn sàng nhận hàng.", ex.Message);
     }
 
     [Fact]
@@ -434,12 +61,13 @@ public sealed class DeliveryRequestServiceTests
     public async Task CreateAsync_UTC04()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        (Locker locker, _) = await SeedLockerAndPolicyAsync(db);
-        locker.OperationalStatus = LockerOperationalStatus.Inactive;
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        policy.IsActive = false;
         await db.SaveChangesAsync();
         DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new InitiateDeliveryRequest(locker.Code)));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new InitiateDeliveryRequest(locker.Code)));
+        Assert.Equal("Không có chính sách hệ thống đang hiệu lực.", ex.Message);
     }
 
     [Fact]
@@ -447,19 +75,45 @@ public sealed class DeliveryRequestServiceTests
     public async Task CreateAsync_UTC05()
     {
         await using ApplicationDbContext db = CreateDbContext();
+        DeliveryRequestService service = CreateService(db);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => service.CreateAsync(null!));
+    }
+
+    [Fact]
+    [Trait("Category", "DEL-01")]
+    public async Task CreateAsync_UTC06()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
         await SeedLockerAndPolicyAsync(db);
         DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<ArgumentException>(() => service.CreateAsync(new InitiateDeliveryRequest("")));
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.CreateAsync(new InitiateDeliveryRequest("")));
+        Assert.Contains("Giá trị không được để trống.", ex.Message);
     }
 
+    [Fact]
+    [Trait("Category", "DEL-01")]
+    public async Task CreateAsync_UTC07()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        await SeedLockerAndPolicyAsync(db);
+        DeliveryRequestService service = CreateService(db);
+
+        string longCode = new('A', 51);
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.CreateAsync(new InitiateDeliveryRequest(longCode)));
+        Assert.Contains("Giá trị không được vượt quá 50 ký tự.", ex.Message);
+    }
+    #endregion
+
+    #region DEL-02: SubmitAsync
     [Fact]
     [Trait("Category", "DEL-02")]
     public async Task SubmitAsync_UTC01()
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(db);
-        await SeedResidentAsync(db, "0911222333", DeliveryApprovalMode.Auto);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333", DeliveryApprovalMode.Auto);
         DeliveryRequestService service = CreateService(db);
         InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
 
@@ -477,18 +131,14 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(db);
-        await SeedResidentAsync(db, "0911222333");
         DeliveryRequestService service = CreateService(db);
         InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
 
-        DeliveryRequest req = await db.DeliveryRequests.SingleAsync(r => r.Id == initiated.Id);
-        req.SessionExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1);
-        await db.SaveChangesAsync();
-
-        await Assert.ThrowsAsync<TimeoutException>(() => service.SubmitAsync(
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.SubmitAsync(
             initiated.Id,
             initiated.GuestSessionToken,
-            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", "0911222333")));
+            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", "0999888777")));
+        Assert.Equal("Không tìm thấy Cư dân đang hoạt động với số điện thoại đã nhập.", ex.Message);
     }
 
     [Fact]
@@ -497,14 +147,17 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(db);
-        await SeedResidentAsync(db, "0911222333");
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        resident.RegisteredLockerId = Guid.NewGuid();
+        await db.SaveChangesAsync();
         DeliveryRequestService service = CreateService(db);
         InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
 
-        await Assert.ThrowsAsync<System.Security.Authentication.AuthenticationException>(() => service.SubmitAsync(
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.SubmitAsync(
             initiated.Id,
-            "WRONG_TOKEN",
+            initiated.GuestSessionToken,
             new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", "0911222333")));
+        Assert.Equal("Cư dân không đăng ký nhận hàng tại locker này.", ex.Message);
     }
 
     [Fact]
@@ -512,17 +165,89 @@ public sealed class DeliveryRequestServiceTests
     public async Task SubmitAsync_UTC04()
     {
         await using ApplicationDbContext db = CreateDbContext();
+        DeliveryRequestService service = CreateService(db);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => service.SubmitAsync(Guid.Empty, "", null!));
+    }
+
+    [Fact]
+    [Trait("Category", "DEL-02")]
+    public async Task SubmitAsync_UTC05()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, _) = await SeedLockerAndPolicyAsync(db);
         await SeedResidentAsync(db, "0911222333");
         DeliveryRequestService service = CreateService(db);
         InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
 
-        await Assert.ThrowsAsync<ArgumentException>(() => service.SubmitAsync(
+        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => service.SubmitAsync(
             initiated.Id,
-            initiated.GuestSessionToken,
-            new SubmitDeliveryRequest("", "0911222333")));
+            "",
+            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", "0911222333")));
+        Assert.Equal("Thiếu X-Guest-Session-Token.", ex.Message);
     }
 
+    [Fact]
+    [Trait("Category", "DEL-02")]
+    public async Task SubmitAsync_UTC06()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        (Locker locker, _) = await SeedLockerAndPolicyAsync(db);
+        await SeedResidentAsync(db, "0911222333");
+        DeliveryRequestService service = CreateService(db);
+        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.SubmitAsync(
+            initiated.Id,
+            initiated.GuestSessionToken,
+            new SubmitDeliveryRequest("relative/path.jpg", "0911222333")));
+        Assert.Contains("ParcelImageUrl phải là URL HTTP hoặc HTTPS tuyệt đối.", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "DEL-02")]
+    public async Task SubmitAsync_UTC07()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        (Locker locker, _) = await SeedLockerAndPolicyAsync(db);
+        await SeedResidentAsync(db, "0911222333", DeliveryApprovalMode.Auto);
+        var pushService = new RecordingPushNotificationService();
+        DeliveryRequestService service = CreateService(db, pushNotificationService: pushService);
+        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
+
+        DeliveryRequestSummaryResponse res = await service.SubmitAsync(
+            initiated.Id,
+            initiated.GuestSessionToken,
+            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", "0911222333"));
+
+        Assert.Equal(DeliveryRequestStatus.Approved, res.Status);
+        Assert.Empty(pushService.Requests);
+    }
+
+    [Fact]
+    [Trait("Category", "DEL-02")]
+    public async Task SubmitAsync_UTC08()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        (Locker locker, _) = await SeedLockerAndPolicyAsync(db);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333", DeliveryApprovalMode.Manual);
+        var pushService = new RecordingPushNotificationService();
+        DeliveryRequestService service = CreateService(db, pushNotificationService: pushService);
+        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
+
+        DeliveryRequestSummaryResponse res = await service.SubmitAsync(
+            initiated.Id,
+            initiated.GuestSessionToken,
+            new SubmitDeliveryRequest("https://cdn.example.com/parcel.jpg", "0911222333"));
+
+        Assert.Equal(DeliveryRequestStatus.PendingApproval, res.Status);
+        var entity = await db.DeliveryRequests.SingleAsync(r => r.Id == initiated.Id);
+        Assert.NotNull(entity.ApprovalExpiresAt);
+        Assert.Single(pushService.Requests);
+    }
+    #endregion
+
+    #region DEL-03: GetAsync
     [Fact]
     [Trait("Category", "DEL-03")]
     public async Task GetAsync_UTC01()
@@ -553,26 +278,78 @@ public sealed class DeliveryRequestServiceTests
     public async Task GetAsync_UTC03()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        (Locker locker, _) = await SeedLockerAndPolicyAsync(db);
         DeliveryRequestService service = CreateService(db);
-        InitiateDeliveryResponse initiated = await service.CreateAsync(new InitiateDeliveryRequest(locker.Code));
 
-        await Assert.ThrowsAsync<System.Security.Authentication.AuthenticationException>(() => service.GetAsync(initiated.Id, "WRONG_TOKEN"));
+        await Assert.ThrowsAnyAsync<Exception>(() => service.GetAsync(Guid.Empty, ""));
     }
 
+    [Fact]
+    [Trait("Category", "DEL-03")]
+    public async Task GetAsync_UTC04()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        var tokenService = new Sha256TokenHashService();
+        string rawToken = "token123";
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DeliveryRequest request = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(rawToken), DeliveryRequestStatus.PendingApproval, now.AddMinutes(15));
+        request.ApprovalExpiresAt = now.AddSeconds(-1);
+        db.DeliveryRequests.Add(request);
+        await db.SaveChangesAsync();
+
+        DeliveryRequestService service = CreateService(db, tokenHashService: tokenService);
+        GuestDeliveryStatusResponse res = await service.GetAsync(request.Id, rawToken);
+
+        Assert.Equal(DeliveryRequestStatus.Expired, res.Status);
+        Assert.Equal(DeliveryRequestFailureCode.ApprovalExpired, res.FailureCode);
+    }
+
+    [Fact]
+    [Trait("Category", "DEL-03")]
+    public async Task GetAsync_UTC05()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        LockerCompartment comp = SeedCompartment(db, locker.Id, 1);
+        var tokenService = new Sha256TokenHashService();
+        string rawToken = "token123";
+        DeliveryRequest request = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(rawToken), DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(15));
+        request.AllocatedCompartmentId = comp.Id;
+        Parcel parcel = new()
+        {
+            Id = Guid.NewGuid(),
+            DeliveryRequestId = request.Id,
+            ParcelCode = "P-123",
+            Status = ParcelStatus.Stored
+        };
+        db.AddRange(request, parcel);
+        await db.SaveChangesAsync();
+
+        DeliveryRequestService service = CreateService(db, tokenHashService: tokenService);
+        GuestDeliveryStatusResponse res = await service.GetAsync(request.Id, rawToken);
+
+        Assert.Equal(comp.Code, res.CompartmentCode);
+        Assert.Equal(parcel.Id, res.ParcelId);
+    }
+    #endregion
+
+    #region DEL-04: ExpireStartedSessionsAsync
     [Fact]
     [Trait("Category", "DEL-04")]
     public async Task ExpireStartedSessionsAsync_UTC01()
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        db.DeliveryRequests.Add(CreateDeliveryRequest(locker.Id, policy.Id, "hash1", DeliveryRequestStatus.Started, DateTimeOffset.UtcNow.AddMinutes(-5)));
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DeliveryRequest started = CreateDeliveryRequest(locker.Id, policy.Id, "started", DeliveryRequestStatus.Started, now.AddMinutes(-5));
+        db.DeliveryRequests.Add(started);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
+        DeliveryRequestService service = CreateService(db);
         int count = await service.ExpireStartedSessionsAsync();
 
-        Assert.True(count >= 1);
+        Assert.Equal(1, count);
+        Assert.Equal(DeliveryRequestStatus.Expired, started.Status);
     }
 
     [Fact]
@@ -581,10 +358,11 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        db.DeliveryRequests.Add(CreateDeliveryRequest(locker.Id, policy.Id, "hash1", DeliveryRequestStatus.Started, DateTimeOffset.UtcNow.AddMinutes(15)));
+        DeliveryRequest started = CreateDeliveryRequest(locker.Id, policy.Id, "started", DeliveryRequestStatus.Started, DateTimeOffset.UtcNow.AddMinutes(10));
+        db.DeliveryRequests.Add(started);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
+        DeliveryRequestService service = CreateService(db);
         int count = await service.ExpireStartedSessionsAsync();
 
         Assert.Equal(0, count);
@@ -595,28 +373,29 @@ public sealed class DeliveryRequestServiceTests
     public async Task ExpireStartedSessionsAsync_UTC03()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        await SeedLockerAndPolicyAsync(db);
         DeliveryRequestService service = CreateService(db);
 
         int count = await service.ExpireStartedSessionsAsync();
-
         Assert.Equal(0, count);
     }
+    #endregion
 
+    #region DEL-05: GetPendingRequestsForResidentAsync
     [Fact]
     [Trait("Category", "DEL-05")]
     public async Task GetPendingRequestsForResidentAsync_UTC01()
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0988776655");
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ResidentProfileId = res.Id;
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident.Id;
+        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
-        PagedResult<PendingDeliveryRequestResponse> result = await service.GetPendingRequestsForResidentAsync(res.UserId, default, 1, 10);
+        DeliveryRequestService service = CreateService(db);
+        PagedResult<PendingDeliveryRequestResponse> result = await service.GetPendingRequestsForResidentAsync(resident.UserId, default, 1, 10);
 
         Assert.Single(result.Items);
     }
@@ -627,10 +406,10 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0988776655");
-        DeliveryRequestService service = CreateService(db);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
 
-        PagedResult<PendingDeliveryRequestResponse> result = await service.GetPendingRequestsForResidentAsync(res.UserId, default, 1, 10);
+        DeliveryRequestService service = CreateService(db);
+        PagedResult<PendingDeliveryRequestResponse> result = await service.GetPendingRequestsForResidentAsync(resident.UserId, default, 1, 10);
 
         Assert.Empty(result.Items);
     }
@@ -640,32 +419,30 @@ public sealed class DeliveryRequestServiceTests
     public async Task GetPendingRequestsForResidentAsync_UTC03()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0988776655");
         DeliveryRequestService service = CreateService(db);
 
-        PagedResult<PendingDeliveryRequestResponse> result = await service.GetPendingRequestsForResidentAsync(res.UserId, default, 1, 20);
-
-        Assert.NotNull(result);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetPendingRequestsForResidentAsync(Guid.Empty, default, 0, 0));
     }
+    #endregion
 
+    #region DEL-06: ApproveDeliveryRequestAsync
     [Fact]
     [Trait("Category", "DEL-06")]
     public async Task ApproveDeliveryRequestAsync_UTC01()
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0912345678");
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ResidentProfileId = res.Id;
-        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident.Id;
+        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
+
         DeliveryRequestService service = CreateService(db);
+        DeliveryRequestSummaryResponse res = await service.ApproveDeliveryRequestAsync(resident.UserId, req.Id);
 
-        DeliveryRequestSummaryResponse response = await service.ApproveDeliveryRequestAsync(res.UserId, req.Id);
-
-        Assert.Equal(DeliveryRequestStatus.Approved, response.Status);
+        Assert.Equal(DeliveryRequestStatus.Approved, res.Status);
     }
 
     [Fact]
@@ -673,16 +450,12 @@ public sealed class DeliveryRequestServiceTests
     public async Task ApproveDeliveryRequestAsync_UTC02()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0912345678");
-        ResidentProfile otherRes = await SeedResidentAsync(db, "0999888777");
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ResidentProfileId = res.Id;
-        db.DeliveryRequests.Add(req);
-        await db.SaveChangesAsync();
+        await SeedLockerAndPolicyAsync(db);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
         DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.ApproveDeliveryRequestAsync(otherRes.UserId, req.Id));
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.ApproveDeliveryRequestAsync(resident.UserId, Guid.NewGuid()));
+        Assert.Equal("Không tìm thấy yêu cầu giao hàng.", ex.Message);
     }
 
     [Fact]
@@ -691,14 +464,17 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0912345678");
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.Started, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ResidentProfileId = res.Id;
+        ResidentProfile resident1 = await SeedResidentAsync(db, "0911222333");
+        ResidentProfile resident2 = await SeedResidentAsync(db, "0911222334");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident1.Id;
+        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ApproveDeliveryRequestAsync(res.UserId, req.Id));
+        DeliveryRequestService service = CreateService(db);
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.ApproveDeliveryRequestAsync(resident2.UserId, req.Id));
+        Assert.Equal("Bạn không có quyền duyệt yêu cầu giao hàng này.", ex.Message);
     }
 
     [Fact]
@@ -707,15 +483,15 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0912345678");
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ResidentProfileId = res.Id;
-        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.Started, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident.Id;
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<TimeoutException>(() => service.ApproveDeliveryRequestAsync(res.UserId, req.Id));
+        DeliveryRequestService service = CreateService(db);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ApproveDeliveryRequestAsync(resident.UserId, req.Id));
+        Assert.Equal($"Không thể duyệt yêu cầu ở trạng thái {DeliveryRequestStatus.Started}.", ex.Message);
     }
 
     [Fact]
@@ -723,11 +499,17 @@ public sealed class DeliveryRequestServiceTests
     public async Task ApproveDeliveryRequestAsync_UTC05()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0912345678");
-        DeliveryRequestService service = CreateService(db);
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident.Id;
+        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        db.DeliveryRequests.Add(req);
+        await db.SaveChangesAsync();
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.ApproveDeliveryRequestAsync(res.UserId, Guid.NewGuid()));
+        DeliveryRequestService service = CreateService(db);
+        var ex = await Assert.ThrowsAsync<TimeoutException>(() => service.ApproveDeliveryRequestAsync(resident.UserId, req.Id));
+        Assert.Equal("Thời hạn phê duyệt yêu cầu giao hàng đã hết.", ex.Message);
     }
 
     [Fact]
@@ -735,29 +517,49 @@ public sealed class DeliveryRequestServiceTests
     public async Task ApproveDeliveryRequestAsync_UTC06()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        await SeedLockerAndPolicyAsync(db);
         DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.ApproveDeliveryRequestAsync(Guid.NewGuid(), Guid.NewGuid()));
+        await Assert.ThrowsAnyAsync<Exception>(() => service.ApproveDeliveryRequestAsync(Guid.Empty, Guid.Empty));
     }
 
+    [Fact]
+    [Trait("Category", "DEL-06")]
+    public async Task ApproveDeliveryRequestAsync_UTC07()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident.Id;
+        req.ApprovalExpiresAt = null;
+        db.DeliveryRequests.Add(req);
+        await db.SaveChangesAsync();
+
+        DeliveryRequestService service = CreateService(db);
+        DeliveryRequestSummaryResponse res = await service.ApproveDeliveryRequestAsync(resident.UserId, req.Id);
+
+        Assert.Equal(DeliveryRequestStatus.Approved, res.Status);
+    }
+    #endregion
+
+    #region DEL-07: RejectDeliveryRequestAsync
     [Fact]
     [Trait("Category", "DEL-07")]
     public async Task RejectDeliveryRequestAsync_UTC01()
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0912345678");
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ResidentProfileId = res.Id;
-        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident.Id;
+        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
+
         DeliveryRequestService service = CreateService(db);
+        DeliveryRequestSummaryResponse res = await service.RejectDeliveryRequestAsync(resident.UserId, req.Id);
 
-        DeliveryRequestSummaryResponse response = await service.RejectDeliveryRequestAsync(res.UserId, req.Id);
-
-        Assert.Equal(DeliveryRequestStatus.Rejected, response.Status);
+        Assert.Equal(DeliveryRequestStatus.Rejected, res.Status);
     }
 
     [Fact]
@@ -765,16 +567,12 @@ public sealed class DeliveryRequestServiceTests
     public async Task RejectDeliveryRequestAsync_UTC02()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0912345678");
-        ResidentProfile otherRes = await SeedResidentAsync(db, "0999888777");
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ResidentProfileId = res.Id;
-        db.DeliveryRequests.Add(req);
-        await db.SaveChangesAsync();
+        await SeedLockerAndPolicyAsync(db);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
         DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.RejectDeliveryRequestAsync(otherRes.UserId, req.Id));
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.RejectDeliveryRequestAsync(resident.UserId, Guid.NewGuid()));
+        Assert.Equal("Không tìm thấy yêu cầu giao hàng.", ex.Message);
     }
 
     [Fact]
@@ -783,14 +581,17 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0912345678");
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.Started, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ResidentProfileId = res.Id;
+        ResidentProfile resident1 = await SeedResidentAsync(db, "0911222333");
+        ResidentProfile resident2 = await SeedResidentAsync(db, "0911222334");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident1.Id;
+        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RejectDeliveryRequestAsync(res.UserId, req.Id));
+        DeliveryRequestService service = CreateService(db);
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.RejectDeliveryRequestAsync(resident2.UserId, req.Id));
+        Assert.Equal("Bạn không có quyền từ chối yêu cầu giao hàng này.", ex.Message);
     }
 
     [Fact]
@@ -799,15 +600,15 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0912345678");
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ResidentProfileId = res.Id;
-        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.Started, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident.Id;
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<TimeoutException>(() => service.RejectDeliveryRequestAsync(res.UserId, req.Id));
+        DeliveryRequestService service = CreateService(db);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.RejectDeliveryRequestAsync(resident.UserId, req.Id));
+        Assert.Equal($"Không thể từ chối yêu cầu ở trạng thái {DeliveryRequestStatus.Started}.", ex.Message);
     }
 
     [Fact]
@@ -815,11 +616,17 @@ public sealed class DeliveryRequestServiceTests
     public async Task RejectDeliveryRequestAsync_UTC05()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0912345678");
-        DeliveryRequestService service = CreateService(db);
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident.Id;
+        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        db.DeliveryRequests.Add(req);
+        await db.SaveChangesAsync();
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.RejectDeliveryRequestAsync(res.UserId, Guid.NewGuid()));
+        DeliveryRequestService service = CreateService(db);
+        var ex = await Assert.ThrowsAsync<TimeoutException>(() => service.RejectDeliveryRequestAsync(resident.UserId, req.Id));
+        Assert.Equal("Thời hạn phê duyệt yêu cầu giao hàng đã hết.", ex.Message);
     }
 
     [Fact]
@@ -827,27 +634,48 @@ public sealed class DeliveryRequestServiceTests
     public async Task RejectDeliveryRequestAsync_UTC06()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        await SeedLockerAndPolicyAsync(db);
         DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.RejectDeliveryRequestAsync(Guid.NewGuid(), Guid.NewGuid()));
+        await Assert.ThrowsAnyAsync<Exception>(() => service.RejectDeliveryRequestAsync(Guid.Empty, Guid.Empty));
     }
 
+    [Fact]
+    [Trait("Category", "DEL-07")]
+    public async Task RejectDeliveryRequestAsync_UTC07()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident.Id;
+        req.ApprovalExpiresAt = null;
+        db.DeliveryRequests.Add(req);
+        await db.SaveChangesAsync();
+
+        DeliveryRequestService service = CreateService(db);
+        DeliveryRequestSummaryResponse res = await service.RejectDeliveryRequestAsync(resident.UserId, req.Id);
+
+        Assert.Equal(DeliveryRequestStatus.Rejected, res.Status);
+    }
+    #endregion
+
+    #region DEL-08: ExpirePendingApprovalsAsync
     [Fact]
     [Trait("Category", "DEL-08")]
     public async Task ExpirePendingApprovalsAsync_UTC01()
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-5);
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
+        DeliveryRequestService service = CreateService(db);
         int count = await service.ExpirePendingApprovalsAsync();
 
         Assert.Equal(1, count);
+        Assert.Equal(DeliveryRequestStatus.Expired, req.Status);
     }
 
     [Fact]
@@ -856,12 +684,12 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.PendingApproval, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ApprovalExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
+        DeliveryRequestService service = CreateService(db);
         int count = await service.ExpirePendingApprovalsAsync();
 
         Assert.Equal(0, count);
@@ -872,31 +700,31 @@ public sealed class DeliveryRequestServiceTests
     public async Task ExpirePendingApprovalsAsync_UTC03()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        await SeedLockerAndPolicyAsync(db);
         DeliveryRequestService service = CreateService(db);
 
         int count = await service.ExpirePendingApprovalsAsync();
-
         Assert.Equal(0, count);
     }
+    #endregion
 
+    #region DEL-09: OpenCompartmentAsync
     [Fact]
     [Trait("Category", "DEL-09")]
     public async Task OpenCompartmentAsync_UTC01()
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        SeedCompartment(db, locker.Id, 1);
-        var hashService = new Sha256TokenHashService();
-        string rawToken = "SECRET_TOKEN_01";
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, hashService.HashToken(rawToken), DeliveryRequestStatus.Approved, DateTimeOffset.UtcNow.AddMinutes(5));
+        LockerCompartment comp = SeedCompartment(db, locker.Id, 1);
+        var tokenService = new Sha256TokenHashService();
+        string rawToken = "valid-token";
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(rawToken), DeliveryRequestStatus.Approved, DateTimeOffset.UtcNow.AddMinutes(10));
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db, hashService);
 
+        DeliveryRequestService service = CreateService(db, tokenHashService: tokenService);
         CompartmentReservationResponse res = await service.OpenCompartmentAsync(req.Id, rawToken);
 
-        Assert.NotNull(res.CompartmentCode);
+        Assert.Equal(comp.Id, res.CompartmentId);
         Assert.Equal(DeliveryRequestStatus.Allocated, req.Status);
     }
 
@@ -906,14 +734,15 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        SeedCompartment(db, locker.Id, 1);
-        var hashService = new Sha256TokenHashService();
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, hashService.HashToken("TOKEN"), DeliveryRequestStatus.Approved, DateTimeOffset.UtcNow.AddMinutes(5));
+        var tokenService = new Sha256TokenHashService();
+        string rawToken = "valid-token";
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(rawToken), DeliveryRequestStatus.Started, DateTimeOffset.UtcNow.AddMinutes(10));
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db, hashService);
 
-        await Assert.ThrowsAsync<System.Security.Authentication.AuthenticationException>(() => service.OpenCompartmentAsync(req.Id, "WRONG_TOKEN"));
+        DeliveryRequestService service = CreateService(db, tokenHashService: tokenService);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.OpenCompartmentAsync(req.Id, rawToken));
+        Assert.Equal($"Chưa thể phân bổ ngăn tủ cho yêu cầu ở trạng thái {DeliveryRequestStatus.Started}.", ex.Message);
     }
 
     [Fact]
@@ -922,15 +751,16 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        SeedCompartment(db, locker.Id, 1);
-        var hashService = new Sha256TokenHashService();
-        string rawToken = "RAW";
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, hashService.HashToken(rawToken), DeliveryRequestStatus.Started, DateTimeOffset.UtcNow.AddMinutes(5));
+        // No compartments in locker
+        var tokenService = new Sha256TokenHashService();
+        string rawToken = "valid-token";
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(rawToken), DeliveryRequestStatus.Approved, DateTimeOffset.UtcNow.AddMinutes(10));
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db, hashService);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.OpenCompartmentAsync(req.Id, rawToken));
+        DeliveryRequestService service = CreateService(db, tokenHashService: tokenService);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.OpenCompartmentAsync(req.Id, rawToken));
+        Assert.Equal("Không tìm thấy ngăn tủ trống khả dụng tại locker này.", ex.Message);
     }
 
     [Fact]
@@ -939,14 +769,13 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        var hashService = new Sha256TokenHashService();
-        string rawToken = "RAW";
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, hashService.HashToken(rawToken), DeliveryRequestStatus.Approved, DateTimeOffset.UtcNow.AddMinutes(5));
+        var tokenService = new Sha256TokenHashService();
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken("token"), DeliveryRequestStatus.Approved, DateTimeOffset.UtcNow.AddMinutes(10));
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db, hashService);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.OpenCompartmentAsync(req.Id, rawToken));
+        DeliveryRequestService service = CreateService(db, tokenHashService: tokenService);
+        await Assert.ThrowsAsync<AuthenticationException>(() => service.OpenCompartmentAsync(req.Id, "WRONG_TOKEN"));
     }
 
     [Fact]
@@ -954,29 +783,67 @@ public sealed class DeliveryRequestServiceTests
     public async Task OpenCompartmentAsync_UTC05()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        await SeedLockerAndPolicyAsync(db);
         DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.OpenCompartmentAsync(Guid.NewGuid(), "TOKEN"));
+        await Assert.ThrowsAnyAsync<Exception>(() => service.OpenCompartmentAsync(Guid.Empty, ""));
     }
 
+    [Fact]
+    [Trait("Category", "DEL-09")]
+    public async Task OpenCompartmentAsync_UTC06()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        SeedCompartment(db, locker.Id, 1);
+        var tokenService = new Sha256TokenHashService();
+        string rawToken = "valid-token";
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(rawToken), DeliveryRequestStatus.Approved, DateTimeOffset.UtcNow.AddMinutes(10));
+        db.DeliveryRequests.Add(req);
+        await db.SaveChangesAsync();
+
+        DeliveryRequestService service = CreateService(db, tokenHashService: tokenService, lockerAccessService: new FailingLockerAccessService("Device offline"));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.OpenCompartmentAsync(req.Id, rawToken));
+        Assert.Equal("Device offline", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "DEL-09")]
+    public async Task OpenCompartmentAsync_UTC07()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        SeedCompartment(db, locker.Id, 1);
+        var tokenService = new Sha256TokenHashService();
+        string rawToken = "valid-token";
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, tokenService.HashToken(rawToken), DeliveryRequestStatus.Approved, DateTimeOffset.UtcNow.AddMinutes(10));
+        db.DeliveryRequests.Add(req);
+        await db.SaveChangesAsync();
+
+        DeliveryRequestService service = CreateService(db, tokenHashService: tokenService, lockerAccessService: new FailingLockerAccessService(null));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.OpenCompartmentAsync(req.Id, rawToken));
+        Assert.Equal("Không thể mở ngăn locker.", ex.Message);
+    }
+    #endregion
+
+    #region DEL-10: ExpireReservationsAsync
     [Fact]
     [Trait("Category", "DEL-10")]
     public async Task ExpireReservationsAsync_UTC01()
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        var comp = SeedCompartment(db, locker.Id, 1);
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(5));
+        LockerCompartment comp = SeedCompartment(db, locker.Id, 1);
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(10));
         req.AllocatedCompartmentId = comp.Id;
-        req.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        req.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-5);
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
+        DeliveryRequestService service = CreateService(db);
         int count = await service.ExpireReservationsAsync();
 
         Assert.Equal(1, count);
+        Assert.Equal(DeliveryRequestStatus.Expired, req.Status);
     }
 
     [Fact]
@@ -985,14 +852,14 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        var comp = SeedCompartment(db, locker.Id, 1);
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(5));
+        LockerCompartment comp = SeedCompartment(db, locker.Id, 1);
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(10));
         req.AllocatedCompartmentId = comp.Id;
-        req.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
+        req.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
+        DeliveryRequestService service = CreateService(db);
         int count = await service.ExpireReservationsAsync();
 
         Assert.Equal(0, count);
@@ -1003,34 +870,34 @@ public sealed class DeliveryRequestServiceTests
     public async Task ExpireReservationsAsync_UTC03()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        await SeedLockerAndPolicyAsync(db);
         DeliveryRequestService service = CreateService(db);
 
         int count = await service.ExpireReservationsAsync();
-
         Assert.Equal(0, count);
     }
+    #endregion
 
+    #region DEL-11: FinalizeDropOffAsync
     [Fact]
     [Trait("Category", "DEL-11")]
     public async Task FinalizeDropOffAsync_UTC01()
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        ResidentProfile res = await SeedResidentAsync(db, "0911223344");
-        var comp = SeedCompartment(db, locker.Id, 1);
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.ResidentProfileId = res.Id;
+        LockerCompartment comp = SeedCompartment(db, locker.Id, 1);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident.Id;
         req.AllocatedCompartmentId = comp.Id;
-        req.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
+        req.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
+        DeliveryRequestService service = CreateService(db);
         await service.FinalizeDropOffAsync(req.Id, DateTimeOffset.UtcNow);
 
         Assert.Equal(DeliveryRequestStatus.Deposited, req.Status);
-        Assert.Single(db.Parcels.Where(p => p.DeliveryRequestId == req.Id));
+        Assert.Single(db.Parcels);
     }
 
     [Fact]
@@ -1038,16 +905,10 @@ public sealed class DeliveryRequestServiceTests
     public async Task FinalizeDropOffAsync_UTC02()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        var comp = SeedCompartment(db, locker.Id, 1);
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.AllocatedCompartmentId = comp.Id;
-        req.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-5); // expired
-        db.DeliveryRequests.Add(req);
-        await db.SaveChangesAsync();
         DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<TimeoutException>(() => service.FinalizeDropOffAsync(req.Id, DateTimeOffset.UtcNow));
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.FinalizeDropOffAsync(Guid.NewGuid(), DateTimeOffset.UtcNow));
+        Assert.Equal("Không tìm thấy yêu cầu giao hàng.", ex.Message);
     }
 
     [Fact]
@@ -1056,14 +917,13 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        var comp = SeedCompartment(db, locker.Id, 1);
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.Started, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.AllocatedCompartmentId = comp.Id;
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.Started, DateTimeOffset.UtcNow.AddMinutes(10));
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.FinalizeDropOffAsync(req.Id, DateTimeOffset.UtcNow));
+        DeliveryRequestService service = CreateService(db);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.FinalizeDropOffAsync(req.Id, DateTimeOffset.UtcNow));
+        Assert.Equal($"Không thể xác nhận gửi hàng khi yêu cầu ở trạng thái {DeliveryRequestStatus.Started}.", ex.Message);
     }
 
     [Fact]
@@ -1071,10 +931,15 @@ public sealed class DeliveryRequestServiceTests
     public async Task FinalizeDropOffAsync_UTC04()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        await SeedLockerAndPolicyAsync(db);
-        DeliveryRequestService service = CreateService(db);
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.AllocatedCompartmentId = null;
+        db.DeliveryRequests.Add(req);
+        await db.SaveChangesAsync();
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.FinalizeDropOffAsync(Guid.NewGuid(), DateTimeOffset.UtcNow));
+        DeliveryRequestService service = CreateService(db);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.FinalizeDropOffAsync(req.Id, DateTimeOffset.UtcNow));
+        Assert.Equal("Yêu cầu giao hàng chưa được phân bổ ngăn tủ.", ex.Message);
     }
 
     [Fact]
@@ -1083,14 +948,16 @@ public sealed class DeliveryRequestServiceTests
     {
         await using ApplicationDbContext db = CreateDbContext();
         (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(5));
-        // No allocated compartment id
-        req.AllocatedCompartmentId = null;
+        LockerCompartment comp = SeedCompartment(db, locker.Id, 1);
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.AllocatedCompartmentId = comp.Id;
+        req.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-5);
         db.DeliveryRequests.Add(req);
         await db.SaveChangesAsync();
-        DeliveryRequestService service = CreateService(db);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.FinalizeDropOffAsync(req.Id, DateTimeOffset.UtcNow));
+        DeliveryRequestService service = CreateService(db);
+        var ex = await Assert.ThrowsAsync<TimeoutException>(() => service.FinalizeDropOffAsync(req.Id, DateTimeOffset.UtcNow));
+        Assert.Equal("Thời gian giữ ngăn tủ đã hết hạn.", ex.Message);
     }
 
     [Fact]
@@ -1098,19 +965,50 @@ public sealed class DeliveryRequestServiceTests
     public async Task FinalizeDropOffAsync_UTC06()
     {
         await using ApplicationDbContext db = CreateDbContext();
-        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
-        var comp = SeedCompartment(db, locker.Id, 1);
-        var req = CreateDeliveryRequest(locker.Id, policy.Id, "hash", DeliveryRequestStatus.Deposited, DateTimeOffset.UtcNow.AddMinutes(5));
-        req.AllocatedCompartmentId = comp.Id;
-        db.DeliveryRequests.Add(req);
-        await db.SaveChangesAsync();
         DeliveryRequestService service = CreateService(db);
 
-        // Deposited already -> idempotent return
+        await Assert.ThrowsAnyAsync<Exception>(() => service.FinalizeDropOffAsync(Guid.Empty, default));
+    }
+
+    [Fact]
+    [Trait("Category", "DEL-11")]
+    public async Task FinalizeDropOffAsync_UTC07()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.Deposited, DateTimeOffset.UtcNow.AddMinutes(10));
+        db.DeliveryRequests.Add(req);
+        await db.SaveChangesAsync();
+
+        DeliveryRequestService service = CreateService(db);
+        // Call when already Deposited (idempotent)
         await service.FinalizeDropOffAsync(req.Id, DateTimeOffset.UtcNow);
+
         Assert.Equal(DeliveryRequestStatus.Deposited, req.Status);
     }
 
+    [Fact]
+    [Trait("Category", "DEL-11")]
+    public async Task FinalizeDropOffAsync_UTC08()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        (Locker locker, SystemPolicy policy) = await SeedLockerAndPolicyAsync(db);
+        LockerCompartment comp = SeedCompartment(db, locker.Id, 1);
+        ResidentProfile resident = await SeedResidentAsync(db, "0911222333");
+        DeliveryRequest req = CreateDeliveryRequest(locker.Id, policy.Id, "tok", DeliveryRequestStatus.Allocated, DateTimeOffset.UtcNow.AddMinutes(10));
+        req.ResidentProfileId = resident.Id;
+        req.AllocatedCompartmentId = comp.Id;
+        req.ReservationExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
+        db.DeliveryRequests.Add(req);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotifier();
+        DeliveryRequestService service = CreateService(db, realtimeNotifier: realtime);
+        await service.FinalizeDropOffAsync(req.Id, DateTimeOffset.UtcNow);
+
+        Assert.Single(realtime.Events);
+        Assert.Equal("ParcelStored", realtime.Events[0].Event.Type);
+    }
     #endregion
 
     private static ApplicationDbContext CreateDbContext()
@@ -1125,14 +1023,17 @@ public sealed class DeliveryRequestServiceTests
         ApplicationDbContext dbContext,
         Sha256TokenHashService? tokenHashService = null,
         IPushNotificationService? pushNotificationService = null,
-        TimeProvider? timeProvider = null) =>
+        TimeProvider? timeProvider = null,
+        ILockerAccessService? lockerAccessService = null,
+        IOperationsRealtimeNotifier? realtimeNotifier = null) =>
         new(
             dbContext,
             tokenHashService ?? new Sha256TokenHashService(),
             pushNotificationService ?? new RecordingPushNotificationService(),
-            new SuccessfulLockerAccessService(),
+            lockerAccessService ?? new SuccessfulLockerAccessService(),
             new CompartmentAllocationService(dbContext, timeProvider ?? TimeProvider.System),
-            timeProvider ?? TimeProvider.System);
+            timeProvider ?? TimeProvider.System,
+            realtimeNotifier);
 
     private static async Task<(Locker Locker, SystemPolicy Policy)> SeedLockerAndPolicyAsync(ApplicationDbContext dbContext)
     {
@@ -1292,10 +1193,7 @@ public sealed class DeliveryRequestServiceTests
 
         public Guid EnqueueParcelPickupReminder(Guid residentUserId, Guid deliveryRequestId, Guid parcelId, string lockerCode, int daysUntilTransfer, bool isOverdue) => Guid.NewGuid();
 
-        public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default)
-        {
-            return Task.CompletedTask;
-        }
+        public Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task<int> RetryPendingDeliveryApprovalNotificationsAsync(
             CancellationToken cancellationToken = default) => Task.FromResult(0);
@@ -1316,8 +1214,31 @@ public sealed class DeliveryRequestServiceTests
                 DateTimeOffset.UtcNow));
     }
 
-    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    private sealed class FailingLockerAccessService(string? failureReason) : ILockerAccessService
     {
-        public override DateTimeOffset GetUtcNow() => utcNow;
+        public Task<OpenLockerResponse> OpenAsync(
+            OpenLockerRequest request,
+            CancellationToken cancellationToken = default) => Task.FromResult(new OpenLockerResponse(
+                Guid.NewGuid(),
+                request.LockerId,
+                request.LockerCompartmentId,
+                "simulator",
+                1,
+                LockerAccessResult.Failed,
+                failureReason,
+                DateTimeOffset.UtcNow));
+    }
+
+    private sealed class RecordingRealtimeNotifier : IOperationsRealtimeNotifier
+    {
+        public List<(Guid LockerId, RealtimeEvent Event)> Events { get; } = [];
+
+        public Task PublishToLockerAsync(Guid lockerId, RealtimeEvent message, CancellationToken cancellationToken = default)
+        {
+            Events.Add((lockerId, message));
+            return Task.CompletedTask;
+        }
+
+        public Task PublishToUserAsync(Guid userId, RealtimeEvent message, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

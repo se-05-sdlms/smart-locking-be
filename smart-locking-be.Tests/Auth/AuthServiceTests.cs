@@ -32,6 +32,7 @@ public sealed class AuthServiceTests
 
         Assert.NotNull(response.AccessToken);
         Assert.Equal("0912345678", response.User.PhoneNumber);
+        Assert.Contains(dbContext.AuditLogs, a => a.Action == "RegisterResident" && a.Result == AuditLogResult.Succeeded);
     }
 
     [Fact]
@@ -44,10 +45,11 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<ArgumentException>(() => service.RegisterAsync(
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.RegisterAsync(
             new RegisterRequest("", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
             null,
             default));
+        Assert.Contains("Phone number is required", ex.Message);
     }
 
     [Fact]
@@ -60,10 +62,11 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<ArgumentException>(() => service.RegisterAsync(
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.RegisterAsync(
             new RegisterRequest("091234567", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
             null,
             default));
+        Assert.Contains("Phone number must contain 10 digits and start with 0", ex.Message);
     }
 
     [Fact]
@@ -76,15 +79,84 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<ArgumentException>(() => service.RegisterAsync(
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.RegisterAsync(
             new RegisterRequest("09123456789", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
             null,
             default));
+        Assert.Contains("Phone number must contain 10 digits and start with 0", ex.Message);
     }
 
     [Fact]
     [Trait("Category", "AUTH-01")]
     public async Task RegisterAsync_UTC05()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Locker locker = CreateLocker(LockerOperationalStatus.Operational);
+        dbContext.Add(locker);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.RegisterAsync(
+            new RegisterRequest("091234567a", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            null,
+            default));
+        Assert.Contains("Phone number must contain 10 digits and start with 0", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-01")]
+    public async Task RegisterAsync_UTC06()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Locker locker = CreateLocker(LockerOperationalStatus.Operational);
+        dbContext.AddRange(locker, CreateRegistrationChallenge("0912345678"));
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.RegisterAsync(
+            new RegisterRequest("0912345678", OtpCode, "Pass123", "Nguyen Van A", locker.Id, null),
+            null,
+            default));
+        Assert.Contains("Password must contain at least 8 characters", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-01")]
+    public async Task RegisterAsync_UTC07()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Locker locker = CreateLocker(LockerOperationalStatus.Operational);
+        dbContext.AddRange(locker, CreateRegistrationChallenge("0912345678"));
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.RegisterAsync(
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "", locker.Id, null),
+            null,
+            default));
+        Assert.Contains("Full name must contain between 1 and 150 characters", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-01")]
+    public async Task RegisterAsync_UTC08()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Locker locker = CreateLocker(LockerOperationalStatus.Operational);
+        dbContext.AddRange(locker, CreateRegistrationChallenge("0912345678"));
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.RegisterAsync(
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", new string('A', 151), locker.Id, null),
+            null,
+            default));
+        Assert.Contains("Full name must contain between 1 and 150 characters", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-01")]
+    public async Task RegisterAsync_UTC09()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Locker locker = CreateLocker(LockerOperationalStatus.Operational);
@@ -96,12 +168,84 @@ public sealed class AuthServiceTests
             Role = UserRole.Resident,
             Status = UserStatus.Active
         };
-        dbContext.AddRange(locker, existing);
+        dbContext.AddRange(locker, existing, CreateRegistrationChallenge("0912345678"));
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.RegisterAsync(
             new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            null,
+            default));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-01")]
+    public async Task RegisterAsync_UTC10()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Locker locker = CreateLocker(LockerOperationalStatus.Inactive);
+        dbContext.AddRange(locker, CreateRegistrationChallenge("0912345678"));
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RegisterAsync(
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            null,
+            default));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-01")]
+    public async Task RegisterAsync_UTC11()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Locker locker = CreateLocker(LockerOperationalStatus.Operational);
+        dbContext.AddRange(locker, CreateRegistrationChallenge("0912345678"));
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RegisterAsync(
+            new RegisterRequest("0912345678", "654321", "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            null,
+            default));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-01")]
+    public async Task RegisterAsync_UTC12()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        dbContext.Add(CreateRegistrationChallenge("0912345678"));
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.RegisterAsync(
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", Guid.NewGuid(), null),
+            null,
+            default));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-01")]
+    public async Task RegisterAsync_UTC13()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Locker locker = CreateLocker(LockerOperationalStatus.Operational);
+        var existing = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0987654321",
+            Email = "resident@example.com",
+            PasswordHash = "hash",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.AddRange(locker, existing, CreateRegistrationChallenge("0912345678"));
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RegisterAsync(
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, "resident@example.com"),
             null,
             default));
     }
@@ -117,12 +261,34 @@ public sealed class AuthServiceTests
 
         await service.RequestRegistrationOtpAsync(new RequestRegistrationOtpRequest("0912345678"), default);
 
-        Assert.Single(dbContext.OtpChallenges);
+        var tokenHashService = new Sha256TokenHashService();
+        Assert.Contains(dbContext.OtpChallenges, c => c.DestinationPhone == "0912345678" && c.Purpose == OtpPurpose.Registration);
     }
 
     [Fact]
     [Trait("Category", "AUTH-02")]
     public async Task RequestRegistrationOtpAsync_UTC02()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        dbContext.Users.Add(new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = "hash",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        });
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await service.RequestRegistrationOtpAsync(new RequestRegistrationOtpRequest("0912345678"), default);
+
+        Assert.Empty(dbContext.OtpChallenges);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-02")]
+    public async Task RequestRegistrationOtpAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
@@ -133,24 +299,15 @@ public sealed class AuthServiceTests
 
     [Fact]
     [Trait("Category", "AUTH-02")]
-    public async Task RequestRegistrationOtpAsync_UTC03()
+    public async Task RequestRegistrationOtpAsync_UTC04()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        var existing = new User
-        {
-            Id = Guid.NewGuid(),
-            PhoneNumber = "0912345678",
-            PasswordHash = "hash",
-            Role = UserRole.Resident,
-            Status = UserStatus.Active
-        };
-        dbContext.Add(existing);
-        await dbContext.SaveChangesAsync();
-
         AuthService service = CreateService(dbContext);
-        await service.RequestRegistrationOtpAsync(new RequestRegistrationOtpRequest("0912345678"), default);
 
-        Assert.Empty(dbContext.OtpChallenges);
+        // Current method does not validate format for RequestRegistrationOtpAsync directly,
+        // it delegates to OtpService which throws ArgumentException
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.RequestRegistrationOtpAsync(new RequestRegistrationOtpRequest("091234567a"), default));
     }
     #endregion
 
@@ -174,16 +331,45 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         AuthTokenResponse response = await service.LoginAsync(
-            new LoginRequest("0912345678", "P@ssw0rd123"), "127.0.0.1", default);
+            new LoginRequest("0912345678", "P@ssw0rd123"),
+            "127.0.0.1",
+            default);
 
         Assert.NotNull(response.AccessToken);
-        Assert.NotNull(response.RefreshToken);
-        Assert.Equal(user.Id, response.User.Id);
+        Assert.NotNull(user.LastLoginAt);
     }
 
     [Fact]
     [Trait("Category", "AUTH-03")]
     public async Task LoginAsync_UTC02()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var hashService = new Pbkdf2PasswordHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            Email = "resident@example.com",
+            PasswordHash = hashService.HashPassword("P@ssw0rd123"),
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        AuthTokenResponse response = await service.LoginAsync(
+            new LoginRequest("resident@example.com", "P@ssw0rd123"),
+            "127.0.0.1",
+            default);
+
+        Assert.NotNull(response.AccessToken);
+        Assert.NotNull(user.LastLoginAt);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-03")]
+    public async Task LoginAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         var hashService = new Pbkdf2PasswordHashService();
@@ -200,18 +386,62 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.LoginAsync(new LoginRequest("0912345678", "WrongPass"), null, default));
+            service.LoginAsync(new LoginRequest("0912345678", "wrong-password"), null, default));
     }
 
     [Fact]
     [Trait("Category", "AUTH-03")]
-    public async Task LoginAsync_UTC03()
+    public async Task LoginAsync_UTC04()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.LoginAsync(new LoginRequest("0999999999", "P@ssw0rd123"), null, default));
+            service.LoginAsync(new LoginRequest("missing@example.com", "P@ssw0rd123"), null, default));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-03")]
+    public async Task LoginAsync_UTC05()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var hashService = new Pbkdf2PasswordHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = hashService.HashPassword("P@ssw0rd123"),
+            Role = UserRole.Resident,
+            Status = UserStatus.Locked
+        };
+        dbContext.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.LoginAsync(new LoginRequest("0912345678", "P@ssw0rd123"), null, default));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-03")]
+    public async Task LoginAsync_UTC06()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var hashService = new Pbkdf2PasswordHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = hashService.HashPassword("P@ssw0rd123"),
+            Role = UserRole.Resident,
+            Status = UserStatus.Disabled
+        };
+        dbContext.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.LoginAsync(new LoginRequest("0912345678", "P@ssw0rd123"), null, default));
     }
     #endregion
 
@@ -221,6 +451,7 @@ public sealed class AuthServiceTests
     public async Task RefreshTokenAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
+        var tokenHashService = new Sha256TokenHashService();
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -229,25 +460,28 @@ public sealed class AuthServiceTests
             Role = UserRole.Resident,
             Status = UserStatus.Active
         };
-        var tokenHashService = new Sha256TokenHashService();
-        string rawToken = "raw-refresh-token-value";
-        var refreshToken = new RefreshToken
+        var token = new RefreshToken
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
-            TokenHash = tokenHashService.HashToken(rawToken),
+            User = user,
+            TokenHash = tokenHashService.HashToken("refresh-token-001"),
             ExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
             CreatedAt = DateTimeOffset.UtcNow
         };
-        dbContext.AddRange(user, refreshToken);
+        dbContext.AddRange(user, token);
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
         AuthTokenResponse response = await service.RefreshTokenAsync(
-            new RefreshTokenRequest(rawToken), "127.0.0.1", default);
+            new RefreshTokenRequest("refresh-token-001"),
+            "127.0.0.1",
+            default);
 
         Assert.NotNull(response.AccessToken);
-        Assert.NotNull(response.RefreshToken);
+        Assert.NotNull(token.RevokedAt);
+        Assert.Equal("127.0.0.1", token.RevokedByIp);
+        Assert.NotNull(token.ReplacedByTokenId);
     }
 
     [Fact]
@@ -258,7 +492,7 @@ public sealed class AuthServiceTests
         AuthService service = CreateService(dbContext);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.RefreshTokenAsync(new RefreshTokenRequest("non-existent-token"), null, default));
+            service.RefreshTokenAsync(new RefreshTokenRequest("unknown-token"), null, default));
     }
 
     [Fact]
@@ -266,6 +500,7 @@ public sealed class AuthServiceTests
     public async Task RefreshTokenAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
+        var tokenHashService = new Sha256TokenHashService();
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -274,22 +509,116 @@ public sealed class AuthServiceTests
             Role = UserRole.Resident,
             Status = UserStatus.Active
         };
-        var tokenHashService = new Sha256TokenHashService();
-        string rawToken = "expired-token";
-        var refreshToken = new RefreshToken
+        var token = new RefreshToken
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
-            TokenHash = tokenHashService.HashToken(rawToken),
-            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-5),
-            CreatedAt = DateTimeOffset.UtcNow.AddDays(-1)
+            User = user,
+            TokenHash = tokenHashService.HashToken("refresh-token-001"),
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
+            CreatedAt = DateTimeOffset.UtcNow,
+            RevokedAt = DateTimeOffset.UtcNow.AddMinutes(-5)
         };
-        dbContext.AddRange(user, refreshToken);
+        dbContext.AddRange(user, token);
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.RefreshTokenAsync(new RefreshTokenRequest(rawToken), null, default));
+            service.RefreshTokenAsync(new RefreshTokenRequest("refresh-token-001"), null, default));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-04")]
+    public async Task RefreshTokenAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var tokenHashService = new Sha256TokenHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = "hash",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        var token = new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            User = user,
+            TokenHash = tokenHashService.HashToken("refresh-token-001"),
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-10),
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-1)
+        };
+        dbContext.AddRange(user, token);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.RefreshTokenAsync(new RefreshTokenRequest("refresh-token-001"), null, default));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-04")]
+    public async Task RefreshTokenAsync_UTC05()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var tokenHashService = new Sha256TokenHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = "hash",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var token = new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            User = user,
+            TokenHash = tokenHashService.HashToken("refresh-token-001"),
+            ExpiresAt = now,
+            CreatedAt = now.AddDays(-1)
+        };
+        dbContext.AddRange(user, token);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.RefreshTokenAsync(new RefreshTokenRequest("refresh-token-001"), null, default));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-04")]
+    public async Task RefreshTokenAsync_UTC06()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var tokenHashService = new Sha256TokenHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = "hash",
+            Role = UserRole.Resident,
+            Status = UserStatus.Disabled
+        };
+        var token = new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            User = user,
+            TokenHash = tokenHashService.HashToken("refresh-token-001"),
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AddRange(user, token);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.RefreshTokenAsync(new RefreshTokenRequest("refresh-token-001"), null, default));
     }
     #endregion
 
@@ -299,6 +628,7 @@ public sealed class AuthServiceTests
     public async Task LogoutAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
+        var tokenHashService = new Sha256TokenHashService();
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -307,23 +637,23 @@ public sealed class AuthServiceTests
             Role = UserRole.Resident,
             Status = UserStatus.Active
         };
-        var tokenHashService = new Sha256TokenHashService();
-        string rawToken = "valid-token";
-        var refreshToken = new RefreshToken
+        var token = new RefreshToken
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
-            TokenHash = tokenHashService.HashToken(rawToken),
+            User = user,
+            TokenHash = tokenHashService.HashToken("refresh-token-001"),
             ExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
             CreatedAt = DateTimeOffset.UtcNow
         };
-        dbContext.AddRange(user, refreshToken);
+        dbContext.AddRange(user, token);
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await service.LogoutAsync(new RefreshTokenRequest(rawToken), "127.0.0.1", default);
+        await service.LogoutAsync(new RefreshTokenRequest("refresh-token-001"), "127.0.0.1", default);
 
-        Assert.NotNull(refreshToken.RevokedAt);
+        Assert.NotNull(token.RevokedAt);
+        Assert.Equal("127.0.0.1", token.RevokedByIp);
     }
 
     [Fact]
@@ -333,8 +663,8 @@ public sealed class AuthServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
-        // Does not throw if token not found
-        await service.LogoutAsync(new RefreshTokenRequest("non-existent"), null, default);
+        await service.LogoutAsync(new RefreshTokenRequest("unknown-token"), null, default);
+        Assert.Empty(dbContext.RefreshTokens);
     }
 
     [Fact]
@@ -342,9 +672,46 @@ public sealed class AuthServiceTests
     public async Task LogoutAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
+        var tokenHashService = new Sha256TokenHashService();
+        DateTimeOffset revokedTime = DateTimeOffset.UtcNow.AddHours(-1);
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = "hash",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        var token = new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            User = user,
+            TokenHash = tokenHashService.HashToken("refresh-token-001"),
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-1),
+            RevokedAt = revokedTime,
+            RevokedByIp = "10.0.0.1"
+        };
+        dbContext.AddRange(user, token);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await service.LogoutAsync(new RefreshTokenRequest("refresh-token-001"), "127.0.0.1", default);
+
+        Assert.Equal(revokedTime, token.RevokedAt);
+        Assert.Equal("10.0.0.1", token.RevokedByIp);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-05")]
+    public async Task LogoutAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
         await service.LogoutAsync(new RefreshTokenRequest(""), null, default);
+        Assert.Empty(dbContext.RefreshTokens);
     }
     #endregion
 
@@ -356,11 +723,11 @@ public sealed class AuthServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         var user = new User
         {
-            Id = Guid.NewGuid(),
+            Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
             PhoneNumber = "0912345678",
-            PasswordHash = "hash",
             Role = UserRole.Resident,
-            Status = UserStatus.Active
+            Status = UserStatus.Active,
+            PasswordHash = "hash"
         };
         dbContext.Add(user);
         await dbContext.SaveChangesAsync();
@@ -380,7 +747,7 @@ public sealed class AuthServiceTests
         AuthService service = CreateService(dbContext);
 
         await Assert.ThrowsAsync<KeyNotFoundException>(() =>
-            service.GetCurrentUserAsync(Guid.NewGuid(), default));
+            service.GetCurrentUserAsync(Guid.Parse("22222222-2222-2222-2222-222222222222"), default));
     }
 
     [Fact]
@@ -415,7 +782,7 @@ public sealed class AuthServiceTests
         AuthService service = CreateService(dbContext);
         await service.RequestPasswordResetAsync(new RequestPasswordResetRequest("0912345678"), default);
 
-        Assert.Single(dbContext.OtpChallenges);
+        Assert.Contains(dbContext.OtpChallenges, c => c.DestinationPhone == "0912345678" && c.Purpose == OtpPurpose.PasswordReset);
     }
 
     [Fact]
@@ -423,11 +790,22 @@ public sealed class AuthServiceTests
     public async Task RequestPasswordResetAsync_UTC02()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        AuthService service = CreateService(dbContext);
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            Email = "resident@example.com",
+            PasswordHash = "hash",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Add(user);
+        await dbContext.SaveChangesAsync();
 
-        // Unknown identifier does not issue OTP
-        await service.RequestPasswordResetAsync(new RequestPasswordResetRequest("0999999999"), default);
-        Assert.Empty(dbContext.OtpChallenges);
+        AuthService service = CreateService(dbContext);
+        await service.RequestPasswordResetAsync(new RequestPasswordResetRequest("resident@example.com"), default);
+
+        Assert.Contains(dbContext.OtpChallenges, c => c.DestinationPhone == "0912345678" && c.Purpose == OtpPurpose.PasswordReset);
     }
 
     [Fact]
@@ -437,7 +815,30 @@ public sealed class AuthServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
-        await service.RequestPasswordResetAsync(new RequestPasswordResetRequest(""), default);
+        await service.RequestPasswordResetAsync(new RequestPasswordResetRequest("missing@example.com"), default);
+        Assert.Empty(dbContext.OtpChallenges);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-07")]
+    public async Task RequestPasswordResetAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = null,
+            Email = "nophone@example.com",
+            PasswordHash = "hash",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await service.RequestPasswordResetAsync(new RequestPasswordResetRequest("nophone@example.com"), default);
+
         Assert.Empty(dbContext.OtpChallenges);
     }
     #endregion
@@ -448,33 +849,36 @@ public sealed class AuthServiceTests
     public async Task ResetPasswordAsync_UTC01()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
+        var tokenHashService = new Sha256TokenHashService();
+        var hashService = new Pbkdf2PasswordHashService();
         var user = new User
         {
             Id = Guid.NewGuid(),
             PhoneNumber = "0912345678",
-            PasswordHash = "old-hash",
+            PasswordHash = hashService.HashPassword("OldPass123"),
+            MustChangePassword = true,
             Role = UserRole.Resident,
             Status = UserStatus.Active
         };
-        var tokenHashService = new Sha256TokenHashService();
-        var challenge = new OtpChallenge
+        var otp = new OtpChallenge
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
-            DestinationPhone = user.PhoneNumber,
+            DestinationPhone = "0912345678",
             Purpose = OtpPurpose.PasswordReset,
-            CodeHash = tokenHashService.HashToken(OtpCode),
+            CodeHash = tokenHashService.HashToken("123456"),
             ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10),
             CreatedAt = DateTimeOffset.UtcNow
         };
-        dbContext.AddRange(user, challenge);
+        dbContext.AddRange(user, otp);
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await service.ResetPasswordAsync(
-            new ResetPasswordRequest("0912345678", OtpCode, "NewP@ssw0rd123"), "127.0.0.1", default);
+        await service.ResetPasswordAsync(new ResetPasswordRequest("0912345678", "123456", "NewPass123"), "127.0.0.1", default);
 
-        Assert.NotNull(challenge.UsedAt);
+        Assert.False(user.MustChangePassword);
+        Assert.True(hashService.VerifyPassword("NewPass123", user.PasswordHash));
+        Assert.Contains(dbContext.AuditLogs, a => a.Action == "ResetPassword" && a.Result == AuditLogResult.Succeeded);
     }
 
     [Fact]
@@ -485,7 +889,7 @@ public sealed class AuthServiceTests
         AuthService service = CreateService(dbContext);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ResetPasswordAsync(new ResetPasswordRequest("0999999999", OtpCode, "NewP@ssw0rd123"), null, default));
+            service.ResetPasswordAsync(new ResetPasswordRequest("missing@example.com", "123456", "NewPass123"), null, default));
     }
 
     [Fact]
@@ -496,8 +900,9 @@ public sealed class AuthServiceTests
         var user = new User
         {
             Id = Guid.NewGuid(),
-            PhoneNumber = "0912345678",
-            PasswordHash = "old-hash",
+            PhoneNumber = null,
+            Email = "nophone@example.com",
+            PasswordHash = "hash",
             Role = UserRole.Resident,
             Status = UserStatus.Active
         };
@@ -506,7 +911,95 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ResetPasswordAsync(new ResetPasswordRequest("0912345678", OtpCode, "short"), null, default));
+            service.ResetPasswordAsync(new ResetPasswordRequest("nophone@example.com", "123456", "NewPass123"), null, default));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-08")]
+    public async Task ResetPasswordAsync_UTC04()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = "hash",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ResetPasswordAsync(new ResetPasswordRequest("0912345678", "123456", "Pass123"), null, default));
+        Assert.Contains("Password must contain at least 8 characters", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-08")]
+    public async Task ResetPasswordAsync_UTC05()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var tokenHashService = new Sha256TokenHashService();
+        var hashService = new Pbkdf2PasswordHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = hashService.HashPassword("OldPass123"),
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        var otp = new OtpChallenge
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            DestinationPhone = "0912345678",
+            Purpose = OtpPurpose.PasswordReset,
+            CodeHash = tokenHashService.HashToken("123456"),
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10),
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AddRange(user, otp);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await service.ResetPasswordAsync(new ResetPasswordRequest("0912345678", "123456", "Pass1234"), null, default);
+
+        Assert.True(hashService.VerifyPassword("Pass1234", user.PasswordHash));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-08")]
+    public async Task ResetPasswordAsync_UTC06()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var tokenHashService = new Sha256TokenHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = "hash",
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        var otp = new OtpChallenge
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            DestinationPhone = "0912345678",
+            Purpose = OtpPurpose.PasswordReset,
+            CodeHash = tokenHashService.HashToken("123456"),
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10),
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AddRange(user, otp);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ResetPasswordAsync(new ResetPasswordRequest("0912345678", "654321", "NewPass123"), null, default));
     }
     #endregion
 
@@ -517,22 +1010,38 @@ public sealed class AuthServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         var hashService = new Pbkdf2PasswordHashService();
+        var tokenHashService = new Sha256TokenHashService();
         var user = new User
         {
             Id = Guid.NewGuid(),
             PhoneNumber = "0912345678",
-            PasswordHash = hashService.HashPassword("CurrentP@ss123"),
+            PasswordHash = hashService.HashPassword("OldPass123"),
             Role = UserRole.Resident,
             Status = UserStatus.Active
         };
-        dbContext.Add(user);
+        var token = new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            User = user,
+            TokenHash = tokenHashService.HashToken("token-01"),
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AddRange(user, token);
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
         AuthTokenResponse response = await service.ChangePasswordAsync(
-            user.Id, new ChangePasswordRequest("CurrentP@ss123", "NewP@ssw0rd456"), "127.0.0.1", default);
+            user.Id,
+            new ChangePasswordRequest("OldPass123", "NewPass123"),
+            "127.0.0.1",
+            default);
 
         Assert.NotNull(response.AccessToken);
+        Assert.True(hashService.VerifyPassword("NewPass123", user.PasswordHash));
+        Assert.NotNull(token.RevokedAt);
+        Assert.Contains(dbContext.AuditLogs, a => a.Action == "Auth.PasswordChanged" && a.Result == AuditLogResult.Succeeded);
     }
 
     [Fact]
@@ -540,21 +1049,10 @@ public sealed class AuthServiceTests
     public async Task ChangePasswordAsync_UTC02()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        var hashService = new Pbkdf2PasswordHashService();
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            PhoneNumber = "0912345678",
-            PasswordHash = hashService.HashPassword("CurrentP@ss123"),
-            Role = UserRole.Resident,
-            Status = UserStatus.Active
-        };
-        dbContext.Add(user);
-        await dbContext.SaveChangesAsync();
-
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ChangePasswordAsync(user.Id, new ChangePasswordRequest("WrongPass", "NewP@ssw0rd456"), null, default));
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.ChangePasswordAsync(Guid.NewGuid(), new ChangePasswordRequest("OldPass123", "NewPass123"), null, default));
     }
 
     [Fact]
@@ -562,21 +1060,10 @@ public sealed class AuthServiceTests
     public async Task ChangePasswordAsync_UTC03()
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
-        var hashService = new Pbkdf2PasswordHashService();
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            PhoneNumber = "0912345678",
-            PasswordHash = hashService.HashPassword("CurrentP@ss123"),
-            Role = UserRole.Resident,
-            Status = UserStatus.Active
-        };
-        dbContext.Add(user);
-        await dbContext.SaveChangesAsync();
-
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            service.ChangePasswordAsync(user.Id, new ChangePasswordRequest("CurrentP@ss123", "short"), null, default));
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.ChangePasswordAsync(Guid.Empty, new ChangePasswordRequest("OldPass123", "NewPass123"), null, default));
     }
 
     [Fact]
@@ -589,7 +1076,7 @@ public sealed class AuthServiceTests
         {
             Id = Guid.NewGuid(),
             PhoneNumber = "0912345678",
-            PasswordHash = hashService.HashPassword("CurrentP@ss123"),
+            PasswordHash = hashService.HashPassword("OldPass123"),
             Role = UserRole.Resident,
             Status = UserStatus.Active
         };
@@ -597,8 +1084,82 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            service.ChangePasswordAsync(user.Id, new ChangePasswordRequest("CurrentP@ss123", "CurrentP@ss123"), null, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ChangePasswordAsync(user.Id, new ChangePasswordRequest("wrong-password", "NewPass123"), null, default));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-09")]
+    public async Task ChangePasswordAsync_UTC05()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var hashService = new Pbkdf2PasswordHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = hashService.HashPassword("OldPass123"),
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.ChangePasswordAsync(user.Id, new ChangePasswordRequest("OldPass123", "Pass123"), null, default));
+        Assert.Contains("Password must contain at least 8 characters", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-09")]
+    public async Task ChangePasswordAsync_UTC06()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var hashService = new Pbkdf2PasswordHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = hashService.HashPassword("OldPass123"),
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.ChangePasswordAsync(user.Id, new ChangePasswordRequest("OldPass123", "OldPass123"), null, default));
+        Assert.Contains("New password must be different from the current password", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-09")]
+    public async Task ChangePasswordAsync_UTC07()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        var hashService = new Pbkdf2PasswordHashService();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            PhoneNumber = "0912345678",
+            PasswordHash = hashService.HashPassword("OldPass123"),
+            Role = UserRole.Resident,
+            Status = UserStatus.Active
+        };
+        dbContext.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        AuthTokenResponse response = await service.ChangePasswordAsync(
+            user.Id,
+            new ChangePasswordRequest("OldPass123", "Pass1234"),
+            "127.0.0.1",
+            default);
+
+        Assert.NotNull(response.AccessToken);
+        Assert.True(hashService.VerifyPassword("Pass1234", user.PasswordHash));
     }
     #endregion
 

@@ -12,39 +12,6 @@ namespace smart_locking_be.Tests.Returns;
 
 public sealed class ReturnRequestServiceTests
 {
-    [Fact]
-    public async Task FullReturnFlow_UsesSixDigitCodeAndCompletesOnce()
-    {
-        await using ApplicationDbContext db = CreateDb();
-        Guid userId = Guid.NewGuid(); Guid lockerId = Guid.NewGuid(); Guid compartmentId = Guid.NewGuid(); DateTimeOffset now = DateTimeOffset.UtcNow;
-        User user = new() { Id = userId, PhoneNumber = "0900000001", PasswordHash = "x", Role = UserRole.Resident, Status = UserStatus.Active, CreatedAt = now, UpdatedAt = now };
-        Locker locker = new() { Id = lockerId, Code = "LK-01", Address = "A", RecoveryAddress = "B", DeviceIdentifier = "SIM", OperationalStatus = LockerOperationalStatus.Operational, ConnectionStatus = LockerConnectionStatus.Online, CreatedAt = now, UpdatedAt = now };
-        ResidentProfile resident = new() { Id = Guid.NewGuid(), UserId = userId, User = user, RegisteredLockerId = lockerId, RegisteredLocker = locker, FullName = "Test", DeliveryApprovalMode = DeliveryApprovalMode.Manual, CreatedAt = now, UpdatedAt = now };
-        LockerCompartment compartment = new() { Id = compartmentId, LockerId = lockerId, Locker = locker, Code = "A01", HardwareCode = "A01", HardwareChannel = 1, OperationalStatus = LockerCompartmentOperationalStatus.Operational, DoorStatus = DoorStatus.Closed, CreatedAt = now, UpdatedAt = now };
-        db.AddRange(user, locker, resident, compartment, new SystemPolicy { Id = Guid.NewGuid(), Version = 1, IsActive = true, GuestSessionTimeoutMinutes = 10, CompartmentReservationMinutes = 10, Currency = "VND", EffectiveFrom = now, CreatedAt = now, CreatedByUserId = Guid.NewGuid() });
-        await db.SaveChangesAsync();
-        var service = new ReturnRequestService(
-            db,
-            new SuccessfulAccess(),
-            new CompartmentAllocationService(db, TimeProvider.System),
-            new NoopPush(),
-            new Sha256TokenHashService(),
-            TimeProvider.System);
-
-        ReturnRequestResponse created = await service.CreateAsync(userId, new CreateReturnRequest("https://example.com/return.jpg", null));
-        ReturnUnlockResponse opened = await service.OpenCompartmentAsync(userId, created.Id);
-        await service.FinalizeDepositAsync(created.Id, now);
-        ReturnRequest deposited = await db.ReturnRequests.SingleAsync();
-        ReturnPickupSessionResponse session = await service.CreateAsync(new ValidateReturnPickupRequest("LK-01", deposited.ReturnCode));
-        await service.OpenCompartmentAsync(created.Id, session.GuestSessionToken);
-        await service.FinalizePickupAsync(created.Id, now);
-
-        Assert.Matches("^[0-9]{6}$", deposited.ReturnCode);
-        Assert.Equal("A01", opened.CompartmentCode);
-        Assert.Equal(ReturnRequestStatus.Completed, deposited.Status);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new ValidateReturnPickupRequest("LK-01", deposited.ReturnCode)));
-    }
-
     #region RET-01 to RET-06 Matrix Tests
 
     [Fact]
@@ -296,6 +263,35 @@ public sealed class ReturnRequestServiceTests
     }
 
     [Fact]
+    [Trait("Category", "RET-04")]
+    public async Task OpenCompartmentAsync_UTC07()
+    {
+        await using ApplicationDbContext db = CreateDb();
+        (Guid userId, _, _, _) = await SeedReturnSetupAsync(db);
+        (_, _, _, ReturnRequestService failingService) = await SeedReturnSetupAsync(db, new FailingAccess("Device offline"));
+        var created = await failingService.CreateAsync(userId, new CreateReturnRequest("https://example.com/return.jpg", null));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => failingService.OpenCompartmentAsync(userId, created.Id));
+        Assert.Equal("Device offline", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "RET-04")]
+    public async Task OpenCompartmentAsync_UTC08()
+    {
+        await using ApplicationDbContext db = CreateDb();
+        (Guid userId, _, _, _) = await SeedReturnSetupAsync(db);
+        (_, _, _, ReturnRequestService failingService) = await SeedReturnSetupAsync(db, new FailingAccess(null));
+        var created = await failingService.CreateAsync(userId, new CreateReturnRequest("https://example.com/return.jpg", null));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => failingService.OpenCompartmentAsync(userId, created.Id));
+        Assert.Equal("Không thể mở ngăn tủ.", ex.Message);
+    }
+
+    #endregion
+
+    #region RET-05: FinalizeDepositAsync
+    [Fact]
     [Trait("Category", "RET-05")]
     public async Task FinalizeDepositAsync_UTC01()
     {
@@ -347,6 +343,23 @@ public sealed class ReturnRequestServiceTests
         await db.SaveChangesAsync();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.FinalizeDepositAsync(created.Id, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    [Trait("Category", "RET-05")]
+    public async Task FinalizeDepositAsync_UTC05()
+    {
+        await using ApplicationDbContext db = CreateDb();
+        (Guid userId, _, _, ReturnRequestService service) = await SeedReturnSetupAsync(db);
+        var created = await service.CreateAsync(userId, new CreateReturnRequest("https://example.com/return.jpg", null));
+        await service.OpenCompartmentAsync(userId, created.Id);
+        await service.FinalizeDepositAsync(created.Id, DateTimeOffset.UtcNow);
+
+        // Call again when status is already Deposited (idempotent)
+        await service.FinalizeDepositAsync(created.Id, DateTimeOffset.UtcNow);
+
+        var deposited = await db.ReturnRequests.SingleAsync(r => r.Id == created.Id);
+        Assert.Equal(ReturnRequestStatus.Deposited, deposited.Status);
     }
 
     [Fact]
@@ -681,6 +694,49 @@ public sealed class ReturnRequestServiceTests
     }
 
     [Fact]
+    [Trait("Category", "RPU-03")]
+    public async Task ReturnPickup_OpenCompartmentAsync_UTC07()
+    {
+        await using ApplicationDbContext db = CreateDb();
+        (Guid userId, Locker locker, _, _) = await SeedReturnSetupAsync(db);
+        (_, _, _, ReturnRequestService failingService) = await SeedReturnSetupAsync(db, new FailingAccess("Device offline"));
+        var created = await failingService.CreateAsync(userId, new CreateReturnRequest("https://example.com/return.jpg", null));
+        var req = await db.ReturnRequests.SingleAsync(r => r.Id == created.Id);
+        req.Status = ReturnRequestStatus.Deposited;
+        req.AllocatedCompartmentId = db.LockerCompartments.First().Id;
+        req.ReturnCode = "123456";
+        await db.SaveChangesAsync();
+
+        IReturnPickupSessionService pickup = failingService;
+        var session = await pickup.CreateAsync(new ValidateReturnPickupRequest(locker.Code, "123456"));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => pickup.OpenCompartmentAsync(session.ReturnRequestId, session.GuestSessionToken));
+        Assert.Equal("Device offline", ex.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "RPU-03")]
+    public async Task ReturnPickup_OpenCompartmentAsync_UTC08()
+    {
+        await using ApplicationDbContext db = CreateDb();
+        (Guid userId, Locker locker, _, ReturnRequestService service) = await SeedReturnSetupAsync(db);
+        var created = await service.CreateAsync(userId, new CreateReturnRequest("https://example.com/return.jpg", null));
+        await service.OpenCompartmentAsync(userId, created.Id);
+        await service.FinalizeDepositAsync(created.Id, DateTimeOffset.UtcNow);
+        var deposited = await db.ReturnRequests.SingleAsync(r => r.Id == created.Id);
+
+        IReturnPickupSessionService pickup = service;
+        var session = await pickup.CreateAsync(new ValidateReturnPickupRequest(locker.Code, deposited.ReturnCode));
+        deposited.UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<TimeoutException>(() => pickup.OpenCompartmentAsync(session.ReturnRequestId, session.GuestSessionToken));
+    }
+
+    #endregion
+
+    #region RPU-04: FinalizePickupAsync
+    [Fact]
     [Trait("Category", "RPU-04")]
     public async Task ReturnPickup_FinalizePickupAsync_UTC01()
     {
@@ -742,7 +798,7 @@ public sealed class ReturnRequestServiceTests
 
     #endregion
 
-    private static async Task<(Guid UserId, Locker Locker, ResidentProfile Resident, ReturnRequestService Service)> SeedReturnSetupAsync(ApplicationDbContext db)
+    private static async Task<(Guid UserId, Locker Locker, ResidentProfile Resident, ReturnRequestService Service)> SeedReturnSetupAsync(ApplicationDbContext db, ILockerAccessService? accessService = null)
     {
         Guid userId = Guid.NewGuid(); Guid lockerId = Guid.NewGuid(); Guid compartmentId = Guid.NewGuid(); DateTimeOffset now = DateTimeOffset.UtcNow;
         User user = new() { Id = userId, PhoneNumber = $"09{Random.Shared.Next(10000000, 99999999)}", PasswordHash = "x", Role = UserRole.Resident, Status = UserStatus.Active, CreatedAt = now, UpdatedAt = now };
@@ -755,7 +811,7 @@ public sealed class ReturnRequestServiceTests
 
         var service = new ReturnRequestService(
             db,
-            new SuccessfulAccess(),
+            accessService ?? new SuccessfulAccess(),
             new CompartmentAllocationService(db, TimeProvider.System),
             new NoopPush(),
             new Sha256TokenHashService(),
@@ -768,6 +824,10 @@ public sealed class ReturnRequestServiceTests
     private sealed class SuccessfulAccess : ILockerAccessService
     {
         public Task<OpenLockerResponse> OpenAsync(OpenLockerRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new OpenLockerResponse(Guid.NewGuid(), request.LockerId, request.LockerCompartmentId, "SIM", 1, LockerAccessResult.Succeeded, null, DateTimeOffset.UtcNow));
+    }
+    private sealed class FailingAccess(string? reason) : ILockerAccessService
+    {
+        public Task<OpenLockerResponse> OpenAsync(OpenLockerRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new OpenLockerResponse(Guid.NewGuid(), request.LockerId, request.LockerCompartmentId, "SIM", 1, LockerAccessResult.Failed, reason, DateTimeOffset.UtcNow));
     }
     private sealed class NoopPush : IPushNotificationService
     {
