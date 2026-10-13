@@ -12,6 +12,25 @@ public sealed class ParcelPickupServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 9, 30, 9, 0, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData(-5)]
+    [InlineData(0)]
+    public async Task UnlockAsync_AtOrPastMaxStorage_BlocksAndProvidesRecoveryAddress(int minutes)
+    {
+        await using var db = CreateDbContext();
+        var (resident, parcel, _) = await SeedParcelAsync(db);
+        parcel.MaxStorageUntil = Now.AddMinutes(minutes);
+        await db.SaveChangesAsync();
+        var access = new RecordingLockerAccessService();
+        var service = new ParcelPickupService(db, access, new FixedTimeProvider(Now));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.UnlockAsync(resident.Id, parcel.Id, null, null));
+
+        Assert.Contains(parcel.DeliveryRequest.Locker.RecoveryAddress, exception.Message);
+        Assert.Empty(access.Requests);
+    }
+
     [Fact]
     public async Task UnlockAsync_OwnedParcel_DispatchesResidentPickup()
     {
@@ -40,7 +59,7 @@ public sealed class ParcelPickupServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         (User resident, Parcel parcel, _) = await SeedParcelAsync(dbContext, outstandingCharge: true);
         var lockerAccess = new RecordingLockerAccessService();
-        var service = new ParcelPickupService(dbContext, lockerAccess, TimeProvider.System);
+        var service = new ParcelPickupService(dbContext, lockerAccess, new FixedTimeProvider(Now));
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.UnlockAsync(resident.Id, parcel.Id, null, null));

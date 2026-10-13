@@ -20,7 +20,7 @@ public sealed class ParcelReminderService(
             .Include(item => item.DeliveryRequest).ThenInclude(item => item.ResidentProfile)
             .Include(item => item.DeliveryRequest).ThenInclude(item => item.Locker)
             .Where(item => (item.Status == ParcelStatus.Stored || item.Status == ParcelStatus.Overdue) &&
-                           item.MaxStorageUntil >= now)
+                           item.MaxStorageUntil > now)
             .ToListAsync(cancellationToken);
         List<Guid> pushIds = [];
         foreach (Parcel parcel in parcels)
@@ -29,13 +29,15 @@ public sealed class ParcelReminderService(
             (DateTimeOffset countStart, _, _) = ParcelTimeline.GetDeadlines(
                 parcel.StoredAt, policy.OverdueStartAfterHours, policy.MaxStorageHours);
             DateTimeOffset reminderStart = countStart.AddDays(Math.Max(policy.PickupReminderStartDay, 1) - 1);
-            bool alreadySentToday = await dbContext.Notifications.AnyAsync(notification =>
+            bool clearanceWarning = parcel.MaxStorageUntil - now <= TimeSpan.FromHours(24);
+            string notificationType = clearanceWarning ? "ParcelClearanceWarning" : "ParcelPickupReminder";
+            bool alreadySent = await dbContext.Notifications.AnyAsync(notification =>
                 notification.ParcelId == parcel.Id &&
-                notification.Type == "ParcelPickupReminder" &&
+                notification.Type == notificationType &&
                 notification.Channel == NotificationChannel.InApp &&
-                notification.CreatedAt >= dayStart && notification.CreatedAt < dayEnd,
+                (clearanceWarning || (notification.CreatedAt >= dayStart && notification.CreatedAt < dayEnd)),
                 cancellationToken);
-            if (now < reminderStart || alreadySentToday)
+            if ((!clearanceWarning && now < reminderStart) || alreadySent)
                 continue;
 
             int daysUntilTransfer = Math.Max(0, (int)Math.Ceiling((parcel.MaxStorageUntil - now).TotalDays));

@@ -11,6 +11,64 @@ namespace smart_locking_be.Tests.Parcels;
 
 public sealed class ParcelServiceTests
 {
+    [Theory]
+    [InlineData(UserRole.Administrator, 4)]
+    [InlineData(UserRole.LockerOperator, 2)]
+    public async Task ClearancePending_FiltersDeadlineStatusAndAssignment(UserRole role, int expectedCount)
+    {
+        await using var db = CreateDbContext();
+        var owner = CreateUser(UserRole.Resident);
+        var requester = CreateUser(role);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var (status, hours, assigned, revoked) in new[]
+        {
+            (ParcelStatus.Stored, 0, true, false),
+            (ParcelStatus.Overdue, -1, true, false),
+            (ParcelStatus.Stored, 1, true, false),
+            (ParcelStatus.Retrieved, -1, true, false),
+            (ParcelStatus.Removed, -1, true, false),
+            (ParcelStatus.Overdue, -1, false, false),
+            (ParcelStatus.Overdue, -1, true, true)
+        })
+        {
+            var parcel = AddParcelGraph(db, owner, status, Guid.NewGuid().ToString());
+            parcel.MaxStorageUntil = now.AddHours(hours);
+            if (assigned)
+                db.OperatorAssignments.Add(new OperatorAssignment
+                {
+                    Id = Guid.NewGuid(),
+                    OperatorUserId = requester.Id,
+                    LockerId = parcel.DeliveryRequest.LockerId,
+                    AssignedByUserId = Guid.NewGuid(),
+                    AssignedAt = now.AddDays(-1),
+                    RevokedAt = revoked ? now : null
+                });
+        }
+        await db.SaveChangesAsync();
+        var result = await new ParcelService(db, new TransferPush(), new FixedClock(now))
+            .GetParcelsAsync(requester.Id, role.ToString(), ParcelListView.ClearancePending, null, null, null, default);
+        Assert.Equal(expectedCount, result.Count);
+        Assert.All(result, parcel =>
+        {
+            Assert.Contains(parcel.Status, new[] { ParcelStatus.Stored, ParcelStatus.Overdue });
+            Assert.True(parcel.MaxStorageUntil <= now);
+        });
+    }
+
+    [Fact]
+    public async Task ClearancePending_ResidentIsForbidden()
+    {
+        await using var db = CreateDbContext();
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            new ParcelService(db, new TransferPush(), TimeProvider.System)
+                .GetParcelsAsync(Guid.NewGuid(), "Resident", ParcelListView.ClearancePending, null, null, null, default));
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
     [Fact]
     public void ParcelResponse_UsesStableStringEnums()
     {

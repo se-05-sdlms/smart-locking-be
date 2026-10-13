@@ -24,7 +24,14 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
             throw new ArgumentException("From date must not be after to date.");
         }
 
-        IQueryable<Parcel> query = ScopeToUser(userId, role);
+        if (view == ParcelListView.ClearancePending &&
+            role is not (nameof(UserRole.LockerOperator) or nameof(UserRole.Administrator)))
+            throw new UnauthorizedAccessException("Role cannot access the clearance queue.");
+
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        IQueryable<Parcel> query = view == ParcelListView.ClearancePending && role == nameof(UserRole.Administrator)
+            ? dbContext.Parcels.AsNoTracking()
+            : ScopeToUser(userId, role);
         query = view switch
         {
             ParcelListView.Active => query.Where(parcel =>
@@ -32,6 +39,9 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
             ParcelListView.History => query.Where(parcel =>
                 parcel.Status == ParcelStatus.Retrieved || parcel.Status == ParcelStatus.Removed),
             ParcelListView.All => query,
+            ParcelListView.ClearancePending => query.Where(parcel =>
+                (parcel.Status == ParcelStatus.Stored || parcel.Status == ParcelStatus.Overdue) &&
+                parcel.MaxStorageUntil <= now),
             _ => throw new ArgumentException("Parcel view is invalid.", nameof(view))
         };
 
