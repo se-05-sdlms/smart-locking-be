@@ -4,6 +4,8 @@ using smart_locking_be.API.Hubs;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.API.Extensions;
 using smart_locking_be.API.Services;
+using smart_locking_be.Infrastructure.Options;
+using smart_locking_be.Infrastructure.Services;
 
 namespace smart_locking_be.API;
 
@@ -21,7 +23,11 @@ public static class DependencyInjection
         services.AddControllers();
         services.AddSignalR();
         services.AddScoped<IOperationsRealtimeNotifier, SignalROperationsRealtimeNotifier>();
-        services.AddScoped<IImageStorageService, LocalImageStorageService>();
+        IConfigurationSection storageSection = configuration.GetSection(SupabaseStorageOptions.SectionName);
+        if (!string.IsNullOrWhiteSpace(storageSection["Url"]) && !string.IsNullOrWhiteSpace(storageSection["ApiKey"]))
+            services.AddScoped<IImageStorageService>(provider => provider.GetRequiredService<SupabaseImageStorageService>());
+        else
+            services.AddScoped<IImageStorageService, LocalImageStorageService>();
         services.AddProblemDetails();
         services.AddExceptionHandler<ApiExceptionHandler>();
 
