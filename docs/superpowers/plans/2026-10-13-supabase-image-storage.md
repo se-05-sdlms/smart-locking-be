@@ -196,11 +196,11 @@
 - Consumes: Codebase đã hoàn thành build và test PASS
 - Produces: Pull Request được tạo thành công trên GitHub nhắm vào nhánh `dev` với nội dung theo template `.github/PULL_REQUEST_TEMPLATE.md`
 
-- [ ] **Step 1: Kiểm tra git status và diff**
+- [x] **Step 1: Kiểm tra git status và diff**
   - Kiểm tra `git status` đảm bảo không có file rác, file nháp hoặc file không liên quan.
   - Review lại `git diff` các thay đổi.
 
-- [ ] **Step 2: Commit và Push lên remote branch**
+- [x] **Step 2: Commit và Push lên remote branch**
   - Thực hiện stage và commit:
     ```bash
     git add .
@@ -211,7 +211,7 @@
     git push origin 95-image-supabase-cloud
     ```
 
-- [ ] **Step 3: Tạo Pull Request vào nhánh `dev` theo đúng template**
+- [x] **Step 3: Tạo Pull Request vào nhánh `dev` theo đúng template**
   - Sử dụng GitHub CLI (`gh pr create`) với base branch `dev`, điền đầy đủ các mục theo template `.github/PULL_REQUEST_TEMPLATE.md`:
     ```bash
     gh pr create --base dev --head 95-image-supabase-cloud --title "feat(storage): integrate Supabase image storage and rename ImagesController" --body "$(cat << 'EOF'
@@ -250,3 +250,11 @@
     )"
     ```
 
+
+## Kết quả triển khai
+
+- Build: 0 warnings, 0 errors.
+- Test hiện có: 210/210 PASS; composition test với cấu hình cloud giả: 1/1 PASS.
+- Format whitespace và git diff --check: PASS; review độc lập không có lỗi quan trọng.
+- PR: https://github.com/se-05-sdlms/smart-locking-be/pull/135 (base dev).
+- Chưa xác minh upload trên Supabase thật; xem docs/supabase-image-storage.md để cấu hình.
