@@ -400,9 +400,9 @@ smart-locking-be.Tests/
 
 - [x] **Step 1: Final sanity verification**
   Run `dotnet build --no-incremental` and `dotnet test`. Ensure 0 errors and all test suites pass.
-- [ ] **Step 2: Push changes to remote branch**
+- [x] **Step 2: Push changes to remote branch**
   Run: `git push origin 26-payment`
-- [ ] **Step 3: Create Pull Request targeting branch `dev`**
+- [x] **Step 3: Create Pull Request targeting branch `dev`**
   Use GitHub CLI (`gh pr create --base dev`) or web with PR body formatted strictly adhering to `.github/PULL_REQUEST_TEMPLATE.md`:
 
 ```markdown
@@ -457,3 +457,5 @@ Tất cả các bài test trong solution smart-locking-be.Tests đều PASS 100%
 - PayOS checkout uses SDK1.0.9. Offline tests verify actual SDK signatures and checkout validation, not a live payment link. Real PostgreSQL concurrency requires an integration environment; Docker was unavailable.
 - Final review fixed callback registration probes: verified unknown orders return200 without mutation. No unresolved important findings. Multi-worker notification dedup remains a known inherited limitation.
 - PR references Related #26 instead of Closes #26 because that issue also requires overdue-fee payment/history/reconciliation endpoints outside this subscription plan.
+
+- Final verification: 210/210 tests passed; clean build, formatting, and diff checks. PR: https://github.com/se-05-sdlms/smart-locking-be/pull/107 (base dev).
