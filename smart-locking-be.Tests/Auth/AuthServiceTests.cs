@@ -306,8 +306,10 @@ public sealed class AuthServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.RequestRegistrationOtpAsync(new RequestRegistrationOtpRequest(""), default));
+        Assert.Equal("Phone number is required.", ex.Message);
+        Assert.Empty(dbContext.OtpChallenges);
     }
 
     [Fact]
@@ -349,7 +351,10 @@ public sealed class AuthServiceTests
             default);
 
         Assert.NotNull(response.AccessToken);
+        Assert.NotNull(response.RefreshToken);
         Assert.NotNull(user.LastLoginAt);
+        Assert.NotEqual(default, user.UpdatedAt);
+        Assert.NotEmpty(dbContext.RefreshTokens);
     }
 
     [Fact]
@@ -377,7 +382,10 @@ public sealed class AuthServiceTests
             default);
 
         Assert.NotNull(response.AccessToken);
+        Assert.NotNull(response.RefreshToken);
         Assert.NotNull(user.LastLoginAt);
+        Assert.NotEqual(default, user.UpdatedAt);
+        Assert.NotEmpty(dbContext.RefreshTokens);
     }
 
     [Fact]
@@ -398,8 +406,10 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.LoginAsync(new LoginRequest("0912345678", "wrong-password"), null, default));
+        Assert.Equal("Invalid credentials.", ex.Message);
+        Assert.Empty(dbContext.RefreshTokens);
     }
 
     [Fact]
@@ -409,8 +419,10 @@ public sealed class AuthServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.LoginAsync(new LoginRequest("missing@example.com", "P@ssw0rd123"), null, default));
+        Assert.Equal("Invalid credentials.", ex.Message);
+        Assert.Empty(dbContext.RefreshTokens);
     }
 
     [Fact]
@@ -431,8 +443,10 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.LoginAsync(new LoginRequest("0912345678", "P@ssw0rd123"), null, default));
+        Assert.Equal("Invalid credentials.", ex.Message);
+        Assert.Empty(dbContext.RefreshTokens);
     }
 
     [Fact]
@@ -453,8 +467,10 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.LoginAsync(new LoginRequest("0912345678", "P@ssw0rd123"), null, default));
+        Assert.Equal("Invalid credentials.", ex.Message);
+        Assert.Empty(dbContext.RefreshTokens);
     }
     #endregion
 
@@ -509,8 +525,9 @@ public sealed class AuthServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.RefreshTokenAsync(new RefreshTokenRequest("unknown-token"), null, default));
+        Assert.Equal("Invalid refresh token.", ex.Message);
     }
 
     [Fact]
@@ -541,8 +558,9 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.RefreshTokenAsync(new RefreshTokenRequest("refresh-token-001"), null, default));
+        Assert.Equal("Invalid refresh token.", ex.Message);
     }
 
     [Fact]
@@ -572,8 +590,9 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.RefreshTokenAsync(new RefreshTokenRequest("refresh-token-001"), null, default));
+        Assert.Equal("Invalid refresh token.", ex.Message);
     }
 
     [Fact]
@@ -604,8 +623,9 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.RefreshTokenAsync(new RefreshTokenRequest("refresh-token-001"), null, default));
+        Assert.Equal("Invalid refresh token.", ex.Message);
     }
 
     [Fact]
@@ -635,8 +655,9 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.RefreshTokenAsync(new RefreshTokenRequest("refresh-token-001"), null, default));
+        Assert.Equal("Invalid refresh token.", ex.Message);
     }
     #endregion
 
@@ -755,6 +776,8 @@ public sealed class AuthServiceTests
 
         Assert.Equal(user.Id, profile.Id);
         Assert.Equal("0912345678", profile.PhoneNumber);
+        Assert.Equal("Resident", profile.Role);
+        Assert.Equal("Active", profile.Status);
     }
 
     [Fact]
@@ -764,8 +787,9 @@ public sealed class AuthServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() =>
             service.GetCurrentUserAsync(Guid.Parse("22222222-2222-2222-2222-222222222222"), default));
+        Assert.Equal("User not found.", ex.Message);
     }
 
     [Fact]
@@ -775,8 +799,9 @@ public sealed class AuthServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() =>
             service.GetCurrentUserAsync(Guid.Empty, default));
+        Assert.Equal("User not found.", ex.Message);
     }
     #endregion
 
@@ -906,8 +931,9 @@ public sealed class AuthServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.ResetPasswordAsync(new ResetPasswordRequest("missing@example.com", "123456", "NewPass123"), null, default));
+        Assert.Equal("Invalid OTP.", ex.Message);
     }
 
     [Fact]
@@ -928,8 +954,9 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.ResetPasswordAsync(new ResetPasswordRequest("nophone@example.com", "123456", "NewPass123"), null, default));
+        Assert.Equal("Invalid OTP.", ex.Message);
     }
 
     [Fact]
@@ -1099,8 +1126,9 @@ public sealed class AuthServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() =>
             service.ChangePasswordAsync(Guid.NewGuid(), new ChangePasswordRequest("OldPass123", "NewPass123"), null, default));
+        Assert.Equal("User not found.", ex.Message);
     }
 
     [Fact]
@@ -1110,8 +1138,9 @@ public sealed class AuthServiceTests
         await using ApplicationDbContext dbContext = CreateDbContext();
         AuthService service = CreateService(dbContext);
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() =>
             service.ChangePasswordAsync(Guid.Empty, new ChangePasswordRequest("OldPass123", "NewPass123"), null, default));
+        Assert.Equal("User not found.", ex.Message);
     }
 
     [Fact]
@@ -1132,8 +1161,9 @@ public sealed class AuthServiceTests
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.ChangePasswordAsync(user.Id, new ChangePasswordRequest("wrong-password", "NewPass123"), null, default));
+        Assert.Equal("Current password is incorrect.", ex.Message);
     }
 
     [Fact]
