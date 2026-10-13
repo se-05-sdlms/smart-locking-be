@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using smart_locking_be.Application.Interfaces;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Infrastructure.Auth;
+using smart_locking_be.Infrastructure.Options;
 using smart_locking_be.Infrastructure.Persistence;
 using smart_locking_be.Infrastructure.Services;
 
@@ -56,6 +57,32 @@ public static class DependencyInjection
         services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(new HttpClient { Timeout = TimeSpan.FromSeconds(10) });
+        IConfigurationSection storageSection = configuration.GetSection(SupabaseStorageOptions.SectionName);
+        services.AddOptions<SupabaseStorageOptions>()
+            .Configure(options =>
+            {
+                options.Url = storageSection["Url"] ?? string.Empty;
+                options.ApiKey = storageSection["ApiKey"] ?? string.Empty;
+                options.BucketName = storageSection["BucketName"] ?? "smart-locking-images";
+                options.Folder = storageSection["Folder"] ?? "parcels";
+            })
+            .Validate(options =>
+                string.IsNullOrWhiteSpace(options.Url) || string.IsNullOrWhiteSpace(options.ApiKey) ||
+                (Uri.TryCreate(options.Url, UriKind.Absolute, out Uri? url) &&
+                 (url.Scheme == Uri.UriSchemeHttps || url.Scheme == Uri.UriSchemeHttp) &&
+                 !string.IsNullOrEmpty(url.Host) && string.IsNullOrEmpty(url.UserInfo) &&
+                 string.IsNullOrEmpty(url.Query) && string.IsNullOrEmpty(url.Fragment) &&
+                 !options.ApiKey.Any(char.IsWhiteSpace) && !options.ApiKey.Any(char.IsControl) &&
+                 !string.IsNullOrWhiteSpace(options.BucketName) &&
+                 options.BucketName is not "." and not ".." && !options.BucketName.Contains('/') &&
+                 !options.BucketName.Contains('\\') &&
+                 !options.Folder.Contains('\\') &&
+                 options.Folder.Split('/').All(segment => segment is not "." and not "..")),
+                "Supabase storage URL, API key, bucket, or folder configuration is invalid.")
+            .ValidateOnStart();
+        services.AddHttpClient<SupabaseImageStorageService>(client =>
+            client.Timeout = TimeSpan.FromSeconds(60))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddScoped<IPushNotificationService, ExpoPushNotificationService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IAdminService, AdminService>();

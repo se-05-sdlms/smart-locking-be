@@ -17,7 +17,7 @@ public sealed class ServiceCompositionTests
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
-            ApplicationName = typeof(UploadsController).Assembly.FullName,
+            ApplicationName = typeof(ImagesController).Assembly.FullName,
             EnvironmentName = "Testing",
             ContentRootPath = Path.GetTempPath()
         });
@@ -31,10 +31,10 @@ public sealed class ServiceCompositionTests
             ["Cors:AllowedOrigins:0"] = "https://test.invalid"
         });
         builder.Services.AddApiServices(builder.Configuration, builder.Environment).AddApplication().AddInfrastructure(builder.Configuration);
-        builder.Services.AddControllers().AddApplicationPart(typeof(UploadsController).Assembly).AddControllersAsServices();
+        builder.Services.AddControllers().AddApplicationPart(typeof(ImagesController).Assembly).AddControllersAsServices();
         await using var app = builder.Build();
         using var scope = app.Services.CreateScope();
-        foreach (Type controller in typeof(UploadsController).Assembly.GetTypes().Where(type => !type.IsAbstract && typeof(ControllerBase).IsAssignableFrom(type)))
+        foreach (Type controller in typeof(ImagesController).Assembly.GetTypes().Where(type => !type.IsAbstract && typeof(ControllerBase).IsAssignableFrom(type)))
             Assert.NotNull(scope.ServiceProvider.GetRequiredService(controller));
         Assert.NotEmpty(app.Services.GetServices<IHostedService>());
     }
