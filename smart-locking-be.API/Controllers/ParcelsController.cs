@@ -77,7 +77,7 @@ public sealed class ParcelsController(
         string? role = User.FindFirstValue(ClaimTypes.Role);
         if (!Guid.TryParse(idClaim, out Guid userId) || string.IsNullOrWhiteSpace(role))
         {
-            throw new System.Security.Authentication.AuthenticationException("Invalid authentication token.");
+            throw new UnauthorizedException("Invalid authentication token.");
         }
 
         return (userId, role);

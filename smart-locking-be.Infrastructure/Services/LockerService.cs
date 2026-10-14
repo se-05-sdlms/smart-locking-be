@@ -36,7 +36,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         }
         else
         {
-            throw new UnauthorizedAccessException($"Role '{userRole}' không có quyền truy cập danh sách tủ locker.");
+            throw new ForbiddenException($"Role '{userRole}' không có quyền truy cập danh sách tủ locker.");
         }
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -78,7 +78,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
             .AsNoTracking()
             .Include(l => l.Compartments)
             .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
+            ?? throw new NotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
 
         if (userRole == nameof(UserRole.Administrator))
         {
@@ -92,12 +92,12 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
 
             if (!isAssigned)
             {
-                throw new UnauthorizedAccessException("Bạn không có quyền truy cập tủ locker này.");
+                throw new ForbiddenException("Bạn không có quyền truy cập tủ locker này.");
             }
         }
         else
         {
-            throw new UnauthorizedAccessException($"Role '{userRole}' không có quyền truy cập thông tin tủ locker.");
+            throw new ForbiddenException($"Role '{userRole}' không có quyền truy cập thông tin tủ locker.");
         }
 
         return MapToDetailResponse(locker);
@@ -114,14 +114,14 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
             .AnyAsync(l => l.Code == code, cancellationToken);
         if (existsCode)
         {
-            throw new InvalidOperationException($"Mã Locker '{code}' đã tồn tại trong hệ thống.");
+            throw new ConflictException($"Mã Locker '{code}' đã tồn tại trong hệ thống.");
         }
 
         var existsDevice = await dbContext.Lockers
             .AnyAsync(l => l.DeviceIdentifier == deviceIdentifier, cancellationToken);
         if (existsDevice)
         {
-            throw new InvalidOperationException($"Mã định danh thiết bị IoT '{deviceIdentifier}' đã tồn tại.");
+            throw new ConflictException($"Mã định danh thiết bị IoT '{deviceIdentifier}' đã tồn tại.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -151,7 +151,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     {
         if (!Enum.IsDefined(request.OperationalStatus))
         {
-            throw new ArgumentException($"Trạng thái vận hành tủ locker '{request.OperationalStatus}' không hợp lệ.", nameof(request.OperationalStatus));
+            throw new BadRequestException($"Trạng thái vận hành tủ locker '{request.OperationalStatus}' không hợp lệ.", nameof(request.OperationalStatus));
         }
 
         var (code, address, recoveryAddress, deviceIdentifier) = ValidateAndTrimLockerInput(
@@ -160,20 +160,20 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         var locker = await dbContext.Lockers
             .Include(l => l.Compartments)
             .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
+            ?? throw new NotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
 
         var existsCode = await dbContext.Lockers
             .AnyAsync(l => l.Code == code && l.Id != lockerId, cancellationToken);
         if (existsCode)
         {
-            throw new InvalidOperationException($"Mã Locker '{code}' đã trùng với tủ khác.");
+            throw new ConflictException($"Mã Locker '{code}' đã trùng với tủ khác.");
         }
 
         var existsDevice = await dbContext.Lockers
             .AnyAsync(l => l.DeviceIdentifier == deviceIdentifier && l.Id != lockerId, cancellationToken);
         if (existsDevice)
         {
-            throw new InvalidOperationException($"Mã định danh thiết bị '{deviceIdentifier}' đã trùng với tủ khác.");
+            throw new ConflictException($"Mã định danh thiết bị '{deviceIdentifier}' đã trùng với tủ khác.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -193,7 +193,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     {
         var locker = await dbContext.Lockers
             .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
+            ?? throw new NotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
 
         locker.OperationalStatus = LockerOperationalStatus.Inactive;
         locker.UpdatedAt = DateTimeOffset.UtcNow;
@@ -212,7 +212,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
             .AsNoTracking()
             .Include(l => l.Compartments)
             .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
+            ?? throw new NotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
 
         if (userRole == nameof(UserRole.Administrator))
         {
@@ -226,12 +226,12 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
 
             if (!isAssigned)
             {
-                throw new UnauthorizedAccessException("Bạn không có quyền truy cập tủ locker này.");
+                throw new ForbiddenException("Bạn không có quyền truy cập tủ locker này.");
             }
         }
         else
         {
-            throw new UnauthorizedAccessException($"Role '{userRole}' không có quyền truy cập danh sách ngăn tủ.");
+            throw new ForbiddenException($"Role '{userRole}' không có quyền truy cập danh sách ngăn tủ.");
         }
 
         return locker.Compartments
@@ -249,32 +249,32 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
 
         var locker = await dbContext.Lockers
             .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
+            ?? throw new NotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
 
         if (locker.OperationalStatus == LockerOperationalStatus.Inactive)
         {
-            throw new InvalidOperationException("Tủ locker đã bị vô hiệu hóa (Inactive), không thể tạo thêm ngăn tủ.");
+            throw new ConflictException("Tủ locker đã bị vô hiệu hóa (Inactive), không thể tạo thêm ngăn tủ.");
         }
 
         var existsCode = await dbContext.LockerCompartments
             .AnyAsync(c => c.LockerId == lockerId && c.Code == code, cancellationToken);
         if (existsCode)
         {
-            throw new InvalidOperationException($"Mã ngăn '{code}' đã tồn tại trong tủ locker này.");
+            throw new ConflictException($"Mã ngăn '{code}' đã tồn tại trong tủ locker này.");
         }
 
         var existsHardwareCode = await dbContext.LockerCompartments
             .AnyAsync(c => c.LockerId == lockerId && c.HardwareCode == hardwareCode, cancellationToken);
         if (existsHardwareCode)
         {
-            throw new InvalidOperationException($"Mã phần cứng '{hardwareCode}' đã tồn tại trong tủ locker này.");
+            throw new ConflictException($"Mã phần cứng '{hardwareCode}' đã tồn tại trong tủ locker này.");
         }
 
         var existsHardwareChannel = await dbContext.LockerCompartments
             .AnyAsync(c => c.LockerId == lockerId && c.HardwareChannel == request.HardwareChannel, cancellationToken);
         if (existsHardwareChannel)
         {
-            throw new InvalidOperationException($"Kênh phần cứng (HardwareChannel) '{request.HardwareChannel}' đã tồn tại trong tủ locker này.");
+            throw new ConflictException($"Kênh phần cứng (HardwareChannel) '{request.HardwareChannel}' đã tồn tại trong tủ locker này.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -307,17 +307,17 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     {
         if (!Enum.IsDefined(request.OperationalStatus))
         {
-            throw new ArgumentException($"Trạng thái vận hành ngăn tủ '{request.OperationalStatus}' không hợp lệ.", nameof(request.OperationalStatus));
+            throw new BadRequestException($"Trạng thái vận hành ngăn tủ '{request.OperationalStatus}' không hợp lệ.", nameof(request.OperationalStatus));
         }
 
         var locker = await dbContext.Lockers
             .AsNoTracking()
             .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
+            ?? throw new NotFoundException($"Locker với ID '{lockerId}' không tồn tại.");
 
         if (locker.OperationalStatus == LockerOperationalStatus.Inactive)
         {
-            throw new InvalidOperationException("Tủ locker đã bị vô hiệu hóa (Inactive), không thể cập nhật trạng thái ngăn tủ.");
+            throw new ConflictException("Tủ locker đã bị vô hiệu hóa (Inactive), không thể cập nhật trạng thái ngăn tủ.");
         }
 
         if (userRole == nameof(UserRole.Administrator))
@@ -332,17 +332,17 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
 
             if (!isAssigned)
             {
-                throw new UnauthorizedAccessException("Bạn không có quyền cập nhật trạng thái ngăn tủ trong tủ locker này.");
+                throw new ForbiddenException("Bạn không có quyền cập nhật trạng thái ngăn tủ trong tủ locker này.");
             }
         }
         else
         {
-            throw new UnauthorizedAccessException($"Role '{userRole}' không có quyền cập nhật trạng thái ngăn tủ.");
+            throw new ForbiddenException($"Role '{userRole}' không có quyền cập nhật trạng thái ngăn tủ.");
         }
 
         var compartment = await dbContext.LockerCompartments
             .FirstOrDefaultAsync(c => c.Id == compartmentId && c.LockerId == lockerId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Ngăn tủ với ID '{compartmentId}' không tồn tại trong tủ locker này.");
+            ?? throw new NotFoundException($"Ngăn tủ với ID '{compartmentId}' không tồn tại trong tủ locker này.");
 
         compartment.OperationalStatus = request.OperationalStatus;
         compartment.UpdatedAt = DateTimeOffset.UtcNow;
@@ -357,42 +357,42 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     {
         if (string.IsNullOrWhiteSpace(code))
         {
-            throw new ArgumentException("Mã Locker không được để trống.", nameof(code));
+            throw new BadRequestException("Mã Locker không được để trống.", nameof(code));
         }
         string trimmedCode = code.Trim();
         if (trimmedCode.Length > 50)
         {
-            throw new ArgumentException("Mã Locker không được vượt quá 50 ký tự.", nameof(code));
+            throw new BadRequestException("Mã Locker không được vượt quá 50 ký tự.", nameof(code));
         }
 
         if (string.IsNullOrWhiteSpace(address))
         {
-            throw new ArgumentException("Địa chỉ tủ không được để trống.", nameof(address));
+            throw new BadRequestException("Địa chỉ tủ không được để trống.", nameof(address));
         }
         string trimmedAddress = address.Trim();
         if (trimmedAddress.Length > 500)
         {
-            throw new ArgumentException("Địa chỉ tủ không được vượt quá 500 ký tự.", nameof(address));
+            throw new BadRequestException("Địa chỉ tủ không được vượt quá 500 ký tự.", nameof(address));
         }
 
         if (string.IsNullOrWhiteSpace(recoveryAddress))
         {
-            throw new ArgumentException("Địa chỉ hoàn hàng không được để trống.", nameof(recoveryAddress));
+            throw new BadRequestException("Địa chỉ hoàn hàng không được để trống.", nameof(recoveryAddress));
         }
         string trimmedRecoveryAddress = recoveryAddress.Trim();
         if (trimmedRecoveryAddress.Length > 500)
         {
-            throw new ArgumentException("Địa chỉ hoàn hàng không được vượt quá 500 ký tự.", nameof(recoveryAddress));
+            throw new BadRequestException("Địa chỉ hoàn hàng không được vượt quá 500 ký tự.", nameof(recoveryAddress));
         }
 
         if (string.IsNullOrWhiteSpace(deviceIdentifier))
         {
-            throw new ArgumentException("Mã định danh thiết bị không được để trống.", nameof(deviceIdentifier));
+            throw new BadRequestException("Mã định danh thiết bị không được để trống.", nameof(deviceIdentifier));
         }
         string trimmedDeviceIdentifier = deviceIdentifier.Trim();
         if (trimmedDeviceIdentifier.Length > 100)
         {
-            throw new ArgumentException("Mã định danh thiết bị không được vượt quá 100 ký tự.", nameof(deviceIdentifier));
+            throw new BadRequestException("Mã định danh thiết bị không được vượt quá 100 ký tự.", nameof(deviceIdentifier));
         }
 
         return (trimmedCode, trimmedAddress, trimmedRecoveryAddress, trimmedDeviceIdentifier);
@@ -402,27 +402,27 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     {
         if (string.IsNullOrWhiteSpace(code))
         {
-            throw new ArgumentException("Mã ngăn không được để trống.", nameof(code));
+            throw new BadRequestException("Mã ngăn không được để trống.", nameof(code));
         }
         string trimmedCode = code.Trim();
         if (trimmedCode.Length > 50)
         {
-            throw new ArgumentException("Mã ngăn không được vượt quá 50 ký tự.", nameof(code));
+            throw new BadRequestException("Mã ngăn không được vượt quá 50 ký tự.", nameof(code));
         }
 
         if (string.IsNullOrWhiteSpace(hardwareCode))
         {
-            throw new ArgumentException("Mã phần cứng không được để trống.", nameof(hardwareCode));
+            throw new BadRequestException("Mã phần cứng không được để trống.", nameof(hardwareCode));
         }
         string trimmedHardwareCode = hardwareCode.Trim();
         if (trimmedHardwareCode.Length > 100)
         {
-            throw new ArgumentException("Mã phần cứng không được vượt quá 100 ký tự.", nameof(hardwareCode));
+            throw new BadRequestException("Mã phần cứng không được vượt quá 100 ký tự.", nameof(hardwareCode));
         }
 
         if (hardwareChannel <= 0)
         {
-            throw new ArgumentException("Kênh phần cứng (HardwareChannel) phải là số nguyên dương lớn hơn 0.", nameof(hardwareChannel));
+            throw new BadRequestException("Kênh phần cứng (HardwareChannel) phải là số nguyên dương lớn hơn 0.", nameof(hardwareChannel));
         }
 
         return (trimmedCode, trimmedHardwareCode);

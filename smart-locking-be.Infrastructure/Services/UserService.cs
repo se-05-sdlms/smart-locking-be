@@ -81,7 +81,7 @@ public sealed class UserService(
 
         if (user is null)
         {
-            throw new KeyNotFoundException("Không tìm thấy người dùng.");
+            throw new NotFoundException("Không tìm thấy người dùng.");
         }
 
         return MapToDetail(user);
@@ -95,12 +95,12 @@ public sealed class UserService(
     {
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
-            throw new ArgumentException("Họ và tên không được để trống.", nameof(request.FullName));
+            throw new BadRequestException("Họ và tên không được để trống.", nameof(request.FullName));
         }
 
         if (string.IsNullOrWhiteSpace(request.Email) || !request.Email.Contains('@'))
         {
-            throw new ArgumentException("Email không hợp lệ.", nameof(request.Email));
+            throw new BadRequestException("Email không hợp lệ.", nameof(request.Email));
         }
 
         string email = request.Email.Trim().ToLowerInvariant();
@@ -111,7 +111,7 @@ public sealed class UserService(
 
         if (exists)
         {
-            throw new InvalidOperationException("Email hoặc số điện thoại đã được sử dụng.");
+            throw new ConflictException("Email hoặc số điện thoại đã được sử dụng.");
         }
 
         string temporaryPassword = string.IsNullOrWhiteSpace(request.Password)
@@ -202,12 +202,12 @@ public sealed class UserService(
 
         if (user is null)
         {
-            throw new KeyNotFoundException("Không tìm thấy người dùng.");
+            throw new NotFoundException("Không tìm thấy người dùng.");
         }
 
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
-            throw new ArgumentException("Họ và tên không được để trống.", nameof(request.FullName));
+            throw new BadRequestException("Họ và tên không được để trống.", nameof(request.FullName));
         }
 
         string? email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToLowerInvariant();
@@ -218,7 +218,7 @@ public sealed class UserService(
             bool emailExists = await dbContext.Users.AnyAsync(u => u.Id != id && u.Email == email, cancellationToken);
             if (emailExists)
             {
-                throw new InvalidOperationException("Email đã được sử dụng bởi tài khoản khác.");
+                throw new ConflictException("Email đã được sử dụng bởi tài khoản khác.");
             }
             user.Email = email;
         }
@@ -228,7 +228,7 @@ public sealed class UserService(
             bool phoneExists = await dbContext.Users.AnyAsync(u => u.Id != id && u.PhoneNumber == phone, cancellationToken);
             if (phoneExists)
             {
-                throw new InvalidOperationException("Số điện thoại đã được sử dụng bởi tài khoản khác.");
+                throw new ConflictException("Số điện thoại đã được sử dụng bởi tài khoản khác.");
             }
             user.PhoneNumber = phone;
         }
@@ -287,7 +287,7 @@ public sealed class UserService(
 
         if (user is null)
         {
-            throw new KeyNotFoundException("Không tìm thấy người dùng.");
+            throw new NotFoundException("Không tìm thấy người dùng.");
         }
 
         if (user.Status != request.Status)
@@ -348,12 +348,12 @@ public sealed class UserService(
 
         if (user is null)
         {
-            throw new KeyNotFoundException("Không tìm thấy nhân viên vận hành.");
+            throw new NotFoundException("Không tìm thấy nhân viên vận hành.");
         }
 
         if (request.LockerId == Guid.Empty)
         {
-            throw new ArgumentException("Phải chỉ định LockerId hợp lệ.", nameof(request.LockerId));
+            throw new BadRequestException("Phải chỉ định LockerId hợp lệ.", nameof(request.LockerId));
         }
 
         bool activeExists = await dbContext.OperatorAssignments.AnyAsync(a =>
@@ -362,7 +362,7 @@ public sealed class UserService(
 
         if (activeExists)
         {
-            throw new InvalidOperationException("Tủ này đã được phân công cho một nhân viên vận hành khác.");
+            throw new ConflictException("Tủ này đã được phân công cho một nhân viên vận hành khác.");
         }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -422,12 +422,12 @@ public sealed class UserService(
 
         if (assignment is null)
         {
-            throw new KeyNotFoundException("Không tìm thấy bản ghi phân công.");
+            throw new NotFoundException("Không tìm thấy bản ghi phân công.");
         }
 
         if (assignment.RevokedAt.HasValue)
         {
-            throw new InvalidOperationException("Phân công này đã bị thu hồi trước đó.");
+            throw new ConflictException("Phân công này đã bị thu hồi trước đó.");
         }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;

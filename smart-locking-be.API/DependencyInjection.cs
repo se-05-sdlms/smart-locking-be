@@ -29,7 +29,7 @@ public static class DependencyInjection
         else
             services.AddScoped<IImageStorageService, LocalImageStorageService>();
         services.AddProblemDetails();
-        services.AddExceptionHandler<ApiExceptionHandler>();
+        services.AddExceptionHandler<GlobalExceptionHandler>();
 
         // 2. CORS Policy Configuration
         services.AddCorsPolicy(configuration, environment);

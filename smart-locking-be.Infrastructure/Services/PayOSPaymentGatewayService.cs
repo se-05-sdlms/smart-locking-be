@@ -17,13 +17,26 @@ public sealed class PayOSPaymentGatewayService(IOptions<PayOSOptions> options) :
         ArgumentNullException.ThrowIfNull(request);
         if (request.OrderCode <= 0 || request.Amount <= 0 || string.IsNullOrWhiteSpace(request.Description)
             || !IsHttpUrl(request.ReturnUrl) || !IsHttpUrl(request.CancelUrl))
-            throw new ArgumentException("Thông tin tạo thanh toán PayOS không hợp lệ.", nameof(request));
+            throw new BadRequestException("Thông tin tạo thanh toán PayOS không hợp lệ.", nameof(request));
 
         // SDK 1.x has no cancellation overload. Once dispatched, await its result so a
         // cancelled caller does not hide a payment link that the provider has created.
-        var result = await client.createPaymentLink(new PaymentData(request.OrderCode, request.Amount,
-            request.Description, [], request.CancelUrl, request.ReturnUrl));
-        return new(result.checkoutUrl, result.paymentLinkId, result.qrCode);
+        try
+        {
+            var result = await client.createPaymentLink(new PaymentData(request.OrderCode, request.Amount,
+                request.Description, [], request.CancelUrl, request.ReturnUrl));
+            return new(result.checkoutUrl, result.paymentLinkId, result.qrCode);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw new ServiceUnavailableException(
+                "Dịch vụ thanh toán hiện không khả dụng. Vui lòng thử lại sau.",
+                exception);
+        }
     }
 
     public PayOSWebhookData VerifyWebhook(PayOSWebhookPayload payload)
@@ -31,7 +44,7 @@ public sealed class PayOSPaymentGatewayService(IOptions<PayOSOptions> options) :
         var client = CreateClient();
         ArgumentNullException.ThrowIfNull(payload);
         if (payload.Data.ValueKind != JsonValueKind.Object || string.IsNullOrWhiteSpace(payload.Signature))
-            throw new ArgumentException("Webhook PayOS không hợp lệ.", nameof(payload));
+            throw new BadRequestException("Webhook PayOS không hợp lệ.", nameof(payload));
 
         WebhookData data;
         try
@@ -45,12 +58,12 @@ public sealed class PayOSPaymentGatewayService(IOptions<PayOSOptions> options) :
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            throw new ArgumentException("Chữ ký hoặc dữ liệu webhook PayOS không hợp lệ.", nameof(payload), ex);
+            throw new BadRequestException("Chữ ký hoặc dữ liệu webhook PayOS không hợp lệ.", nameof(payload), ex);
         }
 
         if (data.orderCode <= 0 || data.amount <= 0 || string.IsNullOrWhiteSpace(data.reference)
             || string.IsNullOrWhiteSpace(data.code) || string.IsNullOrWhiteSpace(data.currency))
-            throw new ArgumentException("Dữ liệu thanh toán PayOS không hợp lệ.", nameof(payload));
+            throw new BadRequestException("Dữ liệu thanh toán PayOS không hợp lệ.", nameof(payload));
         return new(data.orderCode, data.amount, data.reference, data.code, data.currency);
     }
 
@@ -59,7 +72,7 @@ public sealed class PayOSPaymentGatewayService(IOptions<PayOSOptions> options) :
         var settings = options.Value;
         if (string.IsNullOrWhiteSpace(settings.ClientId) || string.IsNullOrWhiteSpace(settings.ApiKey)
             || string.IsNullOrWhiteSpace(settings.ChecksumKey))
-            throw new InvalidOperationException("Chưa cấu hình thông tin xác thực PayOS.");
+            throw new InternalServerException("Chưa cấu hình thông tin xác thực PayOS.");
         return new PayOS(settings.ClientId, settings.ApiKey, settings.ChecksumKey);
     }
 

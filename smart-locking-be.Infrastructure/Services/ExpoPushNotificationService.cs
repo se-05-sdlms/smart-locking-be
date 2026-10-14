@@ -177,7 +177,7 @@ public sealed class ExpoPushNotificationService(
     {
         Notification notification = await dbContext.Notifications
             .SingleOrDefaultAsync(item => item.Id == notificationId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Không tìm thấy push notification '{notificationId}'.");
+            ?? throw new NotFoundException($"Không tìm thấy push notification '{notificationId}'.");
 
         if (realtimeNotifier is not null)
         {

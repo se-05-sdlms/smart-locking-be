@@ -42,7 +42,7 @@ public sealed class IncidentsController(IIncidentService incidentService) : Cont
         if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId) ||
             string.IsNullOrWhiteSpace(role))
         {
-            throw new System.Security.Authentication.AuthenticationException("Invalid authentication token.");
+            throw new UnauthorizedException("Invalid authentication token.");
         }
 
         return (userId, role);
