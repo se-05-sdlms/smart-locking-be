@@ -21,7 +21,8 @@ public sealed class AuthServiceTests
     {
         await using ApplicationDbContext dbContext = CreateDbContext();
         Locker locker = CreateLocker(LockerOperationalStatus.Operational);
-        dbContext.AddRange(locker, CreateRegistrationChallenge("0912345678"));
+        OtpChallenge challenge = CreateRegistrationChallenge("0912345678");
+        dbContext.AddRange(locker, challenge);
         await dbContext.SaveChangesAsync();
 
         AuthService service = CreateService(dbContext);
@@ -33,7 +34,18 @@ public sealed class AuthServiceTests
         Assert.NotEmpty(response.AccessToken);
         Assert.NotEmpty(response.RefreshToken);
         Assert.Equal("0912345678", response.User.PhoneNumber);
-        Assert.Contains(dbContext.AuditLogs, a => a.Action == "RegisterResident" && a.Result == AuditLogResult.Succeeded);
+
+        User persistedUser = Assert.Single(dbContext.Users.Where(u => u.PhoneNumber == "0912345678"));
+        Assert.Equal(UserRole.Resident, persistedUser.Role);
+        Assert.Equal(UserStatus.Active, persistedUser.Status);
+
+        ResidentProfile profile = Assert.Single(dbContext.ResidentProfiles.Where(p => p.UserId == persistedUser.Id));
+        Assert.Equal(locker.Id, profile.RegisteredLockerId);
+
+        Assert.Contains(dbContext.RefreshTokens, t => t.UserId == persistedUser.Id);
+        Assert.NotNull(challenge.UsedAt);
+
+        Assert.Contains(dbContext.AuditLogs, a => a.Action == "RegisterResident" && a.ActorUserId == persistedUser.Id && a.Result == AuditLogResult.Succeeded);
     }
 
     [Fact]
@@ -837,7 +849,7 @@ public sealed class AuthServiceTests
         AuthService service = CreateService(dbContext);
         await service.RequestPasswordResetAsync(new RequestPasswordResetRequest("0912345678"), default);
 
-        Assert.Contains(dbContext.OtpChallenges, c => c.DestinationPhone == "0912345678" && c.Purpose == OtpPurpose.PasswordReset);
+        Assert.Contains(dbContext.OtpChallenges, c => c.DestinationPhone == "0912345678" && c.Purpose == OtpPurpose.PasswordReset && c.UserId == user.Id);
     }
 
     [Fact]
@@ -860,7 +872,7 @@ public sealed class AuthServiceTests
         AuthService service = CreateService(dbContext);
         await service.RequestPasswordResetAsync(new RequestPasswordResetRequest("resident@example.com"), default);
 
-        Assert.Contains(dbContext.OtpChallenges, c => c.DestinationPhone == "0912345678" && c.Purpose == OtpPurpose.PasswordReset);
+        Assert.Contains(dbContext.OtpChallenges, c => c.DestinationPhone == "0912345678" && c.Purpose == OtpPurpose.PasswordReset && c.UserId == user.Id);
     }
 
     [Fact]
