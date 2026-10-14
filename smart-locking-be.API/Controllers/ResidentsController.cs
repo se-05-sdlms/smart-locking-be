@@ -20,7 +20,7 @@ public class ResidentsController(IResidentService residentService) : ControllerB
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => residentService.GetProfileAsync(userId, cancellationToken));
+        return Ok(await residentService.GetProfileAsync(userId, cancellationToken));
     }
 
     [HttpPut("me")]
@@ -33,7 +33,7 @@ public class ResidentsController(IResidentService residentService) : ControllerB
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => residentService.UpdateProfileAsync(userId, request, cancellationToken));
+        return Ok(await residentService.UpdateProfileAsync(userId, request, cancellationToken));
     }
 
     [HttpPut("me/approval-mode")]
@@ -46,39 +46,12 @@ public class ResidentsController(IResidentService residentService) : ControllerB
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
         }
 
-        return await ExecuteAsync(() => residentService.UpdateApprovalModeAsync(userId, request, cancellationToken));
+        return Ok(await residentService.UpdateApprovalModeAsync(userId, request, cancellationToken));
     }
 
     private bool TryGetUserId(out Guid userId)
     {
         string? claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(claimValue, out userId);
-    }
-
-    private async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
-    {
-        try
-        {
-            TResponse result = await action();
-            return Ok(result);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            if (exception.Message.Contains("khóa", StringComparison.OrdinalIgnoreCase) ||
-                exception.Message.Contains("vô hiệu hóa", StringComparison.OrdinalIgnoreCase))
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-            }
-
-            return BadRequest(new { message = exception.Message });
-        }
     }
 }

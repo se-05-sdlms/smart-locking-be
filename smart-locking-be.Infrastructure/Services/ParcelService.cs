@@ -1,5 +1,5 @@
-using smart_locking_be.Application.DTOs.Notifications;
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -21,12 +21,12 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
     {
         if (from.HasValue && to.HasValue && from > to)
         {
-            throw new ArgumentException("From date must not be after to date.");
+            throw new BadRequestException("From date must not be after to date.");
         }
 
         if (view == ParcelListView.ClearancePending &&
             role is not (nameof(UserRole.LockerOperator) or nameof(UserRole.Administrator)))
-            throw new UnauthorizedAccessException("Role cannot access the clearance queue.");
+            throw new ForbiddenException("Role cannot access the clearance queue.");
 
         DateTimeOffset now = timeProvider.GetUtcNow();
         IQueryable<Parcel> query = view == ParcelListView.ClearancePending && role == nameof(UserRole.Administrator)
@@ -42,7 +42,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
             ParcelListView.ClearancePending => query.Where(parcel =>
                 (parcel.Status == ParcelStatus.Stored || parcel.Status == ParcelStatus.Overdue) &&
                 parcel.MaxStorageUntil <= now),
-            _ => throw new ArgumentException("Parcel view is invalid.", nameof(view))
+            _ => throw new BadRequestException("Parcel view is invalid.", nameof(view))
         };
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -114,7 +114,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
                 parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Currency,
                 parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Status))
             .SingleOrDefaultAsync(cancellationToken)
-            ?? throw new KeyNotFoundException("Parcel not found.");
+            ?? throw new NotFoundException("Parcel not found.");
 
     public async Task<IReadOnlyCollection<ParcelStatusHistoryResponse>> GetHistoryAsync(
         Guid userId,
@@ -126,7 +126,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
             .AnyAsync(parcel => parcel.Id == parcelId, cancellationToken);
         if (!canAccess)
         {
-            throw new KeyNotFoundException("Parcel not found.");
+            throw new NotFoundException("Parcel not found.");
         }
 
         return await dbContext.ParcelStatusHistories
@@ -158,7 +158,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
                 assignment.RevokedAt == null));
         }
 
-        throw new UnauthorizedAccessException("Role cannot access parcels.");
+        throw new ForbiddenException("Role cannot access parcels.");
     }
     public async Task<OverdueTransferResponse> TransferOverdueAsync(
         Guid userId,
@@ -170,14 +170,14 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
             .Include(item => item.DeliveryRequest).ThenInclude(request => request.Locker)
             .Include(item => item.DeliveryRequest).ThenInclude(request => request.ResidentProfile)
             .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy kiện hàng.");
+            ?? throw new NotFoundException("Không tìm thấy kiện hàng.");
         await EnsureOperationalAccessAsync(userId, role, parcel.DeliveryRequest.LockerId, cancellationToken);
         DateTimeOffset now = timeProvider.GetUtcNow();
         if (parcel.MaxStorageUntil > now || parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
-            throw new InvalidOperationException("Kiện hàng chưa đủ điều kiện chuyển điểm tập kết.");
+            throw new ConflictException("Kiện hàng chưa đủ điều kiện chuyển điểm tập kết.");
 
         ResidentProfile resident = parcel.DeliveryRequest.ResidentProfile
-            ?? throw new InvalidOperationException("Kiện hàng không có cư dân nhận.");
+            ?? throw new ConflictException("Kiện hàng không có cư dân nhận.");
         parcel.Status = ParcelStatus.Removed;
         parcel.RemovedAt = now;
         parcel.RemovedByUserId = userId;
@@ -216,7 +216,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
             !await dbContext.OperatorAssignments.AnyAsync(item =>
                 item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
                 cancellationToken))
-            throw new UnauthorizedAccessException("Tủ không thuộc phạm vi vận hành.");
+            throw new ForbiddenException("Tủ không thuộc phạm vi vận hành.");
     }
 
 
@@ -229,12 +229,12 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
         Parcel parcel = await dbContext.Parcels
             .Include(item => item.DeliveryRequest)
             .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy bưu kiện.");
+            ?? throw new NotFoundException("Không tìm thấy bưu kiện.");
 
         if (parcel.Status == ParcelStatus.Retrieved)
             return;
         if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
-            throw new InvalidOperationException("Bưu kiện không còn ở trạng thái có thể hoàn tất lấy hàng.");
+            throw new ConflictException("Bưu kiện không còn ở trạng thái có thể hoàn tất lấy hàng.");
 
         ParcelStatus previousStatus = parcel.Status;
         parcel.Status = ParcelStatus.Retrieved;

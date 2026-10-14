@@ -15,57 +15,41 @@ public sealed class OperatorIncidentsController(IIncidentService incidentService
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] IncidentStatus? status,
-        CancellationToken cancellationToken) =>
-        await ExecuteAsync(async (userId, role) =>
-            Ok(await incidentService.GetOperationalIncidentsAsync(
-                userId,
-                role,
-                status,
-                cancellationToken)));
+        CancellationToken cancellationToken)
+    {
+        var (userId, role) = GetIdentity();
+        return Ok(await incidentService.GetOperationalIncidentsAsync(userId, role, status, cancellationToken));
+    }
 
     [HttpPost("{id:guid}/actions")]
     public async Task<IActionResult> AddAction(
         Guid id,
         [FromBody] AddIncidentActionRequest request,
-        CancellationToken cancellationToken) =>
-        await ExecuteAsync(async (userId, role) =>
-            Ok(await incidentService.AddActionAsync(userId, role, id, request, cancellationToken)));
+        CancellationToken cancellationToken)
+    {
+        var (userId, role) = GetIdentity();
+        return Ok(await incidentService.AddActionAsync(userId, role, id, request, cancellationToken));
+    }
 
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(
         Guid id,
         [FromBody] UpdateIncidentStatusRequest request,
-        CancellationToken cancellationToken) =>
-        await ExecuteAsync(async (userId, role) =>
-            Ok(await incidentService.UpdateStatusAsync(userId, role, id, request, cancellationToken)));
-
-    private async Task<IActionResult> ExecuteAsync(Func<Guid, string, Task<IActionResult>> action)
+        CancellationToken cancellationToken)
     {
+        var (userId, role) = GetIdentity();
+        return Ok(await incidentService.UpdateStatusAsync(userId, role, id, request, cancellationToken));
+    }
+
+    private (Guid UserId, string Role) GetIdentity()
+    {
+        string? role = User.FindFirstValue(ClaimTypes.Role);
         if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId) ||
-            string.IsNullOrWhiteSpace(User.FindFirstValue(ClaimTypes.Role)))
+            string.IsNullOrWhiteSpace(role))
         {
-            return Unauthorized(new { message = "Invalid authentication token." });
+            throw new UnauthorizedException("Invalid authentication token.");
         }
 
-        try
-        {
-            return await action(userId, User.FindFirstValue(ClaimTypes.Role)!);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
-        }
+        return (userId, role);
     }
 }

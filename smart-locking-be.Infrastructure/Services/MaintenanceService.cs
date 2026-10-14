@@ -42,7 +42,7 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
             .Include(candidate => candidate.LockerCompartment)
             .Include(candidate => candidate.Activities)
             .SingleOrDefaultAsync(candidate => candidate.Id == id, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu bảo trì.");
+            ?? throw new NotFoundException("Không tìm thấy yêu cầu bảo trì.");
         return new MaintenanceDetailResponse(Map(item), item.Activities
             .OrderBy(activity => activity.CreatedAt)
             .Select(activity => new MaintenanceActivityResponse(
@@ -55,15 +55,15 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
     {
         await EnsureAccessAsync(userId, role, request.LockerId, cancellationToken);
         if (string.IsNullOrWhiteSpace(request.Description))
-            throw new ArgumentException("Mô tả bảo trì là bắt buộc.");
+            throw new BadRequestException("Mô tả bảo trì là bắt buộc.");
         if (request.CompartmentId.HasValue && !await dbContext.LockerCompartments.AnyAsync(
             item => item.Id == request.CompartmentId && item.LockerId == request.LockerId,
             cancellationToken))
-            throw new KeyNotFoundException("Không tìm thấy ngăn tủ.");
+            throw new NotFoundException("Không tìm thấy ngăn tủ.");
         if (request.IncidentId.HasValue && !await dbContext.Incidents.AnyAsync(item =>
             item.Id == request.IncidentId && item.LockerId == request.LockerId &&
             item.LockerCompartmentId == request.CompartmentId, cancellationToken))
-            throw new ArgumentException("Sự cố không thuộc đúng tủ hoặc ngăn được yêu cầu bảo trì.");
+            throw new BadRequestException("Sự cố không thuộc đúng tủ hoặc ngăn được yêu cầu bảo trì.");
 
         DateTimeOffset now = timeProvider.GetUtcNow();
         MaintenanceRequest entity = new()
@@ -97,10 +97,10 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
     {
         MaintenanceRequest entity = await dbContext.MaintenanceRequests
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu bảo trì.");
+            ?? throw new NotFoundException("Không tìm thấy yêu cầu bảo trì.");
         await EnsureAccessAsync(userId, role, entity.LockerId, cancellationToken);
         if (request.Status == MaintenanceStatus.Closed && string.IsNullOrWhiteSpace(request.ResolutionSummary))
-            throw new ArgumentException("Cần nhập kết quả bảo trì khi đóng yêu cầu.");
+            throw new BadRequestException("Cần nhập kết quả bảo trì khi đóng yêu cầu.");
         DateTimeOffset now = timeProvider.GetUtcNow();
         MaintenanceStatus previous = entity.Status;
         entity.Status = request.Status;
@@ -129,7 +129,7 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         nameof(UserRole.LockerOperator) => dbContext.MaintenanceRequests.Where(item =>
             dbContext.OperatorAssignments.Any(assignment =>
                 assignment.OperatorUserId == userId && assignment.LockerId == item.LockerId && assignment.RevokedAt == null)),
-        _ => throw new UnauthorizedAccessException()
+        _ => throw new ForbiddenException()
     };
 
     private async Task EnsureAccessAsync(Guid userId, string role, Guid lockerId, CancellationToken cancellationToken)
@@ -138,7 +138,7 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         if (role != nameof(UserRole.LockerOperator) || !await dbContext.OperatorAssignments.AnyAsync(item =>
             item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
             cancellationToken))
-            throw new UnauthorizedAccessException("Tủ không thuộc phạm vi vận hành.");
+            throw new ForbiddenException("Tủ không thuộc phạm vi vận hành.");
     }
 
     private void AddAudit(Guid userId, string action, Guid id, string details, DateTimeOffset now) =>

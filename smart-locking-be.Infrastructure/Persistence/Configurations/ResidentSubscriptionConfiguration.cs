@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using smart_locking_be.Domain.Entities;
-using smart_locking_be.Domain.Enums;
 
 namespace smart_locking_be.Infrastructure.Persistence.Configurations;
 

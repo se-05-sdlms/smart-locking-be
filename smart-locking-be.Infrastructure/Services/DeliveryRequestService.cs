@@ -29,11 +29,11 @@ public sealed class DeliveryRequestService(
         Locker locker = await dbContext.Lockers.SingleOrDefaultAsync(
             item => item.Code == lockerCode,
             cancellationToken)
-            ?? throw new KeyNotFoundException($"Locker với mã '{lockerCode}' không tồn tại.");
+            ?? throw new NotFoundException($"Locker với mã '{lockerCode}' không tồn tại.");
 
         if (locker.OperationalStatus != LockerOperationalStatus.Operational)
         {
-            throw new InvalidOperationException("Locker hiện không sẵn sàng nhận hàng.");
+            throw new ConflictException("Locker hiện không sẵn sàng nhận hàng.");
         }
 
         SystemPolicy policy = await dbContext.SystemPolicies.SingleOrDefaultAsync(
@@ -41,7 +41,7 @@ public sealed class DeliveryRequestService(
                     item.EffectiveFrom <= now &&
                     (item.EffectiveTo == null || item.EffectiveTo > now),
             cancellationToken)
-            ?? throw new InvalidOperationException("Không có chính sách hệ thống đang hiệu lực.");
+            ?? throw new InternalServerException("Không có chính sách hệ thống đang hiệu lực.");
 
         string guestSessionToken = tokenHashService.CreateSecureToken();
         DeliveryRequest deliveryRequest = new()
@@ -86,11 +86,11 @@ public sealed class DeliveryRequestService(
                            profile.User.Role == UserRole.Resident &&
                            profile.User.Status == UserStatus.Active,
                 cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy Cư dân đang hoạt động với số điện thoại đã nhập.");
+            ?? throw new NotFoundException("Không tìm thấy Cư dân đang hoạt động với số điện thoại đã nhập.");
 
         if (resident.RegisteredLockerId != deliveryRequest.LockerId)
         {
-            throw new InvalidOperationException("Cư dân không đăng ký nhận hàng tại locker này.");
+            throw new ConflictException("Cư dân không đăng ký nhận hàng tại locker này.");
         }
 
         deliveryRequest.ResidentProfileId = resident.Id;
@@ -241,16 +241,16 @@ public sealed class DeliveryRequestService(
         DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests
             .Include(r => r.SystemPolicy)
             .SingleOrDefaultAsync(r => r.Id == requestId, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu giao hàng.");
+            ?? throw new NotFoundException("Không tìm thấy yêu cầu giao hàng.");
 
         if (deliveryRequest.ResidentProfileId != resident.Id)
         {
-            throw new UnauthorizedAccessException("Bạn không có quyền duyệt yêu cầu giao hàng này.");
+            throw new ForbiddenException("Bạn không có quyền duyệt yêu cầu giao hàng này.");
         }
 
         if (deliveryRequest.Status != DeliveryRequestStatus.PendingApproval)
         {
-            throw new InvalidOperationException($"Không thể duyệt yêu cầu ở trạng thái {deliveryRequest.Status}.");
+            throw new ConflictException($"Không thể duyệt yêu cầu ở trạng thái {deliveryRequest.Status}.");
         }
 
         if (deliveryRequest.ApprovalExpiresAt.HasValue && deliveryRequest.ApprovalExpiresAt <= now)
@@ -259,7 +259,7 @@ public sealed class DeliveryRequestService(
             deliveryRequest.FailureCode = DeliveryRequestFailureCode.ApprovalExpired;
             deliveryRequest.UpdatedAt = now;
             await dbContext.SaveChangesAsync(cancellationToken);
-            throw new TimeoutException("Thời hạn phê duyệt yêu cầu giao hàng đã hết.");
+            throw new GoneException("Thời hạn phê duyệt yêu cầu giao hàng đã hết.");
         }
 
         deliveryRequest.Status = DeliveryRequestStatus.Approved;
@@ -283,16 +283,16 @@ public sealed class DeliveryRequestService(
         DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests
             .Include(r => r.SystemPolicy)
             .SingleOrDefaultAsync(r => r.Id == requestId, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu giao hàng.");
+            ?? throw new NotFoundException("Không tìm thấy yêu cầu giao hàng.");
 
         if (deliveryRequest.ResidentProfileId != resident.Id)
         {
-            throw new UnauthorizedAccessException("Bạn không có quyền từ chối yêu cầu giao hàng này.");
+            throw new ForbiddenException("Bạn không có quyền từ chối yêu cầu giao hàng này.");
         }
 
         if (deliveryRequest.Status != DeliveryRequestStatus.PendingApproval)
         {
-            throw new InvalidOperationException($"Không thể từ chối yêu cầu ở trạng thái {deliveryRequest.Status}.");
+            throw new ConflictException($"Không thể từ chối yêu cầu ở trạng thái {deliveryRequest.Status}.");
         }
 
         if (deliveryRequest.ApprovalExpiresAt.HasValue && deliveryRequest.ApprovalExpiresAt <= now)
@@ -301,7 +301,7 @@ public sealed class DeliveryRequestService(
             deliveryRequest.FailureCode = DeliveryRequestFailureCode.ApprovalExpired;
             deliveryRequest.UpdatedAt = now;
             await dbContext.SaveChangesAsync(cancellationToken);
-            throw new TimeoutException("Thời hạn phê duyệt yêu cầu giao hàng đã hết.");
+            throw new GoneException("Thời hạn phê duyệt yêu cầu giao hàng đã hết.");
         }
 
         deliveryRequest.Status = DeliveryRequestStatus.Rejected;
@@ -347,7 +347,7 @@ public sealed class DeliveryRequestService(
         DeliveryRequest deliveryRequest = await FindValidSessionAsync(requestId, guestSessionToken, cancellationToken);
         if (deliveryRequest.Status != DeliveryRequestStatus.Approved)
         {
-            throw new InvalidOperationException($"Chưa thể phân bổ ngăn tủ cho yêu cầu ở trạng thái {deliveryRequest.Status}.");
+            throw new ConflictException($"Chưa thể phân bổ ngăn tủ cho yêu cầu ở trạng thái {deliveryRequest.Status}.");
         }
 
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -367,7 +367,7 @@ public sealed class DeliveryRequestService(
             deliveryRequest.UpdatedAt = now;
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            throw new InvalidOperationException("Không tìm thấy ngăn tủ trống khả dụng tại locker này.");
+            throw new ConflictException("Không tìm thấy ngăn tủ trống khả dụng tại locker này.");
         }
 
         LockerCompartment availableCompartment = reservation.LockerCompartment;
@@ -400,7 +400,9 @@ public sealed class DeliveryRequestService(
             deliveryRequest.FailureDetail = access.FailureReason;
             deliveryRequest.UpdatedAt = now;
             await dbContext.SaveChangesAsync(cancellationToken);
-            throw new InvalidOperationException(access.FailureReason ?? "Không thể mở ngăn locker.");
+            throw access.Result == LockerAccessResult.Failed
+                ? new ServiceUnavailableException(access.FailureReason ?? "Không thể mở ngăn locker.")
+                : new ConflictException(access.FailureReason ?? "Không thể mở ngăn locker.");
         }
 
         return new CompartmentReservationResponse(
@@ -448,19 +450,19 @@ public sealed class DeliveryRequestService(
             .Include(item => item.SystemPolicy)
             .Include(item => item.Locker)
             .SingleOrDefaultAsync(item => item.Id == requestId, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu giao hàng.");
+            ?? throw new NotFoundException("Không tìm thấy yêu cầu giao hàng.");
         if (deliveryRequest.Status == DeliveryRequestStatus.Deposited)
         {
             return;
         }
         if (deliveryRequest.Status != DeliveryRequestStatus.Allocated)
         {
-            throw new InvalidOperationException($"Không thể xác nhận gửi hàng khi yêu cầu ở trạng thái {deliveryRequest.Status}.");
+            throw new ConflictException($"Không thể xác nhận gửi hàng khi yêu cầu ở trạng thái {deliveryRequest.Status}.");
         }
 
         if (!deliveryRequest.AllocatedCompartmentId.HasValue)
         {
-            throw new InvalidOperationException("Yêu cầu giao hàng chưa được phân bổ ngăn tủ.");
+            throw new ConflictException("Yêu cầu giao hàng chưa được phân bổ ngăn tủ.");
         }
 
         DateTimeOffset now = completedAt;
@@ -471,7 +473,7 @@ public sealed class DeliveryRequestService(
             deliveryRequest.FailureCode = DeliveryRequestFailureCode.ReservationExpired;
             deliveryRequest.UpdatedAt = now;
             await dbContext.SaveChangesAsync(cancellationToken);
-            throw new TimeoutException("Thời gian giữ ngăn tủ đã hết hạn.");
+            throw new GoneException("Thời gian giữ ngăn tủ đã hết hạn.");
         }
 
         (_, DateTimeOffset pickupDueAt, DateTimeOffset transferEligibleAt) = ParcelTimeline.GetDeadlines(
@@ -554,7 +556,7 @@ public sealed class DeliveryRequestService(
 
         if (deliveryRequest.Status != DeliveryRequestStatus.Started)
         {
-            throw new InvalidOperationException($"Không thể cập nhật yêu cầu ở trạng thái {deliveryRequest.Status}.");
+            throw new ConflictException($"Không thể cập nhật yêu cầu ở trạng thái {deliveryRequest.Status}.");
         }
 
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -564,7 +566,7 @@ public sealed class DeliveryRequestService(
             deliveryRequest.FailureCode = DeliveryRequestFailureCode.SessionExpired;
             deliveryRequest.UpdatedAt = now;
             await dbContext.SaveChangesAsync(cancellationToken);
-            throw new TimeoutException("Phiên gửi hàng đã hết hạn.");
+            throw new GoneException("Phiên gửi hàng đã hết hạn.");
         }
 
         return deliveryRequest;
@@ -577,7 +579,7 @@ public sealed class DeliveryRequestService(
     {
         if (string.IsNullOrWhiteSpace(guestSessionToken))
         {
-            throw new System.Security.Authentication.AuthenticationException("Thiếu X-Guest-Session-Token.");
+            throw new UnauthorizedException("Thiếu X-Guest-Session-Token.");
         }
 
         string tokenHash = tokenHashService.HashToken(guestSessionToken.Trim());
@@ -585,11 +587,11 @@ public sealed class DeliveryRequestService(
             .Include(request => request.SystemPolicy)
             .Include(request => request.Locker)
             .SingleOrDefaultAsync(request => request.Id == id, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu giao hàng.");
+            ?? throw new NotFoundException("Không tìm thấy yêu cầu giao hàng.");
 
         if (!string.Equals(deliveryRequest.GuestSessionTokenHash, tokenHash, StringComparison.Ordinal))
         {
-            throw new System.Security.Authentication.AuthenticationException("Guest session token không hợp lệ.");
+            throw new UnauthorizedException("Guest session token không hợp lệ.");
         }
 
         return deliveryRequest;
@@ -599,7 +601,7 @@ public sealed class DeliveryRequestService(
         await dbContext.ResidentProfiles
             .Include(p => p.User)
             .SingleOrDefaultAsync(p => p.UserId == userId && p.User.Status == UserStatus.Active, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy hồ sơ Cư dân hợp lệ.");
+            ?? throw new NotFoundException("Không tìm thấy hồ sơ Cư dân hợp lệ.");
 
     private static void RefreshSession(DeliveryRequest request, DateTimeOffset now)
     {
@@ -614,7 +616,7 @@ public sealed class DeliveryRequestService(
         if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
-            throw new ArgumentException("ParcelImageUrl phải là URL HTTP hoặc HTTPS tuyệt đối.", nameof(value));
+            throw new BadRequestException("ParcelImageUrl phải là URL HTTP hoặc HTTPS tuyệt đối.", nameof(value));
         }
 
         return url;
@@ -624,13 +626,13 @@ public sealed class DeliveryRequestService(
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new ArgumentException("Giá trị không được để trống.", parameterName);
+            throw new BadRequestException("Giá trị không được để trống.", parameterName);
         }
 
         string trimmed = value.Trim();
         if (trimmed.Length > maxLength)
         {
-            throw new ArgumentException($"Giá trị không được vượt quá {maxLength} ký tự.", parameterName);
+            throw new BadRequestException($"Giá trị không được vượt quá {maxLength} ký tự.", parameterName);
         }
 
         return trimmed;

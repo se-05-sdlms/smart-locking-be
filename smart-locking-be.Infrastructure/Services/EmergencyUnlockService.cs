@@ -20,17 +20,17 @@ public sealed class EmergencyUnlockService(
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length < 10)
-            throw new ArgumentException("Lý do mở khẩn cấp phải có ít nhất 10 ký tự.");
+            throw new BadRequestException("Lý do mở khẩn cấp phải có ít nhất 10 ký tự.");
         await EnsureAccessAsync(userId, role, request.LockerId, cancellationToken);
         LockerCompartment compartment = await dbContext.LockerCompartments.SingleOrDefaultAsync(
             item => item.Id == request.CompartmentId && item.LockerId == request.LockerId,
-            cancellationToken) ?? throw new KeyNotFoundException("Không tìm thấy ngăn tủ.");
+            cancellationToken) ?? throw new NotFoundException("Không tìm thấy ngăn tủ.");
         if (request.IncidentId.HasValue && !await dbContext.Incidents.AnyAsync(incident =>
             incident.Id == request.IncidentId &&
             incident.LockerId == request.LockerId &&
             incident.LockerCompartmentId == request.CompartmentId,
             cancellationToken))
-            throw new ArgumentException("Sự cố không thuộc đúng tủ hoặc ngăn được mở khẩn cấp.");
+            throw new BadRequestException("Sự cố không thuộc đúng tủ hoặc ngăn được mở khẩn cấp.");
         DateTimeOffset now = timeProvider.GetUtcNow();
         EmergencyUnlock entity = new()
         {
@@ -76,6 +76,6 @@ public sealed class EmergencyUnlockService(
             !await dbContext.OperatorAssignments.AnyAsync(item =>
                 item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
                 cancellationToken))
-            throw new UnauthorizedAccessException("Tủ không thuộc phạm vi vận hành.");
+            throw new ForbiddenException("Tủ không thuộc phạm vi vận hành.");
     }
 }
