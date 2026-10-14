@@ -42,6 +42,7 @@ public sealed class DeliveryRequestServiceTests
         Assert.Equal(response.Status, saved.Status);
         Assert.Equal(response.SessionExpiresAt, saved.SessionExpiresAt);
         Assert.Equal(Now, saved.CreatedAt);
+        Assert.Equal(Now, saved.UpdatedAt);
         Assert.Equal(Now, saved.LastActivityAt);
         context.AssertAudit("DeliveryRequest.Created", saved.Id);
         context.AssertNoExternalCalls();
@@ -66,7 +67,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using TestContext context = await TestContext.CreateAsync(seedRequest: false);
         context.Locker.OperationalStatus = LockerOperationalStatus.OutOfService;
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => context.Service.CreateAsync(new(context.Locker.Code)));
 
@@ -81,7 +82,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using TestContext context = await TestContext.CreateAsync(seedRequest: false);
         context.Policy.IsActive = false;
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => context.Service.CreateAsync(new(context.Locker.Code)));
 
@@ -144,7 +145,7 @@ public sealed class DeliveryRequestServiceTests
         Assert.Equal(context.Request.Id, response.Id);
         Assert.Equal(ImageUrl, response.ParcelImageUrl);
         Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
-        Assert.Equal(context.Request.SessionExpiresAt, response.SessionExpiresAt);
+        Assert.Equal(Now.AddMinutes(15), response.SessionExpiresAt);
         DeliveryRequest saved = await context.ReloadRequestAsync();
         Assert.Equal(context.Resident.Id, saved.ResidentProfileId);
         Assert.Equal(Phone, saved.RecipientPhoneSnapshot);
@@ -153,7 +154,18 @@ public sealed class DeliveryRequestServiceTests
         Assert.Equal(response.Status, saved.Status);
         Assert.Equal(Now, saved.LastActivityAt);
         Assert.Equal(Now, saved.UpdatedAt);
+        Assert.Equal(Now.AddMinutes(15), saved.SessionExpiresAt);
+        Assert.Equal(Now.AddMinutes(10), saved.ApprovalExpiresAt);
+        Assert.Null(saved.DecisionAt);
         context.AssertAudit("DeliveryRequest.Submitted");
+        Assert.Equal((context.Resident.UserId, context.Request.Id, context.Locker.Code), Assert.Single(context.Push.Approvals));
+        Assert.Equal(context.Push.NotificationId, Assert.Single(context.Push.Sent));
+        Assert.Empty(context.Push.Stored);
+        Assert.Empty(context.Access.Calls);
+        Assert.Empty(context.Allocation.Reserved);
+        Assert.Empty(context.Allocation.Released);
+        Assert.Empty(context.Realtime.LockerEvents);
+        Assert.Empty(context.Realtime.UserEvents);
     }
 
     [Fact]
@@ -162,7 +174,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using TestContext context = await TestContext.CreateAsync();
         context.Resident.User.Status = UserStatus.Disabled;
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         var exception = await Assert.ThrowsAsync<KeyNotFoundException>(() => context.Service.SubmitAsync(context.Request.Id, GuestToken, new(ImageUrl, Phone)));
 
@@ -176,7 +188,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using TestContext context = await TestContext.CreateAsync();
         context.Resident.RegisteredLockerId = Guid.NewGuid();
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => context.Service.SubmitAsync(context.Request.Id, GuestToken, new(ImageUrl, Phone)));
 
@@ -227,16 +239,22 @@ public sealed class DeliveryRequestServiceTests
     {
         await using TestContext context = await TestContext.CreateAsync();
         context.Resident.DeliveryApprovalMode = DeliveryApprovalMode.Auto;
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         DeliveryRequestSummaryResponse response = await context.Service.SubmitAsync(context.Request.Id, GuestToken, new(ImageUrl, Phone));
 
         Assert.Equal(DeliveryRequestStatus.Approved, response.Status);
+        Assert.Equal(context.Request.Id, response.Id);
+        Assert.Equal(ImageUrl, response.ParcelImageUrl);
+        Assert.Equal(Now.AddMinutes(15), response.SessionExpiresAt);
         DeliveryRequest saved = await context.ReloadRequestAsync();
         Assert.Equal(DeliveryRequestStatus.Approved, saved.Status);
         Assert.Equal(Now, saved.DecisionAt);
         Assert.Null(saved.ApprovalExpiresAt);
         Assert.Equal(DeliveryApprovalMode.Auto, saved.ApprovalModeSnapshot);
+        Assert.Equal(context.Resident.Id, saved.ResidentProfileId);
+        Assert.Equal(Phone, saved.RecipientPhoneSnapshot);
+        Assert.Equal(ImageUrl, saved.ParcelImageUrl);
         context.AssertNoExternalCalls();
         context.AssertAudit("DeliveryRequest.Submitted");
     }
@@ -250,14 +268,23 @@ public sealed class DeliveryRequestServiceTests
         DeliveryRequestSummaryResponse response = await context.Service.SubmitAsync(context.Request.Id, GuestToken, new(ImageUrl, Phone));
 
         Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
+        Assert.Equal(context.Request.Id, response.Id);
+        Assert.Equal(ImageUrl, response.ParcelImageUrl);
+        Assert.Equal(Now.AddMinutes(15), response.SessionExpiresAt);
         DeliveryRequest saved = await context.ReloadRequestAsync();
         Assert.Equal(response.Status, saved.Status);
         Assert.Equal(Now.AddMinutes(10), saved.ApprovalExpiresAt);
         Assert.Null(saved.DecisionAt);
+        Assert.Equal(DeliveryApprovalMode.Manual, saved.ApprovalModeSnapshot);
+        Assert.Equal(context.Resident.Id, saved.ResidentProfileId);
         Assert.Equal((context.Resident.UserId, context.Request.Id, context.Locker.Code), Assert.Single(context.Push.Approvals));
         Assert.Equal(context.Push.NotificationId, Assert.Single(context.Push.Sent));
         Assert.Empty(context.Push.Stored);
         Assert.Empty(context.Access.Calls);
+        Assert.Empty(context.Allocation.Reserved);
+        Assert.Empty(context.Allocation.Released);
+        Assert.Empty(context.Realtime.LockerEvents);
+        Assert.Empty(context.Realtime.UserEvents);
         context.AssertAudit("DeliveryRequest.Submitted");
     }
     #endregion
@@ -273,10 +300,12 @@ public sealed class DeliveryRequestServiceTests
 
         Assert.Equal(context.Request.Id, response.RequestId);
         Assert.Equal(DeliveryRequestStatus.PendingApproval, response.Status);
-        Assert.Equal(context.Request.ApprovalExpiresAt, response.ApprovalExpiresAt);
+        Assert.Equal(Now.AddMinutes(10), response.ApprovalExpiresAt);
         Assert.Null(response.CompartmentCode);
         Assert.Null(response.ParcelId);
         Assert.Null(response.FailureCode);
+        Assert.Null(response.FailureDetail);
+        Assert.Null(response.ReservationExpiresAt);
         await context.AssertUnchangedAsync(DeliveryRequestStatus.PendingApproval);
     }
 
@@ -311,7 +340,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using TestContext context = await TestContext.CreateAsync(DeliveryRequestStatus.PendingApproval);
         context.Request.ApprovalExpiresAt = Now;
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         GuestDeliveryStatusResponse response = await context.Service.GetAsync(context.Request.Id, GuestToken);
 
@@ -333,15 +362,19 @@ public sealed class DeliveryRequestServiceTests
         context.Request.ReservationExpiresAt = Now.AddMinutes(10);
         var parcel = new Parcel { Id = Guid.NewGuid(), DeliveryRequestId = context.Request.Id, ParcelCode = "P-STORED", Status = ParcelStatus.Stored };
         context.Db.Parcels.Add(parcel);
-        await context.Db.SaveChangesAsync();
+        DeliveryRequest otherRequest = context.AddRequest(DeliveryRequestStatus.Deposited);
+        context.Db.Parcels.Add(new Parcel { Id = Guid.NewGuid(), DeliveryRequestId = otherRequest.Id, ParcelCode = "P-OTHER", Status = ParcelStatus.Stored });
+        await context.SaveSetupAsync();
 
         GuestDeliveryStatusResponse response = await context.Service.GetAsync(context.Request.Id, GuestToken);
 
         Assert.Equal(context.Compartment.Code, response.CompartmentCode);
+        Assert.Equal(context.Request.Id, response.RequestId);
         Assert.Equal(parcel.Id, response.ParcelId);
-        Assert.Equal(context.Request.ReservationExpiresAt, response.ReservationExpiresAt);
+        Assert.Equal(Now.AddMinutes(10), response.ReservationExpiresAt);
         Assert.Equal(DeliveryRequestStatus.Deposited, response.Status);
-        Assert.Single(context.Db.Parcels);
+        await context.AssertRequestUnchangedAsync(DeliveryRequestStatus.Deposited);
+        Assert.Equal(2, context.Db.Parcels.Count());
         Assert.Empty(context.Db.AuditLogs);
         context.AssertNoExternalCalls();
     }
@@ -390,7 +423,7 @@ public sealed class DeliveryRequestServiceTests
         context.AddRequest(DeliveryRequestStatus.Approved);
         DeliveryRequest expired = context.AddRequest(DeliveryRequestStatus.PendingApproval);
         expired.ApprovalExpiresAt = Now;
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         var response = await context.Service.GetPendingRequestsForResidentAsync(context.Resident.UserId, pageNumber: 10, pageSize: 10);
 
@@ -408,7 +441,7 @@ public sealed class DeliveryRequestServiceTests
         var firstPage = await context.Service.GetPendingRequestsForResidentAsync(context.Resident.UserId);
         Assert.Equal(context.Request.Id, firstPage.Items[0].RequestId);
         Assert.Equal(context.Request.CreatedAt.AddMinutes(10), firstPage.Items[0].ApprovalExpiresAt);
-        context.AssertNoEffects();
+        await context.AssertUnchangedAsync(DeliveryRequestStatus.PendingApproval);
     }
 
     [Fact]
@@ -417,7 +450,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using TestContext context = await TestContext.CreateAsync(DeliveryRequestStatus.PendingApproval);
         context.Resident.User.Status = UserStatus.Disabled;
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         var exception = await Assert.ThrowsAsync<KeyNotFoundException>(() => context.Service.GetPendingRequestsForResidentAsync(context.Resident.UserId, pageNumber: 10, pageSize: 10));
 
@@ -592,6 +625,8 @@ public sealed class DeliveryRequestServiceTests
         Assert.Equal(Now, saved.AllocatedAt);
         Assert.Equal(response.ReservationExpiresAt, saved.ReservationExpiresAt);
         Assert.Equal(Now, saved.LastActivityAt);
+        Assert.Equal(Now, saved.UpdatedAt);
+        Assert.Null(saved.FailureCode);
         Assert.Equal((context.Locker.Id, (Guid?)context.Request.Id, (Guid?)null, Now.AddMinutes(10)), Assert.Single(context.Allocation.Reserved));
         OpenLockerRequest open = Assert.Single(context.Access.Calls);
         Assert.Equal(context.Locker.Id, open.LockerId);
@@ -600,10 +635,16 @@ public sealed class DeliveryRequestServiceTests
         Assert.Equal(LockerAccessType.ShipperDropOff, open.AccessType);
         Assert.Equal(LockerAccessMethod.GuestSession, open.AccessMethod);
         Assert.Null(open.UserId);
+        Assert.Null(open.ParcelId);
         Assert.Null(open.ReturnRequestId);
         Assert.Empty(context.Allocation.Released);
         context.AssertAudit("DeliveryRequest.CompartmentAllocated");
+        Assert.Equal(context.Compartment.Code, Assert.Single(context.Db.AuditLogs).Details);
+        Assert.Empty(context.Push.Approvals);
+        Assert.Empty(context.Push.Stored);
         Assert.Empty(context.Push.Sent);
+        Assert.Empty(context.Realtime.LockerEvents);
+        Assert.Empty(context.Realtime.UserEvents);
     }
 
     [Fact]
@@ -742,7 +783,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using TestContext context = await TestContext.CreateAsync(DeliveryRequestStatus.Allocated);
         context.Request.AllocatedCompartmentId = null;
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => context.Service.FinalizeDropOffAsync(context.Request.Id, Now));
 
@@ -756,7 +797,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using TestContext context = await TestContext.CreateAsync(DeliveryRequestStatus.Allocated);
         context.Request.ReservationExpiresAt = Now;
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         var exception = await Assert.ThrowsAsync<TimeoutException>(() => context.Service.FinalizeDropOffAsync(context.Request.Id, Now));
 
@@ -796,10 +837,14 @@ public sealed class DeliveryRequestServiceTests
 
         await context.Service.FinalizeDropOffAsync(context.Request.Id, Now.AddMinutes(2));
 
-        Assert.Equal(parcel.Id, Assert.Single(context.Db.Parcels).Id);
-        Assert.Equal(historyId, Assert.Single(context.Db.ParcelStatusHistories).Id);
-        Assert.Equal(auditId, Assert.Single(context.Db.AuditLogs).Id);
         DeliveryRequest saved = await context.ReloadRequestAsync();
+        Assert.Equal(parcel.Id, Assert.Single(context.Db.Parcels).Id);
+        Assert.Equal(Now, Assert.Single(context.Db.Parcels).StoredAt);
+        Assert.Equal(ParcelStatus.Stored, Assert.Single(context.Db.Parcels).Status);
+        Assert.Equal(historyId, Assert.Single(context.Db.ParcelStatusHistories).Id);
+        Assert.Equal(Now, Assert.Single(context.Db.ParcelStatusHistories).ChangedAt);
+        Assert.Equal(auditId, Assert.Single(context.Db.AuditLogs).Id);
+        Assert.Equal(Now, Assert.Single(context.Db.AuditLogs).OccurredAt);
         Assert.Equal(DeliveryRequestStatus.Deposited, saved.Status);
         Assert.Equal(Now, saved.DepositedAt);
         Assert.Equal(Now, saved.UpdatedAt);
@@ -838,7 +883,7 @@ public sealed class DeliveryRequestServiceTests
         if (noDeadline)
         {
             context.Request.ApprovalExpiresAt = null;
-            await context.Db.SaveChangesAsync();
+            await context.SaveSetupAsync();
         }
 
         DeliveryRequestSummaryResponse response = await DecideAsync(context, approve, context.Resident.UserId, context.Request.Id);
@@ -847,16 +892,22 @@ public sealed class DeliveryRequestServiceTests
         Assert.Equal(context.Request.Id, response.Id);
         Assert.Equal(expected, response.Status);
         Assert.Equal(ImageUrl, response.ParcelImageUrl);
-        Assert.Equal(context.Request.SessionExpiresAt, response.SessionExpiresAt);
+        Assert.Equal(Now.AddMinutes(15), response.SessionExpiresAt);
         DeliveryRequest saved = await context.ReloadRequestAsync();
         Assert.Equal(expected, saved.Status);
         Assert.Equal(Now, saved.DecisionAt);
         Assert.Equal(Now, saved.LastActivityAt);
         Assert.Equal(Now, saved.UpdatedAt);
         Assert.Null(saved.FailureCode);
+        Assert.Equal(Now.AddMinutes(15), saved.SessionExpiresAt);
+        Assert.Equal(context.Resident.Id, saved.ResidentProfileId);
         if (noDeadline)
         {
             Assert.Null(saved.ApprovalExpiresAt);
+        }
+        else
+        {
+            Assert.Equal(Now.AddMinutes(10), saved.ApprovalExpiresAt);
         }
         context.AssertAudit(approve ? "DeliveryRequest.Approved" : "DeliveryRequest.Rejected", actorUserId: context.Resident.UserId);
         context.AssertNoExternalCalls();
@@ -877,7 +928,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using TestContext context = await TestContext.CreateAsync(DeliveryRequestStatus.PendingApproval);
         context.Request.ResidentProfileId = Guid.NewGuid();
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         var exception = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => DecideAsync(context, approve, context.Resident.UserId, context.Request.Id));
 
@@ -899,7 +950,7 @@ public sealed class DeliveryRequestServiceTests
     {
         await using TestContext context = await TestContext.CreateAsync(DeliveryRequestStatus.PendingApproval);
         context.Request.ApprovalExpiresAt = Now;
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         var exception = await Assert.ThrowsAsync<TimeoutException>(() => DecideAsync(context, approve, context.Resident.UserId, context.Request.Id));
 
@@ -964,7 +1015,7 @@ public sealed class DeliveryRequestServiceTests
             noDeadline = context.AddRequest(status);
             SetDeadline(noDeadline, status, null);
         }
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         int count = await ExpireAsync(context, status);
 
@@ -982,23 +1033,42 @@ public sealed class DeliveryRequestServiceTests
         DeliveryRequest secondSaved = await context.Db.DeliveryRequests.SingleAsync(r => r.Id == secondExpired.Id);
         Assert.Equal(DeliveryRequestStatus.Expired, secondSaved.Status);
         Assert.Equal(failure, secondSaved.FailureCode);
-        Assert.Equal(status, (await context.Db.DeliveryRequests.SingleAsync(r => r.Id == future.Id)).Status);
-        Assert.Equal(DeliveryRequestStatus.Deposited, (await context.Db.DeliveryRequests.SingleAsync(r => r.Id == differentStatus.Id)).Status);
+        Assert.Equal(Now, secondSaved.UpdatedAt);
+        DeliveryRequest savedFuture = await context.Db.DeliveryRequests.SingleAsync(r => r.Id == future.Id);
+        Assert.Equal(status, savedFuture.Status);
+        Assert.Equal(Now.AddMinutes(-5), savedFuture.UpdatedAt);
+        Assert.Null(savedFuture.FailureCode);
+        DeliveryRequest savedDifferentStatus = await context.Db.DeliveryRequests.SingleAsync(r => r.Id == differentStatus.Id);
+        Assert.Equal(DeliveryRequestStatus.Deposited, savedDifferentStatus.Status);
+        Assert.Equal(Now.AddMinutes(-5), savedDifferentStatus.UpdatedAt);
+        Assert.Null(savedDifferentStatus.FailureCode);
         if (noDeadline is not null)
         {
-            Assert.Equal(status, (await context.Db.DeliveryRequests.SingleAsync(r => r.Id == noDeadline.Id)).Status);
+            DeliveryRequest savedNoDeadline = await context.Db.DeliveryRequests.SingleAsync(r => r.Id == noDeadline.Id);
+            Assert.Equal(status, savedNoDeadline.Status);
+            Assert.Equal(Now.AddMinutes(-5), savedNoDeadline.UpdatedAt);
+            Assert.Null(savedNoDeadline.FailureCode);
         }
-        Assert.Equal(2, context.Db.AuditLogs.Count());
+        Assert.Equal(new Guid?[] { context.Request.Id, secondExpired.Id }.OrderBy(id => id),
+            context.Db.AuditLogs.Select(a => a.EntityId).ToList().OrderBy(id => id));
         Assert.All(context.Db.AuditLogs, audit =>
         {
             Assert.Equal("DeliveryRequest.Expired", audit.Action);
+            Assert.Equal(nameof(DeliveryRequest), audit.EntityType);
+            Assert.Null(audit.ActorUserId);
             Assert.Equal(AuditLogResult.Succeeded, audit.Result);
             Assert.Equal(Now, audit.OccurredAt);
             Assert.Contains(audit.EntityId, new Guid?[] { context.Request.Id, secondExpired.Id });
         });
         Assert.Empty(context.Allocation.Reserved);
         Assert.Empty(context.Access.Calls);
+        Assert.Empty(context.Push.Approvals);
+        Assert.Empty(context.Push.Stored);
         Assert.Empty(context.Push.Sent);
+        Assert.Empty(context.Realtime.LockerEvents);
+        Assert.Empty(context.Realtime.UserEvents);
+        Assert.Empty(context.Db.Parcels);
+        Assert.Empty(context.Db.ParcelStatusHistories);
         if (status == DeliveryRequestStatus.Allocated)
         {
             Assert.Equal(2, context.Allocation.Released.Count);
@@ -1017,7 +1087,7 @@ public sealed class DeliveryRequestServiceTests
         SetDeadline(context.Request, status, Now.AddTicks(1));
         DeliveryRequest other = context.AddRequest(DeliveryRequestStatus.Deposited);
         SetDeadline(other, status, Now.AddMinutes(-1));
-        await context.Db.SaveChangesAsync();
+        await context.SaveSetupAsync();
 
         int count = await ExpireAsync(context, status);
 
@@ -1041,12 +1111,23 @@ public sealed class DeliveryRequestServiceTests
         Assert.Equal(reason, saved.FailureDetail);
         Assert.Equal(Now, saved.UpdatedAt);
         Assert.Single(context.Allocation.Reserved);
-        Assert.Single(context.Access.Calls);
+        OpenLockerRequest open = Assert.Single(context.Access.Calls);
+        Assert.Equal(context.Request.Id, open.DeliveryRequestId);
+        Assert.Equal(context.Locker.Id, open.LockerId);
+        Assert.Equal(context.Compartment.Id, open.LockerCompartmentId);
+        Assert.Equal(context.Compartment.Id, saved.AllocatedCompartmentId);
+        Assert.Equal(Now, saved.AllocatedAt);
+        Assert.Equal(Now.AddMinutes(10), saved.ReservationExpiresAt);
         Assert.Equal(((Guid?)context.Request.Id, (Guid?)null, Now), Assert.Single(context.Allocation.Released));
         // Allocation is persisted and audited before the device call, even if opening fails.
         context.AssertAudit("DeliveryRequest.CompartmentAllocated");
         Assert.Empty(context.Db.Parcels);
+        Assert.Empty(context.Db.ParcelStatusHistories);
+        Assert.Empty(context.Push.Approvals);
+        Assert.Empty(context.Push.Stored);
         Assert.Empty(context.Push.Sent);
+        Assert.Empty(context.Realtime.LockerEvents);
+        Assert.Empty(context.Realtime.UserEvents);
     }
 
     private static async Task AssertDepositedAsync(TestContext context, DateTimeOffset completedAt)
@@ -1062,6 +1143,8 @@ public sealed class DeliveryRequestServiceTests
         Assert.Equal(ParcelStatus.Stored, parcel.Status);
         Assert.NotEmpty(parcel.ParcelCode);
         Assert.Equal(completedAt, parcel.StoredAt);
+        Assert.Equal(completedAt, parcel.CreatedAt);
+        Assert.Equal(completedAt, parcel.UpdatedAt);
         // 2026-10-15 00:00 in Vietnam is the first counting day after this completion.
         Assert.Equal(new DateTimeOffset(2026, 10, 15, 17, 0, 0, TimeSpan.Zero), parcel.PickupDueAt);
         Assert.Equal(new DateTimeOffset(2026, 10, 17, 17, 0, 0, TimeSpan.Zero), parcel.MaxStorageUntil);
@@ -1084,6 +1167,8 @@ public sealed class DeliveryRequestServiceTests
     #region Test infrastructure
     private sealed class TestContext : IAsyncDisposable
     {
+        private Dictionary<string, object?> requestSnapshot = [];
+
         public ApplicationDbContext Db { get; } = new(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         public Locker Locker { get; } = new()
@@ -1162,7 +1247,7 @@ public sealed class DeliveryRequestServiceTests
                 ReservedAt = Now,
                 ExpiresAt = Now.AddMinutes(10)
             };
-            await context.Db.SaveChangesAsync();
+            await context.SaveSetupAsync();
             context.Service = new DeliveryRequestService(context.Db, new Sha256TokenHashService(), context.Push,
                 context.Access, context.Allocation, new FixedTimeProvider(), realtime ? context.Realtime : null);
             return context;
@@ -1198,19 +1283,29 @@ public sealed class DeliveryRequestServiceTests
             return await Db.DeliveryRequests.SingleAsync(r => r.Id == Request.Id);
         }
 
-        public async Task AssertUnchangedAsync(DeliveryRequestStatus status)
+        public async Task SaveSetupAsync()
+        {
+            await Db.SaveChangesAsync();
+            if (Request is not null)
+            {
+                requestSnapshot = Db.Entry(Request).Properties.ToDictionary(p => p.Metadata.Name, p => p.CurrentValue);
+            }
+        }
+
+        public async Task AssertRequestUnchangedAsync(DeliveryRequestStatus status)
         {
             DeliveryRequest saved = await ReloadRequestAsync();
             Assert.Equal(status, saved.Status);
-            Assert.Equal(Now.AddMinutes(-5), saved.UpdatedAt);
-            Assert.Null(saved.DecisionAt);
-            Assert.Null(saved.DepositedAt);
-            Assert.Null(saved.FailureCode);
-            if (status == DeliveryRequestStatus.Started)
+            Assert.NotEmpty(requestSnapshot);
+            foreach ((string property, object? expected) in requestSnapshot)
             {
-                Assert.Null(saved.ResidentProfileId);
-                Assert.Null(saved.ParcelImageUrl);
+                Assert.Equal(expected, Db.Entry(saved).Property(property).CurrentValue);
             }
+        }
+
+        public async Task AssertUnchangedAsync(DeliveryRequestStatus status)
+        {
+            await AssertRequestUnchangedAsync(status);
             AssertNoEffects();
         }
 
