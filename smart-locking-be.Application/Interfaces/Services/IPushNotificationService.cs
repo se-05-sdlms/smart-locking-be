@@ -7,13 +7,6 @@ public interface IPushNotificationService
         Guid deliveryRequestId,
         string lockerCode);
 
-    Guid EnqueueParcelStored(
-        Guid residentUserId,
-        Guid deliveryRequestId,
-        Guid parcelId,
-        string lockerCode,
-        string compartmentCode);
-
     Guid EnqueueReturnNotification(
         Guid residentUserId,
         Guid returnRequestId,
@@ -27,4 +20,25 @@ public interface IPushNotificationService
 
     Task<int> RetryPendingDeliveryApprovalNotificationsAsync(
         CancellationToken cancellationToken = default);
+    Guid EnqueueParcelTransferred(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string collectionAddress);
+
+    Guid EnqueueParcelStored(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string lockerCode,
+        string compartmentCode);
+
+    Guid EnqueueParcelPickupReminder(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string lockerCode,
+        int daysUntilTransfer,
+        bool isOverdue);
+
 }

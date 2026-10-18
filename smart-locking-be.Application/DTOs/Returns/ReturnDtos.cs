@@ -4,10 +4,8 @@ namespace smart_locking_be.Application.DTOs.Returns;
 
 public sealed record CreateReturnRequest(string ImageUrl, string? Note);
 public sealed record ReturnUnlockResponse(Guid ReturnRequestId, string CompartmentCode, Guid AccessEventId, DateTimeOffset ReservationExpiresAt);
-public sealed record ReturnDepositResponse(Guid ReturnRequestId, string PickupCode, string CompartmentCode, ReturnRequestStatus Status);
 public sealed record ValidateReturnPickupRequest(string LockerCode, string PickupCode);
 public sealed record ReturnPickupSessionResponse(Guid ReturnRequestId, string GuestSessionToken, string LockerCode, string CompartmentCode, string ImageUrl, DateTimeOffset ExpiresAt);
-public sealed record ReturnPickupCompleteResponse(Guid ReturnRequestId, ReturnRequestStatus Status, string CompartmentCode);
 public sealed record ReturnRequestResponse(
     Guid Id,
     string PickupCode,

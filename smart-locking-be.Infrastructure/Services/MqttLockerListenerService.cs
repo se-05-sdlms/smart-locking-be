@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Protocol;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
@@ -51,7 +52,6 @@ public sealed class MqttLockerListenerService(
             optionsBuilder.WithTlsOptions(options =>
             {
                 options.UseTls();
-                options.WithCertificateValidationHandler(_ => true);
             });
         }
 
@@ -80,11 +80,11 @@ public sealed class MqttLockerListenerService(
                 {
                     logger.LogInformation("[MQTT LISTENER] Đang kết nối tới EMQX Broker ({Host}:{Port})...", host, port);
                     await _mqttClient.ConnectAsync(options, stoppingToken);
-                    logger.LogInformation("[MQTT LISTENER] Đã kết nối thành công! Đăng ký lắng nghe trạng thái cửa và sự kiện offline...");
+                    logger.LogInformation("[MQTT LISTENER] Đã kết nối thành công! Đăng ký lắng nghe 'lockers/+/doors/+/status'...");
 
                     await _mqttClient.SubscribeAsync("lockers/+/doors/+/status", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
                     await _mqttClient.SubscribeAsync("lockers/+/events/offline", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
-                    logger.LogInformation("[MQTT LISTENER] Đã subscribe thành công các topic IoT.");
+                    logger.LogInformation("[MQTT LISTENER] Đã subscribe thành công topic trạng thái cửa.");
                 }
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
@@ -105,16 +105,15 @@ public sealed class MqttLockerListenerService(
 
     internal async Task HandleMessageAsync(string topic, string payload, CancellationToken cancellationToken)
     {
+        // Topic pattern: lockers/{deviceId}/doors/{channel}/status
         var parts = topic.Split('/');
-
-        // 1. Nhận sự kiện mở tủ Offline: lockers/{deviceId}/events/offline
+        // Giu luong Bluetooth cu cua nhanh hien tai khi ghep voi xu ly cua tu dev.
         if (parts.Length == 4 && parts[0] == "lockers" && parts[2] == "events" && parts[3] == "offline")
         {
             await HandleOfflineEventAsync(parts[1], payload, cancellationToken);
             return;
         }
 
-        // 2. Nhận trạng thái cửa: lockers/{deviceId}/doors/{channel}/status
         if (parts.Length != 5 || parts[0] != "lockers" || parts[2] != "doors" || parts[4] != "status")
         {
             return;
@@ -127,6 +126,11 @@ public sealed class MqttLockerListenerService(
         }
 
         string statusStr = payload.Trim().ToUpperInvariant();
+        if (statusStr is not ("OPEN" or "CLOSED"))
+        {
+            logger.LogWarning("[MQTT LISTENER] Bỏ qua trạng thái cửa không hợp lệ: '{Payload}'.", payload);
+            return;
+        }
         DoorStatus doorStatus = statusStr == "CLOSED" ? DoorStatus.Closed : DoorStatus.Open;
 
         using var scope = serviceScopeFactory.CreateScope();
@@ -142,21 +146,64 @@ public sealed class MqttLockerListenerService(
             return;
         }
 
-        // Tự động đánh dấu tủ Online và cập nhật thời điểm nhìn thấy
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         locker.ConnectionStatus = LockerConnectionStatus.Online;
-        locker.LastSeenAt = DateTimeOffset.UtcNow;
-        locker.UpdatedAt = DateTimeOffset.UtcNow;
+        locker.LastSeenAt = now;
+        locker.UpdatedAt = now;
 
         var compartment = locker.Compartments.FirstOrDefault(c => c.HardwareChannel == channel);
+        DoorStatus? previousDoorStatus = compartment?.DoorStatus;
         if (compartment is not null)
         {
             compartment.DoorStatus = doorStatus;
-            compartment.UpdatedAt = DateTimeOffset.UtcNow;
+            compartment.UpdatedAt = now;
+        }
+
+        if (compartment is not null && previousDoorStatus == DoorStatus.Open && doorStatus == DoorStatus.Closed)
+        {
+            await FinalizeActiveAccessAsync(scope.ServiceProvider, dbContext, compartment.Id, now, cancellationToken);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
         logger.LogInformation("[MQTT IN] Locker '{DeviceId}' - Ngăn {Channel} -> Cửa: {Status} (Online)",
             deviceIdentifier, channel, doorStatus);
+    }
+
+    private static async Task FinalizeActiveAccessAsync(
+        IServiceProvider services,
+        ApplicationDbContext dbContext,
+        Guid compartmentId,
+        DateTimeOffset completedAt,
+        CancellationToken cancellationToken)
+    {
+        LockerAccessEvent? access = await dbContext.LockerAccessEvents
+            .AsNoTracking()
+            .Where(item => item.LockerCompartmentId == compartmentId && item.Result == LockerAccessResult.Succeeded)
+            .OrderByDescending(item => item.OccurredAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (access is null) return;
+
+        switch (access.AccessType)
+        {
+            case LockerAccessType.ShipperDropOff when access.DeliveryRequestId.HasValue:
+                await services.GetRequiredService<IDeliveryRequestService>()
+                    .FinalizeDropOffAsync(access.DeliveryRequestId.Value, completedAt, cancellationToken);
+                break;
+            case LockerAccessType.ResidentPickup when access.ParcelId.HasValue:
+                await services.GetRequiredService<IParcelService>()
+                    .FinalizeRetrievalAsync(access.ParcelId.Value, access.UserId, completedAt, cancellationToken);
+                break;
+            case LockerAccessType.ResidentReturnDropOff when access.ReturnRequestId.HasValue:
+                await services.GetRequiredService<IReturnRequestService>()
+                    .FinalizeDepositAsync(access.ReturnRequestId.Value, completedAt, cancellationToken);
+                break;
+            case LockerAccessType.ShipperReturnPickup when access.ReturnRequestId.HasValue:
+                await services.GetRequiredService<IReturnPickupSessionService>()
+                    .FinalizePickupAsync(access.ReturnRequestId.Value, completedAt, cancellationToken);
+                break;
+        }
     }
 
     private async Task HandleOfflineEventAsync(string deviceIdentifier, string payload, CancellationToken cancellationToken)

@@ -38,16 +38,6 @@ public sealed class DeliveryRequest
     public string GuestSessionTokenHash { get; set; } = string.Empty;
 
     /// <summary>
-    /// Họ tên của Shipper nếu quy trình thu thập.
-    /// </summary>
-    public string? ShipperName { get; set; }
-
-    /// <summary>
-    /// Số điện thoại của Shipper nếu quy trình thu thập.
-    /// </summary>
-    public string? ShipperPhone { get; set; }
-
-    /// <summary>
     /// Số điện thoại Cư dân nhận hàng do Shipper xác nhận; null ở bước đầu phiên.
     /// </summary>
     public string? RecipientPhoneSnapshot { get; set; }

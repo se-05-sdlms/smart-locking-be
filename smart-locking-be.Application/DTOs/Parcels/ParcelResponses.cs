@@ -7,7 +7,8 @@ public enum ParcelListView
 {
     Active,
     History,
-    All
+    All,
+    ClearancePending
 }
 
 public sealed record ParcelListItemResponse(
@@ -56,3 +57,9 @@ public sealed record ParcelStatusHistoryResponse(
     [property: JsonConverter(typeof(JsonStringEnumConverter))] ParcelStatus ToStatus,
     string? Reason,
     DateTimeOffset ChangedAt);
+
+public sealed record OverdueTransferResponse(
+    Guid ParcelId,
+    string ParcelCode,
+    string CollectionAddress,
+    string Status);

@@ -41,7 +41,7 @@ public sealed class NotificationService(
                 notification.Title,
                 notification.Message,
                 notification.DeliveryRequestId,
-                notification.ReturnRequestId,
+        notification.ReturnRequestId,
                 notification.ParcelId,
                 notification.IncidentId,
                 notification.PaymentTransactionId,
@@ -115,6 +115,11 @@ public sealed class NotificationService(
             cancellationToken))
         {
             throw new KeyNotFoundException("System policy not found.");
+        }
+        if (await dbContext.SystemPolicies.AnyAsync(
+            policy => policy.Id == request.SystemPolicyId && policy.IsActive, cancellationToken))
+        {
+            throw new InvalidOperationException("Rules of an active policy are immutable.");
         }
         if (await dbContext.NotificationRules.AnyAsync(rule =>
             rule.SystemPolicyId == request.SystemPolicyId &&

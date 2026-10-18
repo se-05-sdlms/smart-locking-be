@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using smart_locking_be.Application.Interfaces.Services;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
@@ -13,7 +14,8 @@ public sealed class ExpoPushNotificationService(
     ApplicationDbContext dbContext,
     HttpClient httpClient,
     TimeProvider timeProvider,
-    ILogger<ExpoPushNotificationService> logger) : IPushNotificationService
+    ILogger<ExpoPushNotificationService> logger,
+    IOperationsRealtimeNotifier? realtimeNotifier = null) : IPushNotificationService
 {
     private const string ExpoPushEndpoint = "https://exp.host/--/api/v2/push/send";
     private const string DeliveryApprovalRequestType = "DeliveryApprovalRequested";
@@ -98,6 +100,27 @@ public sealed class ExpoPushNotificationService(
         return push.Id;
     }
 
+    public Guid EnqueueParcelTransferred(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string collectionAddress)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        const string type = "ParcelTransferred";
+        const string title = "Kiện hàng đã chuyển điểm tập kết";
+        string message = $"Nhận kiện tại {collectionAddress}.";
+        Notification inApp = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, type,
+            NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
+        inApp.SentAt = now;
+        Notification push = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, type,
+            NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
+        dbContext.Notifications.AddRange(inApp, push);
+        return push.Id;
+    }
+
     public async Task TrySendAsync(Guid notificationId, CancellationToken cancellationToken = default)
     {
         try
@@ -155,6 +178,17 @@ public sealed class ExpoPushNotificationService(
         Notification notification = await dbContext.Notifications
             .SingleOrDefaultAsync(item => item.Id == notificationId, cancellationToken)
             ?? throw new KeyNotFoundException($"Không tìm thấy push notification '{notificationId}'.");
+
+        if (realtimeNotifier is not null)
+        {
+            await realtimeNotifier.PublishToUserAsync(notification.UserId, new RealtimeEvent(
+                notification.Type,
+                notification.ParcelId ?? notification.ReturnRequestId ?? notification.DeliveryRequestId ?? notification.IncidentId,
+                null,
+                "Updated",
+                notification.Message,
+                notification.CreatedAt), cancellationToken);
+        }
 
         if (notification.Channel != NotificationChannel.Push ||
             notification.DeliveryStatus == NotificationDeliveryStatus.Sent)
@@ -270,4 +304,34 @@ public sealed class ExpoPushNotificationService(
         ticket.TryGetProperty("details", out JsonElement details) &&
         details.TryGetProperty("error", out JsonElement error) &&
         error.GetString() == "DeviceNotRegistered";
+    public Guid EnqueueParcelPickupReminder(
+        Guid residentUserId,
+        Guid deliveryRequestId,
+        Guid parcelId,
+        string lockerCode,
+        int daysUntilTransfer,
+        bool isOverdue)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        bool clearanceWarning = daysUntilTransfer <= 1;
+        string type = clearanceWarning ? "ParcelClearanceWarning" : "ParcelPickupReminder";
+        string title = clearanceWarning ? "Cảnh báo thu hồi kiện hàng trong 24 giờ" :
+            isOverdue ? "Kiện hàng đã quá hạn" : "Nhắc nhận kiện hàng";
+        string message = clearanceWarning
+            ? $"Vui lòng nhận kiện tại tủ {lockerCode} ngay. Kiện sẽ được chuyển điểm tập kết trong vòng 24 giờ và không thể mở tủ từ xa sau hạn lưu trữ."
+            : isOverdue
+            ? $"Kiện tại tủ {lockerCode} đã quá hạn. Còn {daysUntilTransfer} ngày trước khi chuyển điểm tập kết."
+            : $"Vui lòng nhận kiện tại tủ {lockerCode}. Còn {daysUntilTransfer} ngày trước khi chuyển điểm tập kết.";
+        Notification inApp = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, type,
+            NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
+        inApp.SentAt = now;
+        Notification push = CreateNotification(
+            residentUserId, deliveryRequestId, null, parcelId, type,
+            NotificationChannel.Push, title, message, NotificationDeliveryStatus.Pending, now);
+        dbContext.Notifications.AddRange(inApp, push);
+        return push.Id;
+    }
+
+
 }

@@ -77,7 +77,6 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
             optionsBuilder.WithTlsOptions(options =>
             {
                 options.UseTls();
-                options.WithCertificateValidationHandler(_ => true);
             });
         }
         return optionsBuilder.Build();

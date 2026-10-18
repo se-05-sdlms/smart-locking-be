@@ -24,6 +24,7 @@ public sealed class ParcelPickupService(
             .Include(item => item.OverdueCharge)
             .Include(item => item.DeliveryRequest).ThenInclude(request => request.ResidentProfile)
             .Include(item => item.DeliveryRequest).ThenInclude(request => request.SystemPolicy)
+            .Include(item => item.DeliveryRequest).ThenInclude(request => request.Locker)
             .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
             ?? throw new KeyNotFoundException("Không tìm thấy bưu kiện.");
 
@@ -34,6 +35,11 @@ public sealed class ParcelPickupService(
         if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
         {
             throw new InvalidOperationException("Bưu kiện không còn ở trạng thái có thể nhận.");
+        }
+        if (timeProvider.GetUtcNow() >= parcel.MaxStorageUntil)
+        {
+            throw new InvalidOperationException(
+                $"Bưu kiện đã hết hạn lưu trữ tối đa. Vui lòng liên hệ điểm tập kết tại {parcel.DeliveryRequest.Locker.RecoveryAddress} để nhận hàng.");
         }
         if (parcel.OverdueCharge?.Status == OverdueChargeStatus.Outstanding)
         {

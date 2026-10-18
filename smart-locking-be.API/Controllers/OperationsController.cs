@@ -32,8 +32,8 @@ public sealed class OperationsController(IOperationsService service) : Controlle
     }
 }
 
-[ApiController, Route("api/reports"), Authorize(Roles = "Administrator")]
-public sealed class ReportsController(IOperationsService service) : ControllerBase
+[ApiController, Route("api/operations/reports"), Authorize(Roles = "Administrator")]
+public sealed class LegacyOperationsReportsController(IOperationsService service) : ControllerBase
 {
     [HttpGet("summary")] public async Task<IActionResult> Summary([FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, CancellationToken ct)
     {
@@ -49,8 +49,8 @@ public sealed class ReportsController(IOperationsService service) : ControllerBa
     }
 }
 
-[ApiController, Route("api/audit-logs"), Authorize(Roles = "Administrator")]
-public sealed class AuditLogsController(IOperationsService service) : ControllerBase
+[ApiController, Route("api/operations/audit-logs"), Authorize(Roles = "Administrator")]
+public sealed class LegacyOperationsAuditLogsController(IOperationsService service) : ControllerBase
 {
     [HttpGet] public async Task<IActionResult> Get([FromQuery] string? query, [FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, CancellationToken ct) => Ok(await service.GetAuditLogsAsync(query, from, to, ct));
 }

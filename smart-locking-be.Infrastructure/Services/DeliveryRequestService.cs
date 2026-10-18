@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -13,13 +15,11 @@ public sealed class DeliveryRequestService(
     ITokenHashService tokenHashService,
     IPushNotificationService pushNotificationService,
     ILockerAccessService lockerAccessService,
-    TimeProvider timeProvider) : IDeliveryRequestService
+    ICompartmentAllocationService compartmentAllocationService,
+    TimeProvider timeProvider,
+    IOperationsRealtimeNotifier? realtimeNotifier = null) : IDeliveryRequestService
 {
-    // ==========================================
-    // Issue #19: Guest Shipper Initiate & Submit
-    // ==========================================
-
-    public async Task<InitiateDeliveryResponse> InitiateAsync(
+    public async Task<InitiateDeliveryResponse> CreateAsync(
         InitiateDeliveryRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -58,6 +58,7 @@ public sealed class DeliveryRequestService(
         };
 
         dbContext.DeliveryRequests.Add(deliveryRequest);
+        AddAudit(null, "DeliveryRequest.Created", deliveryRequest, deliveryRequest.Status.ToString(), now);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return new InitiateDeliveryResponse(
@@ -67,37 +68,16 @@ public sealed class DeliveryRequestService(
             deliveryRequest.SessionExpiresAt);
     }
 
-    public async Task<DeliveryRequestSummaryResponse> UploadImageAsync(
+    public async Task<DeliveryRequestSummaryResponse> SubmitAsync(
         Guid id,
         string guestSessionToken,
-        UploadParcelImageRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
-        string parcelImageUrl = ValidateImageUrl(request.ParcelImageUrl);
-        DateTimeOffset now = timeProvider.GetUtcNow();
-
-        deliveryRequest.ParcelImageUrl = parcelImageUrl;
-        RefreshSession(deliveryRequest, now);
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return MapSummary(deliveryRequest);
-    }
-
-    public async Task<DeliveryRequestSummaryResponse> SubmitRecipientAsync(
-        Guid id,
-        string guestSessionToken,
-        SubmitRecipientPhoneRequest request,
+        SubmitDeliveryRequest request,
         CancellationToken cancellationToken = default)
     {
         DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
         string recipientPhone = RequireValue(request.RecipientPhone, nameof(request.RecipientPhone), 20);
+        string parcelImageUrl = ValidateImageUrl(request.ParcelImageUrl);
         DateTimeOffset now = timeProvider.GetUtcNow();
-
-        if (deliveryRequest.ParcelImageUrl is null)
-        {
-            throw new InvalidOperationException("Phải cung cấp URL ảnh bưu kiện trước khi gửi thông tin người nhận.");
-        }
 
         ResidentProfile resident = await dbContext.ResidentProfiles
             .Include(profile => profile.User)
@@ -114,6 +94,7 @@ public sealed class DeliveryRequestService(
         }
 
         deliveryRequest.ResidentProfileId = resident.Id;
+        deliveryRequest.ParcelImageUrl = parcelImageUrl;
         deliveryRequest.RecipientPhoneSnapshot = recipientPhone;
         deliveryRequest.ApprovalModeSnapshot = resident.DeliveryApprovalMode;
         deliveryRequest.Status = resident.DeliveryApprovalMode == DeliveryApprovalMode.Auto
@@ -135,6 +116,7 @@ public sealed class DeliveryRequestService(
                 deliveryRequest.Locker.Code);
         }
 
+        AddAudit(null, "DeliveryRequest.Submitted", deliveryRequest, deliveryRequest.Status.ToString(), now);
         await dbContext.SaveChangesAsync(cancellationToken);
         if (pushNotificationId.HasValue)
         {
@@ -144,7 +126,7 @@ public sealed class DeliveryRequestService(
         return MapSummary(deliveryRequest);
     }
 
-    public async Task<GuestDeliveryStatusResponse> GetGuestStatusAsync(
+    public async Task<GuestDeliveryStatusResponse> GetAsync(
         Guid id,
         string guestSessionToken,
         CancellationToken cancellationToken = default)
@@ -196,6 +178,7 @@ public sealed class DeliveryRequestService(
             request.Status = DeliveryRequestStatus.Expired;
             request.FailureCode = DeliveryRequestFailureCode.SessionExpired;
             request.UpdatedAt = now;
+            AddAudit(null, "DeliveryRequest.Expired", request, "Guest session expired.", now);
         }
 
         if (expiredSessions.Count > 0)
@@ -210,24 +193,32 @@ public sealed class DeliveryRequestService(
     // Issue #20: Resident Delivery Approval
     // ==========================================
 
-    public async Task<IReadOnlyCollection<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(
+    public async Task<PagedResult<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(
         Guid residentUserId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
         ResidentProfile resident = await GetActiveResidentProfileAsync(residentUserId, cancellationToken);
 
-        List<DeliveryRequest> pendingRequests = await dbContext.DeliveryRequests
+        IQueryable<DeliveryRequest> query = dbContext.DeliveryRequests
             .AsNoTracking()
             .Include(r => r.Locker)
             .Include(r => r.SystemPolicy)
             .Where(r => r.ResidentProfileId == resident.Id &&
                         r.Status == DeliveryRequestStatus.PendingApproval &&
-                        (r.ApprovalExpiresAt == null || r.ApprovalExpiresAt > now))
+                        (r.ApprovalExpiresAt == null || r.ApprovalExpiresAt > now));
+        pageNumber = Math.Max(pageNumber, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        int totalCount = await query.CountAsync(cancellationToken);
+        List<DeliveryRequest> pendingRequests = await query
             .OrderByDescending(r => r.CreatedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        return pendingRequests.Select(r => new PendingDeliveryRequestResponse(
+        List<PendingDeliveryRequestResponse> items = pendingRequests.Select(r => new PendingDeliveryRequestResponse(
             r.Id,
             r.Locker.Code,
             r.Locker.Address,
@@ -236,6 +227,7 @@ public sealed class DeliveryRequestService(
             r.CreatedAt,
             r.ApprovalExpiresAt ?? r.CreatedAt.AddMinutes(r.SystemPolicy.ManualApprovalTimeoutMinutes)
         )).ToList();
+        return new PagedResult<PendingDeliveryRequestResponse>(items, totalCount, pageNumber, pageSize);
     }
 
     public async Task<DeliveryRequestSummaryResponse> ApproveDeliveryRequestAsync(
@@ -275,6 +267,7 @@ public sealed class DeliveryRequestService(
         deliveryRequest.LastActivityAt = now;
         deliveryRequest.UpdatedAt = now;
 
+        AddAudit(residentUserId, "DeliveryRequest.Approved", deliveryRequest, null, now);
         await dbContext.SaveChangesAsync(cancellationToken);
         return MapSummary(deliveryRequest);
     }
@@ -316,6 +309,7 @@ public sealed class DeliveryRequestService(
         deliveryRequest.LastActivityAt = now;
         deliveryRequest.UpdatedAt = now;
 
+        AddAudit(residentUserId, "DeliveryRequest.Rejected", deliveryRequest, null, now);
         await dbContext.SaveChangesAsync(cancellationToken);
         return MapSummary(deliveryRequest);
     }
@@ -334,6 +328,7 @@ public sealed class DeliveryRequestService(
             request.Status = DeliveryRequestStatus.Expired;
             request.FailureCode = DeliveryRequestFailureCode.ApprovalExpired;
             request.UpdatedAt = now;
+            AddAudit(null, "DeliveryRequest.Expired", request, "Approval expired.", now);
         }
 
         if (expiredRequests.Count > 0)
@@ -344,11 +339,7 @@ public sealed class DeliveryRequestService(
         return expiredRequests.Count;
     }
 
-    // ==========================================
-    // Issue #21: Compartment Reservation
-    // ==========================================
-
-    public async Task<CompartmentReservationResponse> ReserveCompartmentAsync(
+    public async Task<CompartmentReservationResponse> OpenCompartmentAsync(
         Guid requestId,
         string guestSessionToken,
         CancellationToken cancellationToken = default)
@@ -361,30 +352,14 @@ public sealed class DeliveryRequestService(
 
         DateTimeOffset now = timeProvider.GetUtcNow();
 
-        List<LockerCompartment> compartments = await dbContext.LockerCompartments
-            .Where(c => c.LockerId == deliveryRequest.LockerId &&
-                        c.OperationalStatus == LockerCompartmentOperationalStatus.Operational)
-            .OrderBy(c => c.Code)
-            .ToListAsync(cancellationToken);
-
-        LockerCompartment? availableCompartment = null;
-        foreach (LockerCompartment compartment in compartments)
-        {
-            bool hasStoredParcel = await dbContext.Parcels.AnyAsync(
-                p => p.DeliveryRequest.AllocatedCompartmentId == compartment.Id && p.Status == ParcelStatus.Stored,
-                cancellationToken);
-            if (hasStoredParcel) continue;
-
-            bool hasActiveReservation = await dbContext.CompartmentReservations.AnyAsync(
-                r => r.LockerCompartmentId == compartment.Id && r.ReleasedAt == null && r.ExpiresAt > now,
-                cancellationToken);
-            if (hasActiveReservation) continue;
-
-            availableCompartment = compartment;
-            break;
-        }
-
-        if (availableCompartment is null)
+        DateTimeOffset reservationExpiresAt = now.AddMinutes(deliveryRequest.SystemPolicy.CompartmentReservationMinutes);
+        CompartmentReservation? reservation = await compartmentAllocationService.ReserveAvailableAsync(
+            deliveryRequest.LockerId,
+            deliveryRequest.Id,
+            null,
+            reservationExpiresAt,
+            cancellationToken);
+        if (reservation is null)
         {
             deliveryRequest.Status = DeliveryRequestStatus.Failed;
             deliveryRequest.FailureCode = DeliveryRequestFailureCode.NoCompartment;
@@ -395,25 +370,15 @@ public sealed class DeliveryRequestService(
             throw new InvalidOperationException("Không tìm thấy ngăn tủ trống khả dụng tại locker này.");
         }
 
-        DateTimeOffset reservationExpiresAt = now.AddMinutes(deliveryRequest.SystemPolicy.CompartmentReservationMinutes);
-        CompartmentReservation reservation = new()
-        {
-            Id = Guid.NewGuid(),
-            LockerCompartmentId = availableCompartment.Id,
-            DeliveryRequestId = deliveryRequest.Id,
-            ReservedAt = now,
-            ExpiresAt = reservationExpiresAt,
-            CreatedAt = now
-        };
-
-        deliveryRequest.AllocatedCompartmentId = availableCompartment.Id;
+        LockerCompartment availableCompartment = reservation.LockerCompartment;
+        deliveryRequest.AllocatedCompartmentId = reservation.LockerCompartmentId;
         deliveryRequest.Status = DeliveryRequestStatus.Allocated;
         deliveryRequest.AllocatedAt = now;
         deliveryRequest.ReservationExpiresAt = reservationExpiresAt;
         deliveryRequest.LastActivityAt = now;
         deliveryRequest.UpdatedAt = now;
 
-        dbContext.CompartmentReservations.Add(reservation);
+        AddAudit(null, "DeliveryRequest.CompartmentAllocated", deliveryRequest, availableCompartment.Code, now);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         OpenLockerResponse access = await lockerAccessService.OpenAsync(new OpenLockerRequest(
@@ -429,7 +394,7 @@ public sealed class DeliveryRequestService(
             "Guest Web"), cancellationToken);
         if (access.Result != LockerAccessResult.Succeeded)
         {
-            reservation.ReleasedAt = now;
+            await compartmentAllocationService.ReleaseAsync(deliveryRequest.Id, null, now, cancellationToken);
             deliveryRequest.Status = DeliveryRequestStatus.Failed;
             deliveryRequest.FailureCode = DeliveryRequestFailureCode.DeviceUnavailable;
             deliveryRequest.FailureDetail = access.FailureReason;
@@ -461,15 +426,9 @@ public sealed class DeliveryRequestService(
             request.Status = DeliveryRequestStatus.Expired;
             request.FailureCode = DeliveryRequestFailureCode.ReservationExpired;
             request.UpdatedAt = now;
+            AddAudit(null, "DeliveryRequest.Expired", request, "Compartment reservation expired.", now);
 
-            List<CompartmentReservation> activeReservations = await dbContext.CompartmentReservations
-                .Where(cr => cr.DeliveryRequestId == request.Id && cr.ReleasedAt == null)
-                .ToListAsync(cancellationToken);
-
-            foreach (CompartmentReservation res in activeReservations)
-            {
-                res.ReleasedAt = now;
-            }
+            await compartmentAllocationService.ReleaseAsync(request.Id, null, now, cancellationToken);
         }
 
         if (expiredReservations.Count > 0)
@@ -480,16 +439,20 @@ public sealed class DeliveryRequestService(
         return expiredReservations.Count;
     }
 
-    // ==========================================
-    // Issue #22: Shipper Drop-off / Confirm Deposited
-    // ==========================================
-
-    public async Task<DropOffConfirmationResponse> ConfirmDropOffAsync(
+    public async Task FinalizeDropOffAsync(
         Guid requestId,
-        string guestSessionToken,
+        DateTimeOffset completedAt,
         CancellationToken cancellationToken = default)
     {
-        DeliveryRequest deliveryRequest = await FindValidSessionAsync(requestId, guestSessionToken, cancellationToken);
+        DeliveryRequest deliveryRequest = await dbContext.DeliveryRequests
+            .Include(item => item.SystemPolicy)
+            .Include(item => item.Locker)
+            .SingleOrDefaultAsync(item => item.Id == requestId, cancellationToken)
+            ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu giao hàng.");
+        if (deliveryRequest.Status == DeliveryRequestStatus.Deposited)
+        {
+            return;
+        }
         if (deliveryRequest.Status != DeliveryRequestStatus.Allocated)
         {
             throw new InvalidOperationException($"Không thể xác nhận gửi hàng khi yêu cầu ở trạng thái {deliveryRequest.Status}.");
@@ -500,16 +463,7 @@ public sealed class DeliveryRequestService(
             throw new InvalidOperationException("Yêu cầu giao hàng chưa được phân bổ ngăn tủ.");
         }
 
-        DateTimeOffset now = timeProvider.GetUtcNow();
-
-        DoorStatus doorStatus = await dbContext.LockerCompartments
-            .Where(item => item.Id == deliveryRequest.AllocatedCompartmentId.Value)
-            .Select(item => item.DoorStatus)
-            .SingleAsync(cancellationToken);
-        if (doorStatus != DoorStatus.Closed)
-        {
-            throw new InvalidOperationException("Chưa thể hoàn tất gửi hàng vì cửa ngăn chưa đóng.");
-        }
+        DateTimeOffset now = completedAt;
 
         if (deliveryRequest.ReservationExpiresAt.HasValue && deliveryRequest.ReservationExpiresAt <= now)
         {
@@ -520,6 +474,10 @@ public sealed class DeliveryRequestService(
             throw new TimeoutException("Thời gian giữ ngăn tủ đã hết hạn.");
         }
 
+        (_, DateTimeOffset pickupDueAt, DateTimeOffset transferEligibleAt) = ParcelTimeline.GetDeadlines(
+            now,
+            deliveryRequest.SystemPolicy.OverdueStartAfterHours,
+            deliveryRequest.SystemPolicy.MaxStorageHours);
         Parcel parcel = new()
         {
             Id = Guid.NewGuid(),
@@ -527,8 +485,8 @@ public sealed class DeliveryRequestService(
             ParcelCode = $"P-{Guid.NewGuid():N}"[..10].ToUpperInvariant(),
             Status = ParcelStatus.Stored,
             StoredAt = now,
-            PickupDueAt = now.AddHours(deliveryRequest.SystemPolicy.OverdueStartAfterHours),
-            MaxStorageUntil = now.AddHours(deliveryRequest.SystemPolicy.MaxStorageHours),
+            PickupDueAt = pickupDueAt,
+            MaxStorageUntil = transferEligibleAt,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -543,14 +501,7 @@ public sealed class DeliveryRequestService(
             ChangedAt = now
         };
 
-        List<CompartmentReservation> reservations = await dbContext.CompartmentReservations
-            .Where(r => r.DeliveryRequestId == deliveryRequest.Id && r.ReleasedAt == null)
-            .ToListAsync(cancellationToken);
-
-        foreach (CompartmentReservation reservation in reservations)
-        {
-            reservation.ReleasedAt = now;
-        }
+        await compartmentAllocationService.ReleaseAsync(deliveryRequest.Id, null, now, cancellationToken);
 
         deliveryRequest.Status = DeliveryRequestStatus.Deposited;
         deliveryRequest.DepositedAt = now;
@@ -574,14 +525,20 @@ public sealed class DeliveryRequestService(
             parcel.Id,
             deliveryRequest.Locker.Code,
             compartmentCode);
+        AddAudit(null, "DeliveryRequest.Deposited", deliveryRequest, $"ParcelId={parcel.Id}", now);
         await dbContext.SaveChangesAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushNotificationId, cancellationToken);
+        if (realtimeNotifier is not null)
+        {
+            await realtimeNotifier.PublishToLockerAsync(deliveryRequest.LockerId, new RealtimeEvent(
+                "ParcelStored",
+                parcel.Id,
+                deliveryRequest.LockerId,
+                parcel.Status.ToString(),
+                "Parcel stored in locker.",
+                now), cancellationToken);
+        }
 
-        return new DropOffConfirmationResponse(
-            deliveryRequest.Id,
-            parcel.Id,
-            deliveryRequest.Status,
-            now);
     }
 
     // ==========================================
@@ -620,7 +577,7 @@ public sealed class DeliveryRequestService(
     {
         if (string.IsNullOrWhiteSpace(guestSessionToken))
         {
-            throw new UnauthorizedAccessException("Thiếu X-Guest-Session-Token.");
+            throw new System.Security.Authentication.AuthenticationException("Thiếu X-Guest-Session-Token.");
         }
 
         string tokenHash = tokenHashService.HashToken(guestSessionToken.Trim());
@@ -632,7 +589,7 @@ public sealed class DeliveryRequestService(
 
         if (!string.Equals(deliveryRequest.GuestSessionTokenHash, tokenHash, StringComparison.Ordinal))
         {
-            throw new UnauthorizedAccessException("Guest session token không hợp lệ.");
+            throw new System.Security.Authentication.AuthenticationException("Guest session token không hợp lệ.");
         }
 
         return deliveryRequest;
@@ -681,4 +638,17 @@ public sealed class DeliveryRequestService(
 
     private static DeliveryRequestSummaryResponse MapSummary(DeliveryRequest request) =>
         new(request.Id, request.Status, request.ParcelImageUrl, request.SessionExpiresAt);
+
+    private void AddAudit(Guid? actorUserId, string action, DeliveryRequest request, string? details, DateTimeOffset occurredAt) =>
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = actorUserId,
+            Action = action,
+            EntityType = nameof(DeliveryRequest),
+            EntityId = request.Id,
+            Result = AuditLogResult.Succeeded,
+            Details = details,
+            OccurredAt = occurredAt
+        });
 }

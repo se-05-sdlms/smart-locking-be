@@ -1,3 +1,4 @@
+using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Returns;
 
 namespace smart_locking_be.Application.Interfaces.Services;
@@ -5,12 +6,13 @@ namespace smart_locking_be.Application.Interfaces.Services;
 public interface IReturnRequestService
 {
     Task<ReturnRequestResponse> CreateAsync(Guid residentUserId, CreateReturnRequest request, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<ReturnRequestResponse>> GetMineAsync(Guid residentUserId, CancellationToken cancellationToken = default);
+    Task<PagedResult<ReturnRequestResponse>> GetMineAsync(
+        Guid residentUserId,
+        CancellationToken cancellationToken = default,
+        int pageNumber = 1,
+        int pageSize = 20);
     Task<ReturnRequestResponse> GetAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default);
-    Task<ReturnUnlockResponse> AllocateAndOpenAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default);
-    Task<ReturnDepositResponse> ConfirmDepositAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default);
-    Task<ReturnPickupSessionResponse> ValidatePickupAsync(ValidateReturnPickupRequest request, CancellationToken cancellationToken = default);
-    Task<ReturnPickupSessionResponse> OpenForPickupAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default);
-    Task<ReturnPickupCompleteResponse> ConfirmPickupAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default);
+    Task<ReturnUnlockResponse> OpenCompartmentAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default);
+    Task FinalizeDepositAsync(Guid id, DateTimeOffset completedAt, CancellationToken cancellationToken = default);
     Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default);
 }

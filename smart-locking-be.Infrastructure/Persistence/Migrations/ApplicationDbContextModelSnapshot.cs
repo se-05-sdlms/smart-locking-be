@@ -192,14 +192,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("SessionExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("ShipperName")
-                        .HasMaxLength(150)
-                        .HasColumnType("character varying");
-
-                    b.Property<string>("ShipperPhone")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying");
-
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("character varying");
@@ -1393,6 +1385,62 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.ToTable("ResidentProfile", (string)null);
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.ResidentSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("EndDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ExternalOrderCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("ExternalTransactionId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying");
+
+                    b.Property<DateTimeOffset?>("PaidAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("PriceSnapshot")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("ResidentProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("StartDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid>("SubscriptionPlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExternalOrderCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ResidentSubscription_ExternalOrderCode")
+                        .HasFilter("\"ExternalOrderCode\" IS NOT NULL");
+
+                    b.HasIndex("ResidentProfileId")
+                        .HasDatabaseName("IX_ResidentSubscription_ResidentProfileId");
+
+                    b.ToTable("ResidentSubscription", (string)null);
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnRequest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1441,10 +1489,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<string>("ReturnReason")
                         .HasColumnType("text");
 
-                    b.Property<string>("ShipperPhone")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying");
-
                     b.Property<DateTimeOffset?>("ShipperPickedUpAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1480,6 +1524,56 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_ReturnRequest_ResidentDepositedAt", "\"ResidentDepositedAt\" IS NULL OR \"AllocatedAt\" IS NULL OR \"ResidentDepositedAt\" >= \"AllocatedAt\"");
 
                             t.HasCheckConstraint("CK_ReturnRequest_ShipperPickedUpAt", "\"ShipperPickedUpAt\" IS NULL OR \"ResidentDepositedAt\" IS NULL OR \"ShipperPickedUpAt\" >= \"ResidentDepositedAt\"");
+                        });
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.SubscriptionPlan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<int>("DurationDays")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MaxActiveParcels")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying");
+
+                    b.Property<decimal>("Price")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SubscriptionPlan_Code");
+
+                    b.ToTable("SubscriptionPlan", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SubscriptionPlan_PriceAndDuration", "\"Price\" >= 0 AND \"DurationDays\" > 0");
                         });
                 });
 
@@ -1553,6 +1647,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<int>("OverdueStartAfterHours")
                         .HasColumnType("integer");
 
+                    b.Property<int>("PickupReminderStartDay")
+                        .HasColumnType("integer");
+
                     b.Property<int>("Version")
                         .HasColumnType("integer");
 
@@ -1572,7 +1669,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.ToTable("SystemPolicy", null, t =>
                         {
-                            t.HasCheckConstraint("CK_SystemPolicy_DurationsAndRates", "\"GuestSessionTimeoutMinutes\" > 0 AND \"ManualApprovalTimeoutMinutes\" > 0 AND \"CompartmentReservationMinutes\" > 0 AND \"OtpMaxAttempts\" > 0 AND \"OtpLockoutMinutes\" > 0 AND \"OverdueStartAfterHours\" >= 0 AND \"OverdueFeePerHour\" >= 0 AND \"MaxStorageHours\" > 0 AND \"ClearanceEligibilityAfterHours\" >= 0 AND \"ClearanceNoticeBeforeHours\" >= 0");
+                            t.HasCheckConstraint("CK_SystemPolicy_DurationsAndRates", "\"GuestSessionTimeoutMinutes\" > 0 AND \"ManualApprovalTimeoutMinutes\" > 0 AND \"CompartmentReservationMinutes\" > 0 AND \"OtpMaxAttempts\" > 0 AND \"OtpLockoutMinutes\" > 0 AND \"OverdueStartAfterHours\" >= 0 AND \"OverdueFeePerHour\" >= 0 AND \"MaxStorageHours\" > 0 AND \"ClearanceEligibilityAfterHours\" >= 0 AND \"ClearanceNoticeBeforeHours\" >= 0 AND \"PickupReminderStartDay\" > 0");
                         });
                 });
 
@@ -2173,6 +2270,25 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.ResidentSubscription", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.ResidentProfile", "ResidentProfile")
+                        .WithMany("Subscriptions")
+                        .HasForeignKey("ResidentProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.SubscriptionPlan", "SubscriptionPlan")
+                        .WithMany("ResidentSubscriptions")
+                        .HasForeignKey("SubscriptionPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ResidentProfile");
+
+                    b.Navigation("SubscriptionPlan");
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnRequest", b =>
                 {
                     b.HasOne("smart_locking_be.Domain.Entities.LockerCompartment", "AllocatedCompartment")
@@ -2329,6 +2445,8 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("DeliveryRequests");
 
                     b.Navigation("ReturnRequests");
+
+                    b.Navigation("Subscriptions");
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnRequest", b =>
@@ -2340,6 +2458,11 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("Notifications");
 
                     b.Navigation("Reservations");
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.SubscriptionPlan", b =>
+                {
+                    b.Navigation("ResidentSubscriptions");
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.SystemPolicy", b =>

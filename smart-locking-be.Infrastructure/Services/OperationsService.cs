@@ -124,7 +124,7 @@ public sealed class OperationsService(ApplicationDbContext db, ILockerAccessServ
         IQueryable<AuditLog> q = db.AuditLogs.Include(x => x.ActorUser).AsNoTracking(); string term = query?.Trim() ?? string.Empty;
         if (from.HasValue) q = q.Where(x => x.OccurredAt >= from); if (to.HasValue) q = q.Where(x => x.OccurredAt < to);
         if (term.Length > 0) q = q.Where(x => x.Action.Contains(term) || (x.Details != null && x.Details.Contains(term)));
-        return await q.OrderByDescending(x => x.OccurredAt).Take(500).Select(x => new AuditLogResponse(x.Id, x.ActorUser == null ? "System/Guest" : (x.ActorUser.Email ?? x.ActorUser.PhoneNumber ?? x.ActorUser.Id.ToString()), x.Action, x.EntityType, x.EntityId, x.Result, x.Details, x.OccurredAt)).ToListAsync(ct);
+        return await q.OrderByDescending(x => x.OccurredAt).Take(500).Select(x => new AuditLogResponse(x.Id, x.ActorUserId, x.ActorUser == null ? "System/Guest" : (x.ActorUser.Email ?? x.ActorUser.PhoneNumber ?? x.ActorUser.Id.ToString()), x.Action, x.EntityType, x.EntityId, x.Result, x.IpAddress, x.Details, x.OccurredAt)).ToListAsync(ct);
     }
 
     public async Task<OverdueTransferResponse> TransferOverdueAsync(Guid userId, string role, Guid parcelId, CancellationToken ct = default)

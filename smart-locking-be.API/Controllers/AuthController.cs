@@ -157,4 +157,17 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     }
 
     private string? GetIpAddress() => HttpContext.Connection.RemoteIpAddress?.ToString();
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword(
+        ChangePasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
+            return Unauthorized();
+        return await Handle(() => authService.ChangePasswordAsync(
+            userId, request, GetIpAddress(), cancellationToken));
+    }
+
+
 }
