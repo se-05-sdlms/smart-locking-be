@@ -1,5 +1,4 @@
 using Serilog;
-using smart_locking_be.API.Extensions;
 using smart_locking_be.API.Hubs;
 using smart_locking_be.API.Middleware;
 using smart_locking_be.API.Services;

@@ -17,7 +17,7 @@ public sealed class PayOSPaymentGatewayService(IOptions<PayOSOptions> options) :
         ArgumentNullException.ThrowIfNull(request);
         if (request.OrderCode <= 0 || request.Amount <= 0 || string.IsNullOrWhiteSpace(request.Description)
             || !IsHttpUrl(request.ReturnUrl) || !IsHttpUrl(request.CancelUrl))
-            throw new BadRequestException("Thông tin tạo thanh toán PayOS không hợp lệ.", nameof(request));
+            throw new BadRequestException("Thông tin tạo thanh toán PayOS không hợp lệ.");
 
         // SDK 1.x has no cancellation overload. Once dispatched, await its result so a
         // cancelled caller does not hide a payment link that the provider has created.
@@ -44,7 +44,7 @@ public sealed class PayOSPaymentGatewayService(IOptions<PayOSOptions> options) :
         var client = CreateClient();
         ArgumentNullException.ThrowIfNull(payload);
         if (payload.Data.ValueKind != JsonValueKind.Object || string.IsNullOrWhiteSpace(payload.Signature))
-            throw new BadRequestException("Webhook PayOS không hợp lệ.", nameof(payload));
+            throw new BadRequestException("Webhook PayOS không hợp lệ.");
 
         WebhookData data;
         try
@@ -58,12 +58,12 @@ public sealed class PayOSPaymentGatewayService(IOptions<PayOSOptions> options) :
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            throw new BadRequestException("Chữ ký hoặc dữ liệu webhook PayOS không hợp lệ.", nameof(payload), ex);
+            throw new BadRequestException("Chữ ký hoặc dữ liệu webhook PayOS không hợp lệ.", ex);
         }
 
         if (data.orderCode <= 0 || data.amount <= 0 || string.IsNullOrWhiteSpace(data.reference)
             || string.IsNullOrWhiteSpace(data.code) || string.IsNullOrWhiteSpace(data.currency))
-            throw new BadRequestException("Dữ liệu thanh toán PayOS không hợp lệ.", nameof(payload));
+            throw new BadRequestException("Dữ liệu thanh toán PayOS không hợp lệ.");
         return new(data.orderCode, data.amount, data.reference, data.code, data.currency);
     }
 

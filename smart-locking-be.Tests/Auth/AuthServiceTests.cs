@@ -6,7 +6,6 @@ using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Auth;
 using smart_locking_be.Infrastructure.Persistence;
-using smart_locking_be.Infrastructure.Services;
 
 namespace smart_locking_be.Tests.Auth;
 

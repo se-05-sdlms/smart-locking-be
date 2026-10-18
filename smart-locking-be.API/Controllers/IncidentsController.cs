@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.RateLimiting;
 using smart_locking_be.API.Constants;
 using smart_locking_be.Application.DTOs.Incidents;
 using smart_locking_be.Application.Interfaces.Services;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -19,7 +18,7 @@ public sealed class IncidentsController(IIncidentService incidentService) : Cont
         [FromBody] CreateIncidentRequest request,
         CancellationToken cancellationToken)
     {
-        var (userId, _) = GetIdentity();
+        Guid userId = User.GetRequiredUserId();
         IncidentDetailResponse response = await incidentService.CreateResidentIncidentAsync(userId, request, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = response.Id }, response);
     }
@@ -27,26 +26,15 @@ public sealed class IncidentsController(IIncidentService incidentService) : Cont
     [HttpGet("mine")]
     [Authorize(Roles = "Resident")]
     public async Task<IActionResult> GetMine(CancellationToken cancellationToken) =>
-        Ok(await incidentService.GetResidentIncidentsAsync(GetIdentity().UserId, cancellationToken));
+        Ok(await incidentService.GetResidentIncidentsAsync(User.GetRequiredUserId(), cancellationToken));
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var (userId, role) = GetIdentity();
+        var (userId, role) = User.GetRequiredIdentity();
         return Ok(await incidentService.GetIncidentAsync(userId, role, id, cancellationToken));
     }
 
-    private (Guid UserId, string Role) GetIdentity()
-    {
-        string? role = User.FindFirstValue(ClaimTypes.Role);
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId) ||
-            string.IsNullOrWhiteSpace(role))
-        {
-            throw new UnauthorizedException("Invalid authentication token.");
-        }
-
-        return (userId, role);
-    }
 
     [HttpPost("guest")]
     [AllowAnonymous]

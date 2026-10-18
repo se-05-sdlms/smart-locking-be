@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.Application.DTOs.Operations;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Enums;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -33,8 +32,7 @@ public sealed class MaintenanceRequestsController(IMaintenanceService service) :
 
     private async Task<IActionResult> Execute<T>(Func<Guid, string, Task<T>> action, int statusCode = StatusCodes.Status200OK)
     {
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId)) return Unauthorized();
-        string role = User.FindFirstValue(ClaimTypes.Role) ?? string.Empty;
+        var (userId, role) = User.GetRequiredIdentity();
         return StatusCode(statusCode, await action(userId, role));
     }
 }

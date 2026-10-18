@@ -151,7 +151,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     {
         if (!Enum.IsDefined(request.OperationalStatus))
         {
-            throw new BadRequestException($"Trạng thái vận hành tủ locker '{request.OperationalStatus}' không hợp lệ.", nameof(request.OperationalStatus));
+            throw new BadRequestException($"Trạng thái vận hành tủ locker '{request.OperationalStatus}' không hợp lệ.");
         }
 
         var (code, address, recoveryAddress, deviceIdentifier) = ValidateAndTrimLockerInput(
@@ -307,7 +307,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     {
         if (!Enum.IsDefined(request.OperationalStatus))
         {
-            throw new BadRequestException($"Trạng thái vận hành ngăn tủ '{request.OperationalStatus}' không hợp lệ.", nameof(request.OperationalStatus));
+            throw new BadRequestException($"Trạng thái vận hành ngăn tủ '{request.OperationalStatus}' không hợp lệ.");
         }
 
         var locker = await dbContext.Lockers
@@ -357,42 +357,42 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     {
         if (string.IsNullOrWhiteSpace(code))
         {
-            throw new BadRequestException("Mã Locker không được để trống.", nameof(code));
+            throw new BadRequestException("Mã Locker không được để trống.");
         }
         string trimmedCode = code.Trim();
         if (trimmedCode.Length > 50)
         {
-            throw new BadRequestException("Mã Locker không được vượt quá 50 ký tự.", nameof(code));
+            throw new BadRequestException("Mã Locker không được vượt quá 50 ký tự.");
         }
 
         if (string.IsNullOrWhiteSpace(address))
         {
-            throw new BadRequestException("Địa chỉ tủ không được để trống.", nameof(address));
+            throw new BadRequestException("Địa chỉ tủ không được để trống.");
         }
         string trimmedAddress = address.Trim();
         if (trimmedAddress.Length > 500)
         {
-            throw new BadRequestException("Địa chỉ tủ không được vượt quá 500 ký tự.", nameof(address));
+            throw new BadRequestException("Địa chỉ tủ không được vượt quá 500 ký tự.");
         }
 
         if (string.IsNullOrWhiteSpace(recoveryAddress))
         {
-            throw new BadRequestException("Địa chỉ hoàn hàng không được để trống.", nameof(recoveryAddress));
+            throw new BadRequestException("Địa chỉ hoàn hàng không được để trống.");
         }
         string trimmedRecoveryAddress = recoveryAddress.Trim();
         if (trimmedRecoveryAddress.Length > 500)
         {
-            throw new BadRequestException("Địa chỉ hoàn hàng không được vượt quá 500 ký tự.", nameof(recoveryAddress));
+            throw new BadRequestException("Địa chỉ hoàn hàng không được vượt quá 500 ký tự.");
         }
 
         if (string.IsNullOrWhiteSpace(deviceIdentifier))
         {
-            throw new BadRequestException("Mã định danh thiết bị không được để trống.", nameof(deviceIdentifier));
+            throw new BadRequestException("Mã định danh thiết bị không được để trống.");
         }
         string trimmedDeviceIdentifier = deviceIdentifier.Trim();
         if (trimmedDeviceIdentifier.Length > 100)
         {
-            throw new BadRequestException("Mã định danh thiết bị không được vượt quá 100 ký tự.", nameof(deviceIdentifier));
+            throw new BadRequestException("Mã định danh thiết bị không được vượt quá 100 ký tự.");
         }
 
         return (trimmedCode, trimmedAddress, trimmedRecoveryAddress, trimmedDeviceIdentifier);
@@ -402,27 +402,27 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     {
         if (string.IsNullOrWhiteSpace(code))
         {
-            throw new BadRequestException("Mã ngăn không được để trống.", nameof(code));
+            throw new BadRequestException("Mã ngăn không được để trống.");
         }
         string trimmedCode = code.Trim();
         if (trimmedCode.Length > 50)
         {
-            throw new BadRequestException("Mã ngăn không được vượt quá 50 ký tự.", nameof(code));
+            throw new BadRequestException("Mã ngăn không được vượt quá 50 ký tự.");
         }
 
         if (string.IsNullOrWhiteSpace(hardwareCode))
         {
-            throw new BadRequestException("Mã phần cứng không được để trống.", nameof(hardwareCode));
+            throw new BadRequestException("Mã phần cứng không được để trống.");
         }
         string trimmedHardwareCode = hardwareCode.Trim();
         if (trimmedHardwareCode.Length > 100)
         {
-            throw new BadRequestException("Mã phần cứng không được vượt quá 100 ký tự.", nameof(hardwareCode));
+            throw new BadRequestException("Mã phần cứng không được vượt quá 100 ký tự.");
         }
 
         if (hardwareChannel <= 0)
         {
-            throw new BadRequestException("Kênh phần cứng (HardwareChannel) phải là số nguyên dương lớn hơn 0.", nameof(hardwareChannel));
+            throw new BadRequestException("Kênh phần cứng (HardwareChannel) phải là số nguyên dương lớn hơn 0.");
         }
 
         return (trimmedCode, trimmedHardwareCode);

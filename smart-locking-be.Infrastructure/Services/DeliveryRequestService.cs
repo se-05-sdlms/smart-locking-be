@@ -612,11 +612,11 @@ public sealed class DeliveryRequestService(
 
     private static string ValidateImageUrl(string value)
     {
-        string url = RequireValue(value, nameof(value), 2048);
+        string url = RequireValue(value, "ParcelImageUrl", 2048);
         if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
-            throw new BadRequestException("ParcelImageUrl phải là URL HTTP hoặc HTTPS tuyệt đối.", nameof(value));
+            throw new BadRequestException("ParcelImageUrl phải là URL HTTP hoặc HTTPS tuyệt đối.");
         }
 
         return url;
@@ -626,13 +626,13 @@ public sealed class DeliveryRequestService(
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new BadRequestException("Giá trị không được để trống.", parameterName);
+            throw new BadRequestException($"{parameterName} không được để trống.");
         }
 
         string trimmed = value.Trim();
         if (trimmed.Length > maxLength)
         {
-            throw new BadRequestException($"Giá trị không được vượt quá {maxLength} ký tự.", parameterName);
+            throw new BadRequestException($"{parameterName} không được vượt quá {maxLength} ký tự.");
         }
 
         return trimmed;

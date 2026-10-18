@@ -84,7 +84,7 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
 
     private static string RequireExpoPushToken(string value)
     {
-        string token = RequireValue(value, nameof(value), 256);
+        string token = RequireValue(value, "ExpoPushToken", 256);
         bool isExpoToken =
             (token.StartsWith("ExpoPushToken[", StringComparison.Ordinal) ||
              token.StartsWith("ExponentPushToken[", StringComparison.Ordinal)) &&
@@ -92,29 +92,29 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
 
         return isExpoToken
             ? token
-            : throw new BadRequestException("ExpoPushToken không hợp lệ.", nameof(value));
+            : throw new BadRequestException("ExpoPushToken không hợp lệ.");
     }
 
     private static string NormalizePlatform(string value)
     {
-        string platform = RequireValue(value, nameof(value), 20);
+        string platform = RequireValue(value, "Platform", 20);
         if (platform.Equals("android", StringComparison.OrdinalIgnoreCase)) return "Android";
         if (platform.Equals("ios", StringComparison.OrdinalIgnoreCase)) return "iOS";
 
-        throw new BadRequestException("Platform chỉ hỗ trợ Android hoặc iOS.", nameof(value));
+        throw new BadRequestException("Platform chỉ hỗ trợ Android hoặc iOS.");
     }
 
     private static string RequireValue(string value, string parameterName, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new BadRequestException("Giá trị không được để trống.", parameterName);
+            throw new BadRequestException($"{parameterName} không được để trống.");
         }
 
         string trimmed = value.Trim();
         return trimmed.Length <= maxLength
             ? trimmed
-            : throw new BadRequestException($"Giá trị không được vượt quá {maxLength} ký tự.", parameterName);
+            : throw new BadRequestException($"{parameterName} không được vượt quá {maxLength} ký tự.");
     }
 
     private static DeviceInstallationResponse MapResponse(DeviceInstallation installation) =>

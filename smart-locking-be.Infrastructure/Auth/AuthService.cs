@@ -37,24 +37,22 @@ public sealed class AuthService(
     {
         string? email = NormalizeEmail(request.Email);
         string phoneNumber = NormalizePhone(request.PhoneNumber)
-            ?? throw new BadRequestException("Phone number is required.", nameof(request.PhoneNumber));
+            ?? throw new BadRequestException("Phone number is required.");
 
         if (!PhonePattern.IsMatch(phoneNumber))
         {
-            throw new BadRequestException(
-                "Phone number must contain 10 digits and start with 0.",
-                nameof(request.PhoneNumber));
+            throw new BadRequestException("Phone number must contain 10 digits and start with 0.");
         }
 
         if (request.Password.Length < 8)
         {
-            throw new BadRequestException("Password must contain at least 8 characters.", nameof(request.Password));
+            throw new BadRequestException("Password must contain at least 8 characters.");
         }
 
         string fullName = request.FullName.Trim();
         if (string.IsNullOrWhiteSpace(fullName) || fullName.Length > 150)
         {
-            throw new BadRequestException("Full name must contain between 1 and 150 characters.", nameof(request.FullName));
+            throw new BadRequestException("Full name must contain between 1 and 150 characters.");
         }
 
         bool exists = await dbContext.Users.AnyAsync(user =>
@@ -359,9 +357,9 @@ public sealed class AuthService(
         if (!passwordHashService.VerifyPassword(request.CurrentPassword, user.PasswordHash))
             throw new BadRequestException("Current password is incorrect.");
         if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
-            throw new BadRequestException("Password must contain at least 8 characters.", nameof(request.NewPassword));
+            throw new BadRequestException("Password must contain at least 8 characters.");
         if (passwordHashService.VerifyPassword(request.NewPassword, user.PasswordHash))
-            throw new BadRequestException("New password must be different from the current password.", nameof(request.NewPassword));
+            throw new BadRequestException("New password must be different from the current password.");
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         user.PasswordHash = passwordHashService.HashPassword(request.NewPassword);

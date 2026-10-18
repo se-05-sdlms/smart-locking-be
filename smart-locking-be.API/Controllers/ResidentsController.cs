@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.API.Authorization;
 using smart_locking_be.Application.DTOs.Residents;
 using smart_locking_be.Application.Interfaces.Services;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -15,10 +14,7 @@ public class ResidentsController(IResidentService residentService) : ControllerB
     [HttpGet("me")]
     public async Task<IActionResult> GetProfile(CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
         return Ok(await residentService.GetProfileAsync(userId, cancellationToken));
     }
@@ -28,10 +24,7 @@ public class ResidentsController(IResidentService residentService) : ControllerB
         [FromBody] UpdateResidentProfileRequest request,
         CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
         return Ok(await residentService.UpdateProfileAsync(userId, request, cancellationToken));
     }
@@ -41,17 +34,8 @@ public class ResidentsController(IResidentService residentService) : ControllerB
         [FromBody] UpdateApprovalModeRequest request,
         CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
         return Ok(await residentService.UpdateApprovalModeAsync(userId, request, cancellationToken));
-    }
-
-    private bool TryGetUserId(out Guid userId)
-    {
-        string? claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claimValue, out userId);
     }
 }

@@ -180,7 +180,7 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
                     break;
                 }
             default:
-                throw new BadRequestException("Operational record kind is invalid.", nameof(kind));
+                throw new BadRequestException("Operational record kind is invalid.");
         }
         if (result is null || !await ScopeLockers(userId, role).AnyAsync(item => item.Id == result.LockerId, cancellationToken))
             throw new NotFoundException("Operational record not found.");

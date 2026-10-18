@@ -6,7 +6,6 @@ using smart_locking_be.API.Constants;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Enums;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -26,7 +25,7 @@ public sealed class ParcelsController(
         [FromQuery] DateTimeOffset? to = null,
         CancellationToken cancellationToken = default)
     {
-        var (userId, role) = GetIdentity();
+        var (userId, role) = User.GetRequiredIdentity();
         return Ok(await parcelService.GetParcelsAsync(userId, role, view, search, from, to, cancellationToken));
     }
 
@@ -34,7 +33,7 @@ public sealed class ParcelsController(
     [Authorize(Roles = "Resident,LockerOperator")]
     public async Task<IActionResult> GetParcel(Guid id, CancellationToken cancellationToken)
     {
-        var (userId, role) = GetIdentity();
+        var (userId, role) = User.GetRequiredIdentity();
         return Ok(await parcelService.GetParcelAsync(userId, role, id, cancellationToken));
     }
 
@@ -42,7 +41,7 @@ public sealed class ParcelsController(
     [Authorize(Roles = "Resident,LockerOperator")]
     public async Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken)
     {
-        var (userId, role) = GetIdentity();
+        var (userId, role) = User.GetRequiredIdentity();
         return Ok(await parcelService.GetHistoryAsync(userId, role, id, cancellationToken));
     }
 
@@ -52,10 +51,7 @@ public sealed class ParcelsController(
     [RequestTimeout(RequestTimeoutPolicyNames.DeviceCommand)]
     public async Task<IActionResult> UnlockPickup(Guid id, CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
         PickupUnlockResponse response = await parcelPickupService.UnlockAsync(
             userId,
@@ -71,22 +67,11 @@ public sealed class ParcelsController(
         };
     }
 
-    private (Guid UserId, string Role) GetIdentity()
-    {
-        string? idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        string? role = User.FindFirstValue(ClaimTypes.Role);
-        if (!Guid.TryParse(idClaim, out Guid userId) || string.IsNullOrWhiteSpace(role))
-        {
-            throw new UnauthorizedException("Invalid authentication token.");
-        }
-
-        return (userId, role);
-    }
     [HttpPost("{id:guid}:transferToCollectionPoint")]
     [Authorize(Roles = "Administrator,LockerOperator")]
     public async Task<IActionResult> TransferToCollectionPoint(Guid id, CancellationToken cancellationToken)
     {
-        var (userId, role) = GetIdentity();
+        var (userId, role) = User.GetRequiredIdentity();
         return Ok(await parcelService.TransferOverdueAsync(userId, role, id, cancellationToken));
     }
 }

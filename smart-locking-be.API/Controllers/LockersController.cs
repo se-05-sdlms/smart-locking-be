@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -17,10 +16,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetLockers([FromQuery] string? search, CancellationToken cancellationToken)
     {
-        if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        var (userId, userRole) = User.GetRequiredIdentity();
 
         return Ok(await lockerService.GetLockersAsync(userId, userRole, search, cancellationToken));
     }
@@ -44,10 +40,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetLockerById(Guid id, CancellationToken cancellationToken)
     {
-        if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        var (userId, userRole) = User.GetRequiredIdentity();
 
         return Ok(await lockerService.GetLockerByIdAsync(userId, userRole, id, cancellationToken));
     }
@@ -82,10 +75,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     [HttpGet("{id:guid}/compartments")]
     public async Task<IActionResult> GetCompartments(Guid id, CancellationToken cancellationToken)
     {
-        if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        var (userId, userRole) = User.GetRequiredIdentity();
 
         return Ok(await lockerService.GetCompartmentsAsync(userId, userRole, id, cancellationToken));
     }
@@ -115,18 +105,8 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         [FromBody] UpdateCompartmentStatusRequest request,
         CancellationToken cancellationToken)
     {
-        if (!TryGetUserIdAndRole(out Guid userId, out string userRole))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        var (userId, userRole) = User.GetRequiredIdentity();
 
         return Ok(await lockerService.UpdateCompartmentStatusAsync(userId, userRole, id, compartmentId, request, cancellationToken));
-    }
-
-    private bool TryGetUserIdAndRole(out Guid userId, out string userRole)
-    {
-        userRole = User.FindFirstValue(ClaimTypes.Role) ?? string.Empty;
-        string? claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claimValue, out userId);
     }
 }

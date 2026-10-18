@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.Application.DTOs.Incidents;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Enums;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -17,7 +16,7 @@ public sealed class OperatorIncidentsController(IIncidentService incidentService
         [FromQuery] IncidentStatus? status,
         CancellationToken cancellationToken)
     {
-        var (userId, role) = GetIdentity();
+        var (userId, role) = User.GetRequiredIdentity();
         return Ok(await incidentService.GetOperationalIncidentsAsync(userId, role, status, cancellationToken));
     }
 
@@ -27,7 +26,7 @@ public sealed class OperatorIncidentsController(IIncidentService incidentService
         [FromBody] AddIncidentActionRequest request,
         CancellationToken cancellationToken)
     {
-        var (userId, role) = GetIdentity();
+        var (userId, role) = User.GetRequiredIdentity();
         return Ok(await incidentService.AddActionAsync(userId, role, id, request, cancellationToken));
     }
 
@@ -37,19 +36,7 @@ public sealed class OperatorIncidentsController(IIncidentService incidentService
         [FromBody] UpdateIncidentStatusRequest request,
         CancellationToken cancellationToken)
     {
-        var (userId, role) = GetIdentity();
+        var (userId, role) = User.GetRequiredIdentity();
         return Ok(await incidentService.UpdateStatusAsync(userId, role, id, request, cancellationToken));
-    }
-
-    private (Guid UserId, string Role) GetIdentity()
-    {
-        string? role = User.FindFirstValue(ClaimTypes.Role);
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId) ||
-            string.IsNullOrWhiteSpace(role))
-        {
-            throw new UnauthorizedException("Invalid authentication token.");
-        }
-
-        return (userId, role);
     }
 }

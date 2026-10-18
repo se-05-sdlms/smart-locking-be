@@ -31,7 +31,7 @@ public sealed class IncidentService(
         string type = RequireValue(request.Type, nameof(request.Type), 100);
         if (!SupportedTypes.Contains(type))
         {
-            throw new BadRequestException("Incident type is invalid.", nameof(request.Type));
+            throw new BadRequestException("Incident type is invalid.");
         }
         int relatedRecordCount = new[]
         {
@@ -276,7 +276,7 @@ public sealed class IncidentService(
     {
         if (!Enum.IsDefined(request.Status))
         {
-            throw new BadRequestException("Incident status is invalid.", nameof(request.Status));
+            throw new BadRequestException("Incident status is invalid.");
         }
 
         Incident incident = await FindOperationalIncidentAsync(userId, role, incidentId, cancellationToken);
@@ -481,7 +481,7 @@ public sealed class IncidentService(
 
     private static string RequireValue(string? value, string parameterName, int maxLength) =>
         NormalizeOptional(value, parameterName, maxLength)
-        ?? throw new BadRequestException("Value is required.", parameterName);
+        ?? throw new BadRequestException($"{parameterName} is required.");
 
     private static string? NormalizeOptional(string? value, string parameterName, int maxLength)
     {
@@ -492,19 +492,19 @@ public sealed class IncidentService(
         string trimmed = value.Trim();
         if (trimmed.Length > maxLength)
         {
-            throw new BadRequestException($"Value must not exceed {maxLength} characters.", parameterName);
+            throw new BadRequestException($"{parameterName} must not exceed {maxLength} characters.");
         }
         return trimmed;
     }
 
     private static string? ValidateOptionalUrl(string? value)
     {
-        string? url = NormalizeOptional(value, nameof(value), 2048);
+        string? url = NormalizeOptional(value, "EvidenceUrl", 2048);
         if (url is not null &&
             (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ||
              (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
         {
-            throw new BadRequestException("EvidenceUrl must be an absolute HTTP or HTTPS URL.", nameof(value));
+            throw new BadRequestException("EvidenceUrl must be an absolute HTTP or HTTPS URL.");
         }
         return url;
     }
@@ -514,7 +514,7 @@ public sealed class IncidentService(
     {
         string type = RequireValue(request.Type, nameof(request.Type), 100);
         if (!SupportedTypes.Contains(type))
-            throw new BadRequestException("Incident type is invalid.", nameof(request.Type));
+            throw new BadRequestException("Incident type is invalid.");
         if (request.DeliveryRequestId.HasValue && request.ReturnRequestId.HasValue)
             throw new BadRequestException("Only one delivery request or return request may be linked.");
 

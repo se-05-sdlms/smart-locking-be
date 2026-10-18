@@ -6,7 +6,6 @@ using smart_locking_be.API.Authorization;
 using smart_locking_be.API.Constants;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 using smart_locking_be.Application.Interfaces.Services;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -36,7 +35,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!TryGetGuestSessionToken(out string token))
         {
-            return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
+            throw new UnauthorizedException($"Thiếu {GuestSessionHeaderName}.");
         }
 
         return Ok(await deliveryRequestService.SubmitAsync(id, token, request, cancellationToken));
@@ -48,7 +47,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!TryGetGuestSessionToken(out string token))
         {
-            return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
+            throw new UnauthorizedException($"Thiếu {GuestSessionHeaderName}.");
         }
 
         return Ok(await deliveryRequestService.GetAsync(id, token, cancellationToken));
@@ -68,12 +67,9 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest(new { message = "Hiện chỉ hỗ trợ lọc status=pending." });
+            throw new BadRequestException("Hiện chỉ hỗ trợ lọc status=pending.");
         }
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
         return Ok(await deliveryRequestService.GetPendingRequestsForResidentAsync(
             userId, cancellationToken, pageNumber, pageSize));
@@ -83,10 +79,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> ApproveRequest(Guid id, CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
         return Ok(await deliveryRequestService.ApproveDeliveryRequestAsync(userId, id, cancellationToken));
     }
@@ -95,10 +88,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> RejectRequest(Guid id, CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
         return Ok(await deliveryRequestService.RejectDeliveryRequestAsync(userId, id, cancellationToken));
     }
@@ -109,7 +99,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!TryGetGuestSessionToken(out string token))
         {
-            return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
+            throw new UnauthorizedException($"Thiếu {GuestSessionHeaderName}.");
         }
 
         return Ok(await deliveryRequestService.OpenCompartmentAsync(id, token, cancellationToken));
@@ -119,11 +109,5 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         token = Request.Headers[GuestSessionHeaderName].FirstOrDefault()?.Trim() ?? string.Empty;
         return token.Length > 0;
-    }
-
-    private bool TryGetUserId(out Guid userId)
-    {
-        string? claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claimValue, out userId);
     }
 }

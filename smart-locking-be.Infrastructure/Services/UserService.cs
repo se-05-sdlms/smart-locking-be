@@ -95,12 +95,12 @@ public sealed class UserService(
     {
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
-            throw new BadRequestException("Họ và tên không được để trống.", nameof(request.FullName));
+            throw new BadRequestException("Họ và tên không được để trống.");
         }
 
         if (string.IsNullOrWhiteSpace(request.Email) || !request.Email.Contains('@'))
         {
-            throw new BadRequestException("Email không hợp lệ.", nameof(request.Email));
+            throw new BadRequestException("Email không hợp lệ.");
         }
 
         string email = request.Email.Trim().ToLowerInvariant();
@@ -207,7 +207,7 @@ public sealed class UserService(
 
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
-            throw new BadRequestException("Họ và tên không được để trống.", nameof(request.FullName));
+            throw new BadRequestException("Họ và tên không được để trống.");
         }
 
         string? email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToLowerInvariant();
@@ -353,7 +353,7 @@ public sealed class UserService(
 
         if (request.LockerId == Guid.Empty)
         {
-            throw new BadRequestException("Phải chỉ định LockerId hợp lệ.", nameof(request.LockerId));
+            throw new BadRequestException("Phải chỉ định LockerId hợp lệ.");
         }
 
         bool activeExists = await dbContext.OperatorAssignments.AnyAsync(a =>

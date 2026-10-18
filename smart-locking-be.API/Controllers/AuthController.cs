@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.RateLimiting;
 using smart_locking_be.API.Constants;
 using smart_locking_be.Application.DTOs.Auth;
 using smart_locking_be.Application.Interfaces.Services;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -55,12 +54,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     [Authorize]
     public async Task<IActionResult> Me(CancellationToken cancellationToken)
     {
-        string? userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userId, out Guid parsedUserId))
-        {
-            return Unauthorized();
-        }
-
+        Guid parsedUserId = User.GetRequiredUserId();
         return Ok(await authService.GetCurrentUserAsync(parsedUserId, cancellationToken));
     }
 
@@ -91,11 +85,8 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         ChangePasswordRequest request,
         CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
-            return Unauthorized();
+        Guid userId = User.GetRequiredUserId();
         return Ok(await authService.ChangePasswordAsync(
             userId, request, GetIpAddress(), cancellationToken));
     }
-
-
 }

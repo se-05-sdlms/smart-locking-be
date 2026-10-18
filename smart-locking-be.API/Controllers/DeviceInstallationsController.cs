@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.API.Authorization;
 using smart_locking_be.Application.DTOs.DeviceInstallations;
 using smart_locking_be.Application.Interfaces.Services;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -17,10 +16,7 @@ public sealed class DeviceInstallationsController(IDeviceInstallationService dev
         [FromBody] RegisterDeviceInstallationRequest request,
         CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
         return Ok(await deviceInstallationService.RegisterAsync(userId, request, cancellationToken));
     }
@@ -28,19 +24,9 @@ public sealed class DeviceInstallationsController(IDeviceInstallationService dev
     [HttpDelete("{installationId}")]
     public async Task<IActionResult> Deactivate(string installationId, CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
         await deviceInstallationService.DeactivateAsync(userId, installationId, cancellationToken);
         return NoContent();
     }
-
-    private bool TryGetUserId(out Guid userId)
-    {
-        string? claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claimValue, out userId);
-    }
-
 }

@@ -26,23 +26,23 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
     {
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
-            throw new BadRequestException("Họ và tên không được để trống.", nameof(request.FullName));
+            throw new BadRequestException("Họ và tên không được để trống.");
         }
 
         string trimmedFullName = request.FullName.Trim();
         if (trimmedFullName.Length > 150)
         {
-            throw new BadRequestException("Họ và tên không được vượt quá 150 ký tự.", nameof(request.FullName));
+            throw new BadRequestException("Họ và tên không được vượt quá 150 ký tự.");
         }
 
         if (request.DateOfBirth.HasValue && request.DateOfBirth.Value > DateOnly.FromDateTime(DateTime.UtcNow))
         {
-            throw new BadRequestException("Ngày sinh không được ở trong tương lai.", nameof(request.DateOfBirth));
+            throw new BadRequestException("Ngày sinh không được ở trong tương lai.");
         }
 
         if (!string.IsNullOrWhiteSpace(request.AvatarUrl) && request.AvatarUrl.Trim().Length > 2048)
         {
-            throw new BadRequestException("Đường dẫn ảnh đại diện không được vượt quá 2048 ký tự.", nameof(request.AvatarUrl));
+            throw new BadRequestException("Đường dẫn ảnh đại diện không được vượt quá 2048 ký tự.");
         }
 
         User user = await FindUserWithProfileAsync(userId, cancellationToken);
@@ -68,7 +68,7 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
     {
         if (!Enum.IsDefined(typeof(DeliveryApprovalMode), request.DeliveryApprovalMode))
         {
-            throw new BadRequestException("Chế độ phê duyệt không hợp lệ.", nameof(request.DeliveryApprovalMode));
+            throw new BadRequestException("Chế độ phê duyệt không hợp lệ.");
         }
 
         User user = await FindUserWithProfileAsync(userId, cancellationToken);

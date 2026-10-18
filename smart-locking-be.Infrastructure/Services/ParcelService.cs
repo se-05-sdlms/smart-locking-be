@@ -42,7 +42,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
             ParcelListView.ClearancePending => query.Where(parcel =>
                 (parcel.Status == ParcelStatus.Stored || parcel.Status == ParcelStatus.Overdue) &&
                 parcel.MaxStorageUntil <= now),
-            _ => throw new BadRequestException("Parcel view is invalid.", nameof(view))
+            _ => throw new BadRequestException("Parcel view is invalid.")
         };
 
         if (!string.IsNullOrWhiteSpace(search))

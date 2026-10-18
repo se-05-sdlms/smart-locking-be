@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.Application.DTOs.Returns;
 using smart_locking_be.Application.Interfaces.Services;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -16,7 +15,7 @@ public sealed class ReturnsController(IReturnRequestService service) : Controlle
 
     private async Task<IActionResult> Execute<T>(Func<Guid, Task<T>> action, int statusCode = StatusCodes.Status200OK)
     {
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId)) return Unauthorized();
+        Guid userId = User.GetRequiredUserId();
         return StatusCode(statusCode, await action(userId));
     }
 }

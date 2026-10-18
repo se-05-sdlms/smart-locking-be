@@ -19,7 +19,7 @@ public sealed class NotificationService(
     {
         if (limit is < 1 or > 100)
         {
-            throw new BadRequestException("Limit must be between 1 and 100.", nameof(limit));
+            throw new BadRequestException("Limit must be between 1 and 100.");
         }
 
         IQueryable<Notification> query = dbContext.Notifications
