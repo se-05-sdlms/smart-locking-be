@@ -220,7 +220,8 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
             RecentParcelsTrend: parcelsTrend,
             AttentionLockers: attentionLockers,
             RecentLockers: recentLockers,
-            RecentAuditLogs: recentAuditLogs
+            RecentAuditLogs: recentAuditLogs,
+            GeneratedAt: now
         );
     }
 
