@@ -28,15 +28,18 @@ public sealed class ReturnRequestService(
             .SingleOrDefaultAsync(item => item.UserId == residentUserId, cancellationToken)
             ?? throw new KeyNotFoundException("Không tìm thấy hồ sơ cư dân.");
         if (resident.User.Status != UserStatus.Active) throw new InvalidOperationException("Tài khoản cư dân không hoạt động.");
-        if (resident.RegisteredLocker is null || resident.RegisteredLocker.OperationalStatus != LockerOperationalStatus.Operational)
-            throw new InvalidOperationException("Tủ đã đăng ký hiện không khả dụng.");
+        // Client truyền tủ đang kết nối; giữ cách gọi cũ cho app chưa cập nhật.
+        Locker? locker = string.IsNullOrWhiteSpace(request.DeviceIdentifier) ? resident.RegisteredLocker :
+            await dbContext.Lockers.SingleOrDefaultAsync(x => x.DeviceIdentifier == request.DeviceIdentifier, cancellationToken);
+        if (locker is null || locker.OperationalStatus != LockerOperationalStatus.Operational)
+            throw new InvalidOperationException("Chọn hoặc kết nối một tủ đang hoạt động trước khi gửi đồ.");
 
         DateTimeOffset now = timeProvider.GetUtcNow();
         ReturnRequest entity = new()
         {
             Id = Guid.NewGuid(),
             ResidentProfileId = resident.Id,
-            LockerId = resident.RegisteredLocker.Id,
+            LockerId = locker.Id,
             ReturnCode = await GeneratePickupCodeAsync(cancellationToken),
             ReturnReason = request.Note?.Trim(),
             ReturnImageUrl = request.ImageUrl.Trim(),
@@ -47,7 +50,7 @@ public sealed class ReturnRequestService(
         dbContext.ReturnRequests.Add(entity);
         AddAudit(residentUserId, "ReturnRequest.Created", nameof(ReturnRequest), entity.Id, "Resident created a return request.", now);
         await dbContext.SaveChangesAsync(cancellationToken);
-        entity.Locker = resident.RegisteredLocker;
+        entity.Locker = locker;
         return Map(entity);
     }
 
@@ -72,7 +75,7 @@ public sealed class ReturnRequestService(
         Map(await ResidentQuery(residentUserId).SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu gửi hàng trả."));
 
-    public async Task<ReturnUnlockResponse> OpenCompartmentAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default)
+    public async Task<ReturnUnlockResponse> OpenCompartmentAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default, LockerAccessMethod accessMethod = LockerAccessMethod.RemoteApp)
     {
         ReturnRequest entity = await ResidentQuery(residentUserId).SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu gửi hàng trả.");
@@ -86,7 +89,8 @@ public sealed class ReturnRequestService(
             null,
             entity.Id,
             expiresAt,
-            cancellationToken);
+            cancellationToken,
+            verifyDoorOnDevice: accessMethod == LockerAccessMethod.Bluetooth);
         if (reservation is null) throw new InvalidOperationException("Tủ hiện không còn ngăn trống.");
         LockerCompartment compartment = reservation.LockerCompartment;
         entity.AllocatedCompartmentId = compartment.Id;
@@ -98,7 +102,7 @@ public sealed class ReturnRequestService(
 
         OpenLockerResponse opened = await lockerAccessService.OpenAsync(new OpenLockerRequest(
             entity.LockerId, compartment.Id, residentUserId, null, null, entity.Id,
-            LockerAccessType.ResidentReturnDropOff, LockerAccessMethod.RemoteApp, null, "Resident Mobile"), cancellationToken);
+            LockerAccessType.ResidentReturnDropOff, accessMethod, null, "Resident Mobile"), cancellationToken);
         if (opened.Result != LockerAccessResult.Succeeded)
         {
             await compartmentAllocationService.ReleaseAsync(null, entity.Id, now, cancellationToken);
@@ -110,7 +114,7 @@ public sealed class ReturnRequestService(
         AddAudit(residentUserId, "ReturnRequest.CompartmentOpened", nameof(ReturnRequest), entity.Id, compartment.Code, now);
         await dbContext.SaveChangesAsync(cancellationToken);
         await PublishAsync(entity, cancellationToken);
-        return new ReturnUnlockResponse(entity.Id, compartment.Code, opened.AccessEventId, expiresAt);
+        return new ReturnUnlockResponse(entity.Id, compartment.Code, opened.AccessEventId, expiresAt, opened.Bluetooth);
     }
 
     public async Task FinalizeDepositAsync(Guid id, DateTimeOffset completedAt, CancellationToken cancellationToken = default)
@@ -148,7 +152,7 @@ public sealed class ReturnRequestService(
         entity.ShipperSessionTokenHash = tokenHashService.HashToken(token);
         entity.UpdatedAt = now;
         await dbContext.SaveChangesAsync(cancellationToken);
-        return new ReturnPickupSessionResponse(entity.Id, token, entity.Locker.Code, entity.AllocatedCompartment.Code, entity.ReturnImageUrl!, now.AddMinutes(policy.GuestSessionTimeoutMinutes));
+        return new ReturnPickupSessionResponse(entity.Id, token, entity.Locker.Code, entity.AllocatedCompartment.Code, entity.ReturnImageUrl ?? string.Empty, now.AddMinutes(policy.GuestSessionTimeoutMinutes));
     }
 
     public async Task<ReturnPickupSessionResponse> GetAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default)
@@ -156,18 +160,18 @@ public sealed class ReturnRequestService(
         ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
         SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl!, entity.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes));
+        return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl ?? string.Empty, entity.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes));
     }
 
-    public async Task<ReturnPickupSessionResponse> OpenCompartmentAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default)
+    public async Task<ReturnPickupSessionResponse> OpenCompartmentAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default, LockerAccessMethod accessMethod = LockerAccessMethod.GuestSession)
     {
         ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
         OpenLockerResponse opened = await lockerAccessService.OpenAsync(new OpenLockerRequest(
             entity.LockerId, entity.AllocatedCompartmentId!.Value, null, null, null, entity.Id,
-            LockerAccessType.ShipperReturnPickup, LockerAccessMethod.GuestSession, null, "Shipper Guest Web"), cancellationToken);
+            LockerAccessType.ShipperReturnPickup, accessMethod, null, "Shipper Guest Web"), cancellationToken);
         if (opened.Result != LockerAccessResult.Succeeded) throw new InvalidOperationException(opened.FailureReason ?? "Không thể mở ngăn tủ.");
         SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
-        return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl!, timeProvider.GetUtcNow().AddMinutes(policy.GuestSessionTimeoutMinutes));
+        return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl ?? string.Empty, timeProvider.GetUtcNow().AddMinutes(policy.GuestSessionTimeoutMinutes), opened.Bluetooth);
     }
 
     public async Task FinalizePickupAsync(Guid id, DateTimeOffset completedAt, CancellationToken cancellationToken = default)
@@ -254,7 +258,7 @@ public sealed class ReturnRequestService(
         for (int attempt = 0; attempt < 20; attempt++)
         {
             string code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
-            if (!await dbContext.ReturnRequests.AnyAsync(item => item.ReturnCode == code && item.Status != ReturnRequestStatus.Completed, cancellationToken)) return code;
+            if (!await dbContext.ReturnRequests.AnyAsync(item => item.ReturnCode == code, cancellationToken)) return code;
         }
         throw new InvalidOperationException("Không thể tạo mã lấy hàng. Vui lòng thử lại.");
     }
@@ -264,6 +268,6 @@ public sealed class ReturnRequestService(
 
     private static ReturnRequestResponse Map(ReturnRequest item) => new(
         item.Id, item.Status == ReturnRequestStatus.Created || item.Status == ReturnRequestStatus.Allocated ? string.Empty : item.ReturnCode,
-        item.ReturnImageUrl!, item.ReturnReason, item.Status, item.Locker.Code, item.Locker.Address,
+        item.ReturnImageUrl ?? string.Empty, item.ReturnReason, item.Status, item.Locker.Code, item.Locker.Address,
         item.AllocatedCompartment?.Code, item.CreatedAt, item.ReservationExpiresAt, item.ResidentDepositedAt, item.ShipperPickedUpAt);
 }

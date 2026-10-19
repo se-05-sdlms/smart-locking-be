@@ -46,6 +46,14 @@ public static class DependencyInjection
         services.AddScoped<IPaymentGatewayService, PayOSPaymentGatewayService>();
         services.AddScoped<ILockerService, LockerService>();
         services.AddScoped<ILockerAccessService, LockerAccessService>();
+        services.AddScoped<ICompartmentResetStore, CompartmentResetStore>();
+        services.AddScoped<ICompartmentResetDispatcher, MqttLockerCommandDispatcher>();
+        services.AddScoped<IOfflinePinService, OfflinePinService>();
+        services.AddScoped<OfflinePinProvisioner>();
+        services.AddHostedService<OfflinePinNotificationWorker>();
+        services.AddSingleton<IBluetoothMessageCodec, BluetoothProtocol>();
+        services.AddSingleton<ICompartmentResetProtocol, BluetoothProtocol>();
+        services.AddScoped<IBluetoothWorkflowStore, BluetoothWorkflowStore>();
         services.AddScoped<IOperationsService, OperationsService>();
         services.AddScoped<ILockerCommandDispatcher, MqttLockerCommandDispatcher>();
         services.AddScoped<ICompartmentAllocationService, CompartmentAllocationService>();

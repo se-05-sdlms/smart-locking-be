@@ -131,7 +131,7 @@ public sealed class MqttLockerListenerTests
     }
 
     [Fact]
-    public async Task HandleMessageAsync_OfflineBluetoothEvent_CreatesAccessEventAndAuditLog()
+    public async Task HandleMessageAsync_UnsignedLegacyOfflineEvent_IsIgnored()
     {
         var dbName = Guid.NewGuid().ToString();
         var serviceProvider = BuildServiceProvider(dbName);
@@ -176,18 +176,50 @@ public sealed class MqttLockerListenerTests
         await listener.HandleMessageAsync("lockers/LKR-1A0844/events/offline", offlinePayload, CancellationToken.None);
 
         var updatedLocker = await dbContext.Lockers.AsNoTracking().SingleAsync(l => l.Id == locker.Id);
-        Assert.Equal(LockerConnectionStatus.Online, updatedLocker.ConnectionStatus);
+        Assert.Equal(LockerConnectionStatus.Offline, updatedLocker.ConnectionStatus);
 
         var accessEvent = await dbContext.LockerAccessEvents.AsNoTracking()
             .SingleOrDefaultAsync(e => e.LockerCompartmentId == compartment.Id);
-        Assert.NotNull(accessEvent);
-        Assert.Equal(LockerAccessMethod.Bluetooth, accessEvent.AccessMethod);
-        Assert.Equal(LockerAccessResult.Succeeded, accessEvent.Result);
+        Assert.Null(accessEvent);
 
         var auditLog = await dbContext.AuditLogs.AsNoTracking()
             .FirstOrDefaultAsync(a => a.EntityId == compartment.Id);
-        Assert.NotNull(auditLog);
-        Assert.Contains("Bluetooth", auditLog.Action);
+        Assert.Null(auditLog);
+    }
+
+    [Theory]
+    [InlineData(LockerAccessMethod.GuestSession)]
+    [InlineData(LockerAccessMethod.RemoteApp)]
+    [InlineData(LockerAccessMethod.Bluetooth)]
+    public async Task HandleMessageAsync_ClosedDoorWithoutWorkflowReceipt_DoesNotCompletePickup(LockerAccessMethod method)
+    {
+        var services = new ServiceCollection();
+        // Chia sẻ cùng database giữa các scope của listener.
+        string database = Guid.NewGuid().ToString();
+        services.AddDbContext<ApplicationDbContext>(options => options.UseInMemoryDatabase(database));
+        services.AddSingleton<smart_locking_be.Application.Interfaces.Services.IBluetoothMessageCodec, BluetoothProtocol>();
+        using var provider = services.BuildServiceProvider();
+        var db = provider.GetRequiredService<ApplicationDbContext>();
+        var locker = new Locker { Id = Guid.NewGuid(), Code = "LKR-B", DeviceIdentifier = "LKR-1A0844", Address = "B", RecoveryAddress = "B" };
+        var compartment = new LockerCompartment { Id = Guid.NewGuid(), LockerId = locker.Id, Locker = locker,
+            Code = "B-01", HardwareCode = "CH1", HardwareChannel = 1, DoorStatus = DoorStatus.Open };
+        var request = new ReturnRequest { Id = Guid.NewGuid(), LockerId = locker.Id,
+            AllocatedCompartmentId = compartment.Id, Status = ReturnRequestStatus.Deposited, ReturnCode = "123456" };
+        db.AddRange(locker, compartment, request, new LockerAccessEvent {
+            Id = Guid.NewGuid(), LockerId = locker.Id, LockerCompartmentId = compartment.Id,
+            ReturnRequestId = request.Id, AccessType = LockerAccessType.ShipperReturnPickup,
+            AccessMethod = method, Result = LockerAccessResult.Succeeded, OccurredAt = Now });
+        await db.SaveChangesAsync();
+        var listener = new MqttLockerListenerService(new ConfigurationBuilder().Build(),
+            provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<MqttLockerListenerService>.Instance);
+
+        await listener.HandleMessageAsync("lockers/LKR-1A0844/doors/1/status", "CLOSED", CancellationToken.None);
+
+        await db.Entry(compartment).ReloadAsync();
+        await db.Entry(request).ReloadAsync();
+        Assert.Equal(DoorStatus.Closed, compartment.DoorStatus);
+        Assert.Equal(ReturnRequestStatus.Deposited, request.Status);
+        Assert.Null(request.ShipperPickedUpAt);
     }
 
     private static IServiceProvider BuildServiceProvider(string dbName)

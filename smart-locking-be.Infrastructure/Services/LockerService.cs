@@ -1,3 +1,4 @@
+using smart_locking_be.Application.Constants;
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
@@ -343,6 +344,11 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         var compartment = await dbContext.LockerCompartments
             .FirstOrDefaultAsync(c => c.Id == compartmentId && c.LockerId == lockerId, cancellationToken)
             ?? throw new KeyNotFoundException($"Ngăn tủ với ID '{compartmentId}' không tồn tại trong tủ locker này.");
+
+        if (request.OperationalStatus != LockerCompartmentOperationalStatus.OutOfService &&
+            await dbContext.AuditLogs.AnyAsync(x => x.EntityId == compartmentId && x.Action == CompartmentResetActions.Requested &&
+                !dbContext.LockerEvents.Any(e => e.Id == x.Id), cancellationToken))
+            throw new InvalidOperationException("Ngăn đang chờ ESP xác nhận đặt lại; chưa thể bật cấp ngăn.");
 
         compartment.OperationalStatus = request.OperationalStatus;
         compartment.UpdatedAt = DateTimeOffset.UtcNow;

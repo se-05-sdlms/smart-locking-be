@@ -22,42 +22,13 @@ public sealed record OpenLockerResponse(
     int HardwareChannel,
     LockerAccessResult Result,
     string? FailureReason,
-    DateTimeOffset OccurredAt);
+    DateTimeOffset OccurredAt,
+    BluetoothCommandResponse? Bluetooth = null);
 
 public sealed record LockerUnlockCommand(
     Guid CommandId,
     string DeviceIdentifier,
-    int HardwareChannel);
-
-public sealed record LockerPinConfigCommand(
-    Guid CommandId,
-    string DeviceIdentifier,
     int HardwareChannel,
-    string PinCode);
-
-public sealed record ConfigureCompartmentPinRequest(
-    string PinCode);
-
-public sealed record ConfigureCompartmentPinResponse(
-    Guid LockerId,
-    Guid LockerCompartmentId,
-    string DeviceIdentifier,
-    int HardwareChannel,
-    string PinCode,
-    bool Dispatched,
-    DateTimeOffset ConfiguredAt);
-
-public sealed record SyncOfflineAccessItem(
-    string DeviceIdentifier,
-    int HardwareChannel,
-    string PinUsed,
-    DateTimeOffset OccurredAt,
-    string? AccessMethod = "Bluetooth");
-
-public sealed record SyncOfflineAccessRequest(
-    List<SyncOfflineAccessItem> Events);
-
-public sealed record SyncOfflineAccessResponse(
-    int TotalProcessed,
-    int SuccessCount,
-    List<string> Details);
+    Guid? DeliveryId = null,
+    bool OperatorOverride = false,
+    string? WorkflowCommand = null);

@@ -1,3 +1,4 @@
+using smart_locking_be.Application.DTOs.Lockers;
 using System.Text.Json.Serialization;
 using smart_locking_be.Domain.Enums;
 
@@ -8,7 +9,8 @@ public sealed record PickupUnlockResponse(
     Guid AccessEventId,
     [property: JsonConverter(typeof(JsonStringEnumConverter))] LockerAccessResult Result,
     string? FailureReason,
-    DateTimeOffset RequestedAt);
+    DateTimeOffset RequestedAt,
+    BluetoothCommandResponse? Bluetooth = null);
 
 public sealed record PickupConfirmationResponse(
     Guid ParcelId,

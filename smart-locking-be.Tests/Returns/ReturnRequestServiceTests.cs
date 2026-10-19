@@ -13,6 +13,56 @@ namespace smart_locking_be.Tests.Returns;
 public sealed class ReturnRequestServiceTests
 {
     [Fact]
+    public async Task BluetoothAllocation_UsesDeviceDoorCheckAndStillRespectsReservations()
+    {
+        await using ApplicationDbContext db = CreateDb();
+        var now = DateTimeOffset.UtcNow;
+        Locker locker = new() { Id = Guid.NewGuid(), Code = "B", DeviceIdentifier = "LKR-B", Address = "B", RecoveryAddress = "B", OperationalStatus = LockerOperationalStatus.Operational };
+        LockerCompartment slot = new() { Id = Guid.NewGuid(), LockerId = locker.Id, Locker = locker, Code = "B-01", HardwareCode = "B-01", HardwareChannel = 1, OperationalStatus = LockerCompartmentOperationalStatus.Operational, DoorStatus = DoorStatus.Open };
+        db.AddRange(locker, slot);
+        await db.SaveChangesAsync();
+        var service = new CompartmentAllocationService(db, TimeProvider.System);
+
+        Assert.Null(await service.ReserveAvailableAsync(locker.Id, null, Guid.NewGuid(), now.AddMinutes(10)));
+        Assert.NotNull(await service.ReserveAvailableAsync(locker.Id, null, Guid.NewGuid(), now.AddMinutes(10), verifyDoorOnDevice: true));
+        Assert.Equal(DoorStatus.Open, slot.DoorStatus);
+        Assert.Null(await service.ReserveAvailableAsync(locker.Id, null, Guid.NewGuid(), now.AddMinutes(10), verifyDoorOnDevice: true));
+    }
+
+    [Fact]
+    public async Task BluetoothAllocation_DoesNotReuseCompartmentWithStoredReturn()
+    {
+        await using ApplicationDbContext db = CreateDb();
+        var locker = new Locker { Id = Guid.NewGuid(), Code = "B", DeviceIdentifier = "LKR-B", Address = "B", RecoveryAddress = "B", OperationalStatus = LockerOperationalStatus.Operational };
+        var slot = new LockerCompartment { Id = Guid.NewGuid(), LockerId = locker.Id, Locker = locker, Code = "B-01", HardwareCode = "B-01", HardwareChannel = 1, OperationalStatus = LockerCompartmentOperationalStatus.Operational, DoorStatus = DoorStatus.Closed };
+        db.AddRange(locker, slot, new ReturnRequest { Id = Guid.NewGuid(), LockerId = locker.Id, AllocatedCompartmentId = slot.Id, ReturnCode = "123456", Status = ReturnRequestStatus.Deposited });
+        await db.SaveChangesAsync();
+
+        var service = new CompartmentAllocationService(db, TimeProvider.System);
+        Assert.Null(await service.ReserveAvailableAsync(locker.Id, null, Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(10), verifyDoorOnDevice: true));
+    }
+
+    [Fact]
+    public async Task CreateAsync_UsesConnectedLockerInsteadOfRegisteredLocker()
+    {
+        await using ApplicationDbContext db = CreateDb();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        User user = new() { Id = Guid.NewGuid(), PhoneNumber = "0900000001", PasswordHash = "x", Role = UserRole.Resident, Status = UserStatus.Active };
+        Locker registered = new() { Id = Guid.NewGuid(), Code = "A", DeviceIdentifier = "LKR-A", Address = "A", RecoveryAddress = "A", OperationalStatus = LockerOperationalStatus.Operational };
+        Locker connected = new() { Id = Guid.NewGuid(), Code = "B", DeviceIdentifier = "LKR-B", Address = "B", RecoveryAddress = "B", OperationalStatus = LockerOperationalStatus.Operational };
+        ResidentProfile resident = new() { Id = Guid.NewGuid(), UserId = user.Id, User = user, FullName = "Test", RegisteredLockerId = registered.Id, RegisteredLocker = registered };
+        db.AddRange(user, registered, connected, resident);
+        await db.SaveChangesAsync();
+        var service = new ReturnRequestService(db, new SuccessfulAccess(), new CompartmentAllocationService(db, TimeProvider.System), new NoopPush(), new Sha256TokenHashService(), TimeProvider.System);
+
+        ReturnRequestResponse response = await service.CreateAsync(user.Id, new("https://example.com/image.jpg", null, "LKR-B"));
+
+        Assert.Equal("B", response.LockerCode);
+        Assert.Equal(connected.Id, Assert.Single(db.ReturnRequests).LockerId);
+        Assert.Equal(registered.Id, resident.RegisteredLockerId);
+    }
+
+    [Fact]
     public async Task FullReturnFlow_UsesSixDigitCodeAndCompletesOnce()
     {
         await using ApplicationDbContext db = CreateDb();
@@ -44,8 +94,6 @@ public sealed class ReturnRequestServiceTests
     private sealed class SuccessfulAccess : ILockerAccessService
     {
         public Task<OpenLockerResponse> OpenAsync(OpenLockerRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new OpenLockerResponse(Guid.NewGuid(), request.LockerId, request.LockerCompartmentId, "SIM", 1, LockerAccessResult.Succeeded, null, DateTimeOffset.UtcNow));
-        public Task<SyncOfflineAccessResponse> SyncOfflineEventsAsync(SyncOfflineAccessRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new SyncOfflineAccessResponse(request.Events.Count, request.Events.Count, []));
-        public Task<ConfigureCompartmentPinResponse> ConfigurePinAsync(Guid lockerId, Guid compartmentId, ConfigureCompartmentPinRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new ConfigureCompartmentPinResponse(lockerId, compartmentId, "SIM", 1, request.PinCode, true, DateTimeOffset.UtcNow));
     }
     private sealed class NoopPush : IPushNotificationService
     {

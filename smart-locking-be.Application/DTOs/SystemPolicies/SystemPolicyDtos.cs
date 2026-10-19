@@ -19,7 +19,8 @@ public sealed record SaveSystemPolicyRequest(
     bool EnableOtp,
     bool EnableRemoteUnlock,
     bool EnableFaceRecognition,
-    DateTimeOffset EffectiveFrom);
+    DateTimeOffset EffectiveFrom,
+    bool EnableBluetoothUnlock = false);
 
 public sealed record SystemPolicyResponse(
     Guid Id,
@@ -43,4 +44,5 @@ public sealed record SystemPolicyResponse(
     DateTimeOffset EffectiveFrom,
     DateTimeOffset? EffectiveTo,
     bool IsActive,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    bool EnableBluetoothUnlock = false);

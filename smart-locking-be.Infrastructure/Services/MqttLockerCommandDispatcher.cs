@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using MQTTnet;
 using MQTTnet.Protocol;
@@ -7,7 +6,7 @@ using smart_locking_be.Application.Interfaces.Services;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : ILockerCommandDispatcher
+public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : ILockerCommandDispatcher, ICompartmentResetDispatcher
 {
     public async Task DispatchUnlockAsync(
         LockerUnlockCommand command,
@@ -23,32 +22,23 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
         await client.ConnectAsync(options, cancellationToken);
         var message = new MqttApplicationMessageBuilder()
             .WithTopic($"lockers/{command.DeviceIdentifier}/doors/{command.HardwareChannel}")
-            .WithPayload("OPEN")
+            .WithPayload(command.WorkflowCommand ?? (command.OperatorOverride ? "OPEN:OPERATOR" : command.DeliveryId.HasValue ? $"OPEN:{command.DeliveryId.Value:N}" : "OPEN"))
             .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
             .Build();
         await client.PublishAsync(message, cancellationToken);
         await client.DisconnectAsync(cancellationToken: cancellationToken);
     }
 
-    public async Task DispatchPinConfigAsync(
-        LockerPinConfigCommand command,
-        CancellationToken cancellationToken = default)
+    // Lệnh đặt lại trạng thái không đi qua nhánh tạo lệnh mở relay.
+    public async Task DispatchResetAsync(string device, int channel, string command, CancellationToken ct = default)
     {
         if (bool.TryParse(configuration["Mqtt:Simulate"], out bool simulate) && simulate)
-        {
-            return;
-        }
-
-        var options = BuildMqttClientOptions();
+            throw new InvalidOperationException("Không gửi lệnh đặt lại thật trong chế độ mô phỏng.");
         using var client = new MqttClientFactory().CreateMqttClient();
-        await client.ConnectAsync(options, cancellationToken);
-        var message = new MqttApplicationMessageBuilder()
-            .WithTopic($"lockers/{command.DeviceIdentifier}/pins/{command.HardwareChannel}")
-            .WithPayload(command.PinCode)
-            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-            .Build();
-        await client.PublishAsync(message, cancellationToken);
-        await client.DisconnectAsync(cancellationToken: cancellationToken);
+        await client.ConnectAsync(BuildMqttClientOptions(), ct);
+        await client.PublishAsync(new MqttApplicationMessageBuilder().WithTopic($"lockers/{device}/doors/{channel}")
+            .WithPayload(command).WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build(), ct);
+        await client.DisconnectAsync(cancellationToken: ct);
     }
 
     private MqttClientOptions BuildMqttClientOptions()
@@ -77,6 +67,7 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
             optionsBuilder.WithTlsOptions(options =>
             {
                 options.UseTls();
+
             });
         }
         return optionsBuilder.Build();

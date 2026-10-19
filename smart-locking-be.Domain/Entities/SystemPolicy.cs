@@ -92,6 +92,8 @@ public sealed class SystemPolicy
     /// </summary>
     public bool EnableRemoteUnlock { get; set; }
 
+    public bool EnableBluetoothUnlock { get; set; }
+
     /// <summary>
     /// Cho phép lấy hàng bằng nhận diện khuôn mặt nếu Cư dân đã đăng ký.
     /// </summary>

@@ -1,3 +1,5 @@
+using smart_locking_be.Application.DTOs.Lockers;
+
 namespace smart_locking_be.Application.DTOs.DeliveryRequests;
 
 public sealed record CompartmentReservationResponse(
@@ -6,4 +8,5 @@ public sealed record CompartmentReservationResponse(
     Guid CompartmentId,
     string CompartmentCode,
     DateTimeOffset ReservedAt,
-    DateTimeOffset ReservationExpiresAt);
+    DateTimeOffset ReservationExpiresAt,
+    BluetoothCommandResponse? Bluetooth = null);

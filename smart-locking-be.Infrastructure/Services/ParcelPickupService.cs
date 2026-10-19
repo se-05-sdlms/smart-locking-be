@@ -18,34 +18,14 @@ public sealed class ParcelPickupService(
         Guid parcelId,
         string? ipAddress,
         string? deviceContext,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, LockerAccessMethod accessMethod = LockerAccessMethod.RemoteApp)
     {
-        Parcel parcel = await dbContext.Parcels
-            .Include(item => item.OverdueCharge)
-            .Include(item => item.DeliveryRequest).ThenInclude(request => request.ResidentProfile)
-            .Include(item => item.DeliveryRequest).ThenInclude(request => request.SystemPolicy)
-            .Include(item => item.DeliveryRequest).ThenInclude(request => request.Locker)
-            .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy bưu kiện.");
-
-        if (parcel.DeliveryRequest.ResidentProfile?.UserId != residentUserId)
-        {
-            throw new UnauthorizedAccessException("Bạn không có quyền mở ngăn chứa bưu kiện này.");
-        }
-        if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
-        {
-            throw new InvalidOperationException("Bưu kiện không còn ở trạng thái có thể nhận.");
-        }
-        if (timeProvider.GetUtcNow() >= parcel.MaxStorageUntil)
-        {
-            throw new InvalidOperationException(
-                $"Bưu kiện đã hết hạn lưu trữ tối đa. Vui lòng liên hệ điểm tập kết tại {parcel.DeliveryRequest.Locker.RecoveryAddress} để nhận hàng.");
-        }
-        if (parcel.OverdueCharge?.Status == OverdueChargeStatus.Outstanding)
-        {
-            throw new InvalidOperationException("Cần thanh toán phí quá hạn trước khi nhận bưu kiện.");
-        }
-        if (!parcel.DeliveryRequest.SystemPolicy.EnableRemoteUnlock)
+        Parcel parcel = await ParcelRetrievalEligibility.LoadAsync(dbContext, residentUserId, parcelId, timeProvider.GetUtcNow(), cancellationToken);
+        bool allowed = accessMethod == LockerAccessMethod.Bluetooth
+            ? await dbContext.SystemPolicies.AnyAsync(x => x.IsActive && x.EnableBluetoothUnlock && x.EffectiveFrom <= timeProvider.GetUtcNow() &&
+                (!x.EffectiveTo.HasValue || x.EffectiveTo > timeProvider.GetUtcNow()), cancellationToken)
+            : parcel.DeliveryRequest.SystemPolicy.EnableRemoteUnlock;
+        if (!allowed)
         {
             throw new InvalidOperationException("Chính sách hiện tại không cho phép mở tủ từ ứng dụng.");
         }
@@ -62,7 +42,7 @@ public sealed class ParcelPickupService(
             parcel.Id,
             null,
             LockerAccessType.ResidentPickup,
-            LockerAccessMethod.RemoteApp,
+            accessMethod,
             ipAddress,
             deviceContext), cancellationToken);
 
@@ -71,7 +51,7 @@ public sealed class ParcelPickupService(
             access.AccessEventId,
             access.Result,
             access.FailureReason,
-            access.OccurredAt);
+            access.OccurredAt, access.Bluetooth);
     }
 
     public async Task<PickupConfirmationResponse> ConfirmPickupAsync(
