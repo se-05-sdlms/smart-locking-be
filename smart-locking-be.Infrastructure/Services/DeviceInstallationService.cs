@@ -28,7 +28,7 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
 
         if (tokenOwner is not null && installation is not null && tokenOwner.Id != installation.Id)
         {
-            throw new ConflictException("Expo push token đã được đăng ký cho thiết bị khác.");
+            throw new ConflictException(DeviceErrorCodes.TokenAlreadyRegistered, "Expo push token is registered to another device.");
         }
 
         installation ??= tokenOwner;
@@ -63,7 +63,7 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
             .SingleOrDefaultAsync(
                 device => device.UserId == userId && device.InstallationId == normalizedInstallationId,
                 cancellationToken)
-            ?? throw new NotFoundException("Không tìm thấy thiết bị đã đăng ký.");
+            ?? throw new NotFoundException(DeviceErrorCodes.NotFound, "Registered device not found.");
 
         installation.IsActive = false;
         installation.UpdatedAt = DateTimeOffset.UtcNow;
@@ -78,7 +78,7 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
 
         if (!isActiveResident)
         {
-            throw new ForbiddenException("Tài khoản Cư dân không hợp lệ hoặc không còn hoạt động.");
+            throw new ForbiddenException(UserErrorCodes.Inactive, "Resident account is invalid or inactive.");
         }
     }
 
@@ -92,7 +92,7 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
 
         return isExpoToken
             ? token
-            : throw new BadRequestException("ExpoPushToken không hợp lệ.");
+            : throw new BadRequestException(DeviceErrorCodes.InvalidToken, "ExpoPushToken is invalid.");
     }
 
     private static string NormalizePlatform(string value)
@@ -101,20 +101,20 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
         if (platform.Equals("android", StringComparison.OrdinalIgnoreCase)) return "Android";
         if (platform.Equals("ios", StringComparison.OrdinalIgnoreCase)) return "iOS";
 
-        throw new BadRequestException("Platform chỉ hỗ trợ Android hoặc iOS.");
+        throw BadRequestException.For("platform", "Platform must be Android or iOS.");
     }
 
     private static string RequireValue(string value, string parameterName, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new BadRequestException($"{parameterName} không được để trống.");
+            throw BadRequestException.For(parameterName, $"{parameterName} is required.");
         }
 
         string trimmed = value.Trim();
         return trimmed.Length <= maxLength
             ? trimmed
-            : throw new BadRequestException($"{parameterName} không được vượt quá {maxLength} ký tự.");
+            : throw BadRequestException.For(parameterName, $"{parameterName} must not exceed {maxLength} characters.");
     }
 
     private static DeviceInstallationResponse MapResponse(DeviceInstallation installation) =>

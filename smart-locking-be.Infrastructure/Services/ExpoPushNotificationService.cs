@@ -27,8 +27,8 @@ public sealed class ExpoPushNotificationService(
         string lockerCode)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
-        string title = "Có yêu cầu giao hàng mới";
-        string message = $"Shipper đang yêu cầu gửi kiện hàng vào tủ {lockerCode}.";
+        string title = "New delivery request";
+        string message = $"A shipper requested to deposit a parcel at locker {lockerCode}.";
 
         Notification inAppNotification = CreateNotification(
             residentUserId,
@@ -67,8 +67,8 @@ public sealed class ExpoPushNotificationService(
         string compartmentCode)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
-        string title = "Kiện hàng đã được lưu";
-        string message = $"Kiện hàng của bạn đã được lưu tại tủ {lockerCode}, ngăn {compartmentCode}.";
+        string title = "Parcel stored";
+        string message = $"Your parcel is stored at locker {lockerCode}, compartment {compartmentCode}.";
         Notification inAppNotification = CreateNotification(
             residentUserId, deliveryRequestId, null, parcelId, ParcelStoredType,
             NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
@@ -108,8 +108,8 @@ public sealed class ExpoPushNotificationService(
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
         const string type = "ParcelTransferred";
-        const string title = "Kiện hàng đã chuyển điểm tập kết";
-        string message = $"Nhận kiện tại {collectionAddress}.";
+        const string title = "Parcel moved to collection point";
+        string message = $"Collect your parcel at {collectionAddress}.";
         Notification inApp = CreateNotification(
             residentUserId, deliveryRequestId, null, parcelId, type,
             NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);
@@ -177,7 +177,7 @@ public sealed class ExpoPushNotificationService(
     {
         Notification notification = await dbContext.Notifications
             .SingleOrDefaultAsync(item => item.Id == notificationId, cancellationToken)
-            ?? throw new NotFoundException($"Không tìm thấy push notification '{notificationId}'.");
+            ?? throw new NotFoundException(NotificationErrorCodes.NotFound, $"Push notification '{notificationId}' not found.");
 
         if (realtimeNotifier is not null)
         {
@@ -232,7 +232,7 @@ public sealed class ExpoPushNotificationService(
         response.EnsureSuccessStatusCode();
 
         using JsonDocument payload = await response.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken)
-            ?? throw new JsonException("Expo Push API trả về nội dung rỗng.");
+            ?? throw new JsonException("Expo Push API returned an empty response.");
 
         JsonElement[] tickets = payload.RootElement.GetProperty("data").EnumerateArray().ToArray();
         bool sent = false;
@@ -315,13 +315,13 @@ public sealed class ExpoPushNotificationService(
         DateTimeOffset now = timeProvider.GetUtcNow();
         bool clearanceWarning = daysUntilTransfer <= 1;
         string type = clearanceWarning ? "ParcelClearanceWarning" : "ParcelPickupReminder";
-        string title = clearanceWarning ? "Cảnh báo thu hồi kiện hàng trong 24 giờ" :
-            isOverdue ? "Kiện hàng đã quá hạn" : "Nhắc nhận kiện hàng";
+        string title = clearanceWarning ? "Parcel collection warning: 24 hours" :
+            isOverdue ? "Parcel is overdue" : "Parcel pickup reminder";
         string message = clearanceWarning
-            ? $"Vui lòng nhận kiện tại tủ {lockerCode} ngay. Kiện sẽ được chuyển điểm tập kết trong vòng 24 giờ và không thể mở tủ từ xa sau hạn lưu trữ."
+            ? $"Collect your parcel from locker {lockerCode} now. It will move to the collection point within 24 hours, and remote unlock will be unavailable after the storage deadline."
             : isOverdue
-            ? $"Kiện tại tủ {lockerCode} đã quá hạn. Còn {daysUntilTransfer} ngày trước khi chuyển điểm tập kết."
-            : $"Vui lòng nhận kiện tại tủ {lockerCode}. Còn {daysUntilTransfer} ngày trước khi chuyển điểm tập kết.";
+            ? $"Your parcel at locker {lockerCode} is overdue. It will move to the collection point in {daysUntilTransfer} days."
+            : $"Collect your parcel from locker {lockerCode}. It will move to the collection point in {daysUntilTransfer} days.";
         Notification inApp = CreateNotification(
             residentUserId, deliveryRequestId, null, parcelId, type,
             NotificationChannel.InApp, title, message, NotificationDeliveryStatus.Sent, now);

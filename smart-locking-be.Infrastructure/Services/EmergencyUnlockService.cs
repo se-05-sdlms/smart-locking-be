@@ -20,17 +20,17 @@ public sealed class EmergencyUnlockService(
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length < 10)
-            throw new BadRequestException("Lý do mở khẩn cấp phải có ít nhất 10 ký tự.");
+            throw BadRequestException.For("reason", "Emergency unlock reason must contain at least 10 characters.");
         await EnsureAccessAsync(userId, role, request.LockerId, cancellationToken);
         LockerCompartment compartment = await dbContext.LockerCompartments.SingleOrDefaultAsync(
             item => item.Id == request.CompartmentId && item.LockerId == request.LockerId,
-            cancellationToken) ?? throw new NotFoundException("Không tìm thấy ngăn tủ.");
+            cancellationToken) ?? throw new NotFoundException(LockerErrorCodes.InvalidCompartment, "Locker compartment not found.");
         if (request.IncidentId.HasValue && !await dbContext.Incidents.AnyAsync(incident =>
             incident.Id == request.IncidentId &&
             incident.LockerId == request.LockerId &&
             incident.LockerCompartmentId == request.CompartmentId,
             cancellationToken))
-            throw new BadRequestException("Sự cố không thuộc đúng tủ hoặc ngăn được mở khẩn cấp.");
+            throw new BadRequestException(IncidentErrorCodes.InvalidLink, "Incident does not match the locker or compartment being opened.");
         DateTimeOffset now = timeProvider.GetUtcNow();
         EmergencyUnlock entity = new()
         {
@@ -76,6 +76,6 @@ public sealed class EmergencyUnlockService(
             !await dbContext.OperatorAssignments.AnyAsync(item =>
                 item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
                 cancellationToken))
-            throw new ForbiddenException("Tủ không thuộc phạm vi vận hành.");
+            throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.");
     }
 }

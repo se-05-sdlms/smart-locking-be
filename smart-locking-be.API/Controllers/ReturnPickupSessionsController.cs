@@ -26,7 +26,7 @@ public sealed class ReturnPickupSessionsController(IReturnPickupSessionService s
     {
         string token = Request.Headers[GuestSessionHeaderName].FirstOrDefault()?.Trim() ?? string.Empty;
         if (token.Length == 0)
-            throw new UnauthorizedException($"Thiếu {GuestSessionHeaderName}.");
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
         return Execute(() => action(token));
     }
 

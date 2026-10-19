@@ -1,4 +1,5 @@
 using smart_locking_be.API.Constants;
+using smart_locking_be.API.Middleware;
 using smart_locking_be.API.Options;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -33,15 +34,8 @@ public static class RateLimitingExtensions
                     "Rate limit rejected request. Path: {Path}",
                     context.HttpContext.Request.Path);
 
-                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                context.HttpContext.Response.ContentType = "application/json";
-
-                await context.HttpContext.Response.WriteAsJsonAsync(new
-                {
-                    status = StatusCodes.Status429TooManyRequests,
-                    title = "Too many requests",
-                    message = "Request limit exceeded. Please try again later."
-                }, cancellationToken);
+                await ProblemResponse.WriteAsync(context.HttpContext, StatusCodes.Status429TooManyRequests,
+                    CommonErrorCodes.RateLimited, "Request limit exceeded. Please try again later.");
             };
 
             options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
