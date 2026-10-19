@@ -22,6 +22,6 @@ public class Service : IService
         // Ví dụ thao tác trực tiếp với DbContext mà không qua lớp Repository trung gian
         int userCount = await _dbContext.Users.CountAsync(cancellationToken);
 
-        return $"Chào mừng bạn đến với hệ thống Smart Locking (SDLMS)! Hệ thống hiện có {userCount} người dùng trong cơ sở dữ liệu.";
+        return $"Welcome to Smart Locking (SDLMS)! The system currently has {userCount} users in the database.";
     }
 }

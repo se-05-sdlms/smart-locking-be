@@ -26,32 +26,32 @@ public sealed class ParcelPickupService(
             .Include(item => item.DeliveryRequest).ThenInclude(request => request.SystemPolicy)
             .Include(item => item.DeliveryRequest).ThenInclude(request => request.Locker)
             .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
-            ?? throw new NotFoundException("Không tìm thấy bưu kiện.");
+            ?? throw new NotFoundException(ParcelErrorCodes.NotFound, "Parcel not found.");
 
         if (parcel.DeliveryRequest.ResidentProfile?.UserId != residentUserId)
         {
-            throw new ForbiddenException("Bạn không có quyền mở ngăn chứa bưu kiện này.");
+            throw new ForbiddenException(ParcelErrorCodes.AccessDenied, "You cannot open this parcel's compartment.");
         }
         if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
         {
-            throw new ConflictException("Bưu kiện không còn ở trạng thái có thể nhận.");
+            throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel is not available for pickup.");
         }
         if (timeProvider.GetUtcNow() >= parcel.MaxStorageUntil)
         {
-            throw new ConflictException(
-                $"Bưu kiện đã hết hạn lưu trữ tối đa. Vui lòng liên hệ điểm tập kết tại {parcel.DeliveryRequest.Locker.RecoveryAddress} để nhận hàng.");
+            throw new ConflictException(ParcelErrorCodes.StorageExpired,
+                $"Parcel has exceeded its maximum storage period. Contact the collection point at {parcel.DeliveryRequest.Locker.RecoveryAddress}.");
         }
         if (parcel.OverdueCharge?.Status == OverdueChargeStatus.Outstanding)
         {
-            throw new ConflictException("Cần thanh toán phí quá hạn trước khi nhận bưu kiện.");
+            throw new ConflictException(ParcelErrorCodes.PaymentRequired, "Pay the overdue charge before collecting this parcel.");
         }
         if (!parcel.DeliveryRequest.SystemPolicy.EnableRemoteUnlock)
         {
-            throw new ConflictException("Chính sách hiện tại không cho phép mở tủ từ ứng dụng.");
+            throw new ConflictException(ParcelErrorCodes.RemoteUnlockDisabled, "Current policy does not allow remote locker unlock.");
         }
         if (!parcel.DeliveryRequest.AllocatedCompartmentId.HasValue)
         {
-            throw new ConflictException("Bưu kiện chưa được gắn với ngăn locker.");
+            throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel has no allocated locker compartment.");
         }
 
         OpenLockerResponse access = await lockerAccessService.OpenAsync(new OpenLockerRequest(
@@ -81,23 +81,23 @@ public sealed class ParcelPickupService(
         LockerAccessEvent accessEvent = await dbContext.LockerAccessEvents
             .AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == lockerAccessEventId, cancellationToken)
-            ?? throw new NotFoundException("Không tìm thấy lượt mở ngăn lấy hàng.");
+            ?? throw new NotFoundException(ParcelErrorCodes.InvalidAccessEvent, "Pickup unlock event not found.");
 
         if (accessEvent.AccessType != LockerAccessType.ResidentPickup ||
             accessEvent.Result != LockerAccessResult.Succeeded ||
             !accessEvent.ParcelId.HasValue)
         {
-            throw new ConflictException("Lượt mở ngăn không hợp lệ để xác nhận lấy hàng.");
+            throw new ConflictException(ParcelErrorCodes.InvalidAccessEvent, "Unlock event is invalid for pickup confirmation.");
         }
 
         Parcel parcel = await dbContext.Parcels
             .Include(item => item.DeliveryRequest)
             .SingleOrDefaultAsync(item => item.Id == accessEvent.ParcelId.Value, cancellationToken)
-            ?? throw new NotFoundException("Không tìm thấy bưu kiện.");
+            ?? throw new NotFoundException(ParcelErrorCodes.NotFound, "Parcel not found.");
 
         if (parcel.DeliveryRequest.AllocatedCompartmentId != accessEvent.LockerCompartmentId)
         {
-            throw new ConflictException("Lượt mở ngăn không khớp với vị trí bưu kiện.");
+            throw new ConflictException(ParcelErrorCodes.InvalidAccessEvent, "Unlock event does not match the parcel compartment.");
         }
         if (parcel.Status == ParcelStatus.Retrieved && parcel.RetrievedAt.HasValue)
         {
@@ -105,7 +105,7 @@ public sealed class ParcelPickupService(
         }
         if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
         {
-            throw new ConflictException("Bưu kiện không còn ở trạng thái có thể xác nhận lấy hàng.");
+            throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel cannot be confirmed as picked up in its current state.");
         }
 
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -121,7 +121,7 @@ public sealed class ParcelPickupService(
             ParcelId = parcel.Id,
             FromStatus = previousStatus,
             ToStatus = ParcelStatus.Retrieved,
-            Reason = "Cư dân đã lấy bưu kiện và cửa ngăn locker đã đóng.",
+            Reason = "Resident collected the parcel and closed the compartment door.",
             ChangedByUserId = accessEvent.UserId,
             ChangedAt = now,
         });

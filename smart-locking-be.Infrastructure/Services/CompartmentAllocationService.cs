@@ -91,7 +91,7 @@ public sealed class CompartmentAllocationService(
     {
         if (deliveryRequestId.HasValue == returnRequestId.HasValue)
         {
-            throw new BadRequestException("Exactly one delivery or return request must own the reservation.");
+            throw new BadRequestException(CommonErrorCodes.InvalidRequest, "Exactly one delivery or return request must own the reservation.");
         }
     }
 }

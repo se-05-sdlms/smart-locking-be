@@ -40,7 +40,7 @@ public class SampleController : ControllerBase
     [Authorize(Policy = ApiPolicies.Administrator)]
     public IActionResult GetAdminData()
     {
-        return Ok(new { message = "Bạn đang truy cập dữ liệu bảo mật dành riêng cho Quản trị viên (Administrator)." });
+        return Ok(new { message = "You are accessing administrator-only data." });
     }
 
     /// <summary>
@@ -51,6 +51,6 @@ public class SampleController : ControllerBase
     [Authorize(Policy = ApiPolicies.Resident)]
     public IActionResult GetResidentData()
     {
-        return Ok(new { message = "Bạn đang truy cập dữ liệu bảo mật dành riêng cho Cư dân (Resident)." });
+        return Ok(new { message = "You are accessing resident-only data." });
     }
 }

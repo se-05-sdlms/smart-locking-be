@@ -17,10 +17,10 @@ public sealed class SubscriptionPlanService(ApplicationDbContext db, TimeProvide
     {
         Validate(request.Name, request.Price, request.DurationDays, request.MaxActiveParcels);
         if (string.IsNullOrWhiteSpace(request.Code) || request.Code.Trim().Length > 50)
-            throw new BadRequestException("Mã gói cước phải có từ 1 đến 50 ký tự.");
+            throw BadRequestException.For("code", "Subscription plan code must contain between 1 and 50 characters.");
         string code = request.Code.Trim();
         if (await db.SubscriptionPlans.AnyAsync(p => p.Code == code, cancellationToken))
-            throw new ConflictException("Mã gói cước đã tồn tại.");
+            throw new ConflictException(SubscriptionErrorCodes.AlreadyExists, "Subscription plan code already exists.");
         var plan = new SubscriptionPlan
         {
             Id = Guid.NewGuid(),
@@ -37,7 +37,7 @@ public sealed class SubscriptionPlanService(ApplicationDbContext db, TimeProvide
         db.SubscriptionPlans.Add(plan);
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
-        { throw new ConflictException("Mã gói cước đã tồn tại."); }
+        { throw new ConflictException(SubscriptionErrorCodes.AlreadyExists, "Subscription plan code already exists."); }
         return Map(plan);
     }
 
@@ -45,7 +45,7 @@ public sealed class SubscriptionPlanService(ApplicationDbContext db, TimeProvide
     {
         Validate(request.Name, request.Price, request.DurationDays, request.MaxActiveParcels);
         var plan = await db.SubscriptionPlans.SingleOrDefaultAsync(p => p.Id == id, cancellationToken)
-            ?? throw new NotFoundException("Không tìm thấy gói cước.");
+            ?? throw new NotFoundException(SubscriptionErrorCodes.NotFound, "Subscription plan not found.");
         plan.Name = request.Name.Trim();
         plan.Description = request.Description;
         plan.Price = request.Price;
@@ -61,7 +61,7 @@ public sealed class SubscriptionPlanService(ApplicationDbContext db, TimeProvide
     {
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 200 || price < 0 || price > int.MaxValue ||
             decimal.Truncate(price) != price || days <= 0 || days > 36500 || capacity <= 0)
-            throw new BadRequestException("Thông tin gói cước không hợp lệ.");
+            throw BadRequestException.For("plan", "Subscription plan data is invalid.");
     }
 
     private static SubscriptionPlanResponse Map(SubscriptionPlan p) => new(p.Id, p.Code, p.Name, p.Description, p.Price, p.DurationDays, p.MaxActiveParcels, p.IsActive);

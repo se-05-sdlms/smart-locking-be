@@ -163,9 +163,9 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
             string actorName = l.ActorUser?.ResidentProfile?.FullName
                 ?? l.ActorUser?.PhoneNumber
                 ?? l.ActorUser?.Email
-                ?? "Hệ thống";
+                ?? "System";
 
-            string target = l.EntityType ?? l.EntityId?.ToString() ?? "Hệ thống";
+            string target = l.EntityType ?? l.EntityId?.ToString() ?? "System";
 
             return new RecentAuditLogResponse(
                 l.Id,

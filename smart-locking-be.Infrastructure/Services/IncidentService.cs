@@ -31,7 +31,7 @@ public sealed class IncidentService(
         string type = RequireValue(request.Type, nameof(request.Type), 100);
         if (!SupportedTypes.Contains(type))
         {
-            throw new BadRequestException("Incident type is invalid.");
+            throw BadRequestException.For("incidentType", "Incident type is invalid.");
         }
         int relatedRecordCount = new[]
         {
@@ -41,7 +41,7 @@ public sealed class IncidentService(
         }.Count(id => id.HasValue);
         if (relatedRecordCount > 1)
         {
-            throw new BadRequestException("Only one parcel, return request, or payment may be linked.");
+            throw new BadRequestException(IncidentErrorCodes.InvalidLink, "Only one parcel, return request, or payment may be linked.");
         }
 
         ResidentProfile resident = await dbContext.ResidentProfiles
@@ -51,7 +51,7 @@ public sealed class IncidentService(
                            profile.User.Role == UserRole.Resident &&
                            profile.User.Status == UserStatus.Active,
                 cancellationToken)
-            ?? throw new NotFoundException("Resident profile not found.");
+            ?? throw new NotFoundException(UserErrorCodes.NotFound, "Resident profile not found.");
 
         Guid? lockerId = request.LockerId;
         Guid? compartmentId = request.LockerCompartmentId;
@@ -61,11 +61,11 @@ public sealed class IncidentService(
         {
             if (lockerId.HasValue && lockerId != relatedLockerId)
             {
-                throw new BadRequestException($"{relatedRecord} does not belong to the selected locker.");
+                throw new BadRequestException(IncidentErrorCodes.InvalidLink, $"{relatedRecord} does not belong to the selected locker.");
             }
             if (compartmentId.HasValue && relatedCompartmentId.HasValue && compartmentId != relatedCompartmentId)
             {
-                throw new BadRequestException($"{relatedRecord} does not belong to the selected compartment.");
+                throw new BadRequestException(IncidentErrorCodes.InvalidLink, $"{relatedRecord} does not belong to the selected compartment.");
             }
 
             lockerId = relatedLockerId;
@@ -80,7 +80,7 @@ public sealed class IncidentService(
                     item => item.Id == request.ParcelId &&
                             item.DeliveryRequest.ResidentProfileId == resident.Id,
                     cancellationToken)
-                ?? throw new NotFoundException("Parcel not found.");
+                ?? throw new NotFoundException(ParcelErrorCodes.NotFound, "Parcel not found.");
             SetContext(parcel.DeliveryRequest.LockerId, parcel.DeliveryRequest.AllocatedCompartmentId, "Parcel");
         }
 
@@ -88,7 +88,7 @@ public sealed class IncidentService(
         {
             ReturnRequest returnRequest = await dbContext.ReturnRequests.SingleOrDefaultAsync(
                 item => item.Id == request.ReturnRequestId && item.ResidentProfileId == resident.Id,
-                cancellationToken) ?? throw new NotFoundException("Return request not found.");
+                cancellationToken) ?? throw new NotFoundException(ReturnErrorCodes.NotFound, "Return request not found.");
             SetContext(returnRequest.LockerId, returnRequest.AllocatedCompartmentId, "Return request");
         }
 
@@ -102,10 +102,10 @@ public sealed class IncidentService(
                     item => item.Id == request.PaymentTransactionId &&
                             item.OverdueCharge.Parcel.DeliveryRequest.ResidentProfileId == resident.Id,
                     cancellationToken)
-                ?? throw new NotFoundException("Payment transaction not found.");
+                ?? throw new NotFoundException(PaymentErrorCodes.NotFound, "Payment transaction not found.");
             if (parcelId.HasValue && parcelId != payment.OverdueCharge.ParcelId)
             {
-                throw new BadRequestException("Payment transaction does not belong to the selected parcel.");
+                throw new BadRequestException(IncidentErrorCodes.InvalidLink, "Payment transaction does not belong to the selected parcel.");
             }
             parcelId = payment.OverdueCharge.ParcelId;
             SetContext(
@@ -116,21 +116,21 @@ public sealed class IncidentService(
 
         if (!lockerId.HasValue)
         {
-            throw new BadRequestException("A related locker, parcel, return request, or payment is required.");
+            throw new BadRequestException(IncidentErrorCodes.InvalidLink, "A related locker, parcel, return request, or payment is required.");
         }
         if (resident.RegisteredLockerId != lockerId)
         {
-            throw new ForbiddenException("The incident locker is not registered to this resident.");
+            throw new ForbiddenException(IncidentErrorCodes.AccessDenied, "The incident locker is not registered to this resident.");
         }
         if (!await dbContext.Lockers.AnyAsync(locker => locker.Id == lockerId, cancellationToken))
         {
-            throw new NotFoundException("Locker not found.");
+            throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
         }
         if (compartmentId.HasValue && !await dbContext.LockerCompartments.AnyAsync(
             compartment => compartment.Id == compartmentId && compartment.LockerId == lockerId,
             cancellationToken))
         {
-            throw new NotFoundException("Locker compartment not found.");
+            throw new NotFoundException(LockerErrorCodes.InvalidCompartment, "Locker compartment not found.");
         }
 
         Guid? assignedOperatorUserId = await dbContext.OperatorAssignments
@@ -184,7 +184,7 @@ public sealed class IncidentService(
                 recipient,
                 incident,
                 assignedOperatorUserId.HasValue ? "IncidentAssigned" : "IncidentUnassigned",
-                "Sự cố mới cần xử lý",
+                "New incident needs attention",
                 incident.Title,
                 now));
         }
@@ -233,7 +233,7 @@ public sealed class IncidentService(
         };
         if (!canAccess)
         {
-            throw new NotFoundException("Incident not found.");
+            throw new NotFoundException(IncidentErrorCodes.NotFound, "Incident not found.");
         }
         return await LoadDetailAsync(incidentId, cancellationToken);
     }
@@ -248,7 +248,7 @@ public sealed class IncidentService(
         Incident incident = await FindOperationalIncidentAsync(userId, role, incidentId, cancellationToken);
         if (incident.Status == IncidentStatus.Resolved)
         {
-            throw new ConflictException("Resolved incidents cannot receive new actions.");
+            throw new ConflictException(IncidentErrorCodes.InvalidState, "Resolved incidents cannot receive new actions.");
         }
 
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -276,24 +276,24 @@ public sealed class IncidentService(
     {
         if (!Enum.IsDefined(request.Status))
         {
-            throw new BadRequestException("Incident status is invalid.");
+            throw BadRequestException.For("status", "Incident status is invalid.");
         }
 
         Incident incident = await FindOperationalIncidentAsync(userId, role, incidentId, cancellationToken);
         if (!IsValidTransition(incident.Status, request.Status, role))
         {
-            throw new ConflictException($"Cannot change incident from {incident.Status} to {request.Status}.");
+            throw new ConflictException(IncidentErrorCodes.InvalidState, $"Cannot change incident from {incident.Status} to {request.Status}.");
         }
 
         string? notes = NormalizeOptional(request.Notes, nameof(request.Notes), 4000);
         string? resolution = NormalizeOptional(request.ResolutionSummary, nameof(request.ResolutionSummary), 4000);
         if (request.Status == IncidentStatus.Resolved && resolution is null)
         {
-            throw new BadRequestException("Resolution summary is required when resolving an incident.");
+            throw BadRequestException.For("resolutionSummary", "Resolution summary is required when resolving an incident.");
         }
         if (request.Status == IncidentStatus.Escalated && notes is null)
         {
-            throw new BadRequestException("Escalation notes are required.");
+            throw BadRequestException.For("escalationNotes", "Escalation notes are required.");
         }
 
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -321,8 +321,8 @@ public sealed class IncidentService(
                 incident.ReporterUserId.Value,
                 incident,
                 "IncidentStatusChanged",
-                "Cập nhật sự cố",
-                $"Sự cố “{incident.Title}” đã chuyển sang {request.Status}.",
+                "Incident updated",
+                $"Incident '{incident.Title}' changed to {request.Status}.",
                 now));
         }
         if (request.Status == IncidentStatus.Escalated)
@@ -337,7 +337,7 @@ public sealed class IncidentService(
                     administratorId,
                     incident,
                     "IncidentEscalated",
-                    "Sự cố đã được chuyển cấp",
+                    "Incident escalated",
                     incident.Title,
                     now));
             }
@@ -357,7 +357,7 @@ public sealed class IncidentService(
                 assignment.OperatorUserId == userId &&
                 assignment.LockerId == incident.LockerId &&
                 assignment.RevokedAt == null)),
-        _ => throw new ForbiddenException("Role cannot access operational incidents.")
+        _ => throw new ForbiddenException(IncidentErrorCodes.AccessDenied, "Role cannot access operational incidents.")
     };
 
     private async Task<Incident> FindOperationalIncidentAsync(
@@ -368,7 +368,7 @@ public sealed class IncidentService(
         await ScopeOperational(userId, role)
             .Include(incident => incident.Actions)
             .SingleOrDefaultAsync(incident => incident.Id == incidentId, cancellationToken)
-        ?? throw new NotFoundException("Incident not found.");
+        ?? throw new NotFoundException(IncidentErrorCodes.NotFound, "Incident not found.");
 
     private async Task<IncidentDetailResponse> LoadDetailAsync(Guid incidentId, CancellationToken cancellationToken)
     {
@@ -481,7 +481,7 @@ public sealed class IncidentService(
 
     private static string RequireValue(string? value, string parameterName, int maxLength) =>
         NormalizeOptional(value, parameterName, maxLength)
-        ?? throw new BadRequestException($"{parameterName} is required.");
+        ?? throw BadRequestException.For(parameterName, $"{parameterName} is required.");
 
     private static string? NormalizeOptional(string? value, string parameterName, int maxLength)
     {
@@ -492,7 +492,7 @@ public sealed class IncidentService(
         string trimmed = value.Trim();
         if (trimmed.Length > maxLength)
         {
-            throw new BadRequestException($"{parameterName} must not exceed {maxLength} characters.");
+            throw BadRequestException.For(parameterName, $"{parameterName} must not exceed {maxLength} characters.");
         }
         return trimmed;
     }
@@ -504,7 +504,7 @@ public sealed class IncidentService(
             (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ||
              (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
         {
-            throw new BadRequestException("EvidenceUrl must be an absolute HTTP or HTTPS URL.");
+            throw BadRequestException.For("evidenceUrl", "EvidenceUrl must be an absolute HTTP or HTTPS URL.");
         }
         return url;
     }
@@ -514,31 +514,31 @@ public sealed class IncidentService(
     {
         string type = RequireValue(request.Type, nameof(request.Type), 100);
         if (!SupportedTypes.Contains(type))
-            throw new BadRequestException("Incident type is invalid.");
+            throw BadRequestException.For("incidentType", "Incident type is invalid.");
         if (request.DeliveryRequestId.HasValue && request.ReturnRequestId.HasValue)
-            throw new BadRequestException("Only one delivery request or return request may be linked.");
+            throw new BadRequestException(IncidentErrorCodes.InvalidLink, "Only one delivery request or return request may be linked.");
 
         Locker locker = await dbContext.Lockers.SingleOrDefaultAsync(
             item => item.Code == request.LockerCode.Trim(), cancellationToken)
-            ?? throw new NotFoundException("Locker not found.");
+            ?? throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
         Guid? compartmentId = request.LockerCompartmentId;
         if (request.DeliveryRequestId.HasValue)
         {
             DeliveryRequest delivery = await dbContext.DeliveryRequests.SingleOrDefaultAsync(
                 item => item.Id == request.DeliveryRequestId && item.LockerId == locker.Id,
-                cancellationToken) ?? throw new NotFoundException("Delivery request not found.");
+                cancellationToken) ?? throw new NotFoundException(DeliveryErrorCodes.NotFound, "Delivery request not found.");
             compartmentId ??= delivery.AllocatedCompartmentId;
         }
         if (request.ReturnRequestId.HasValue)
         {
             ReturnRequest returnRequest = await dbContext.ReturnRequests.SingleOrDefaultAsync(
                 item => item.Id == request.ReturnRequestId && item.LockerId == locker.Id,
-                cancellationToken) ?? throw new NotFoundException("Return request not found.");
+                cancellationToken) ?? throw new NotFoundException(ReturnErrorCodes.NotFound, "Return request not found.");
             compartmentId ??= returnRequest.AllocatedCompartmentId;
         }
         if (compartmentId.HasValue && !await dbContext.LockerCompartments.AnyAsync(
             item => item.Id == compartmentId && item.LockerId == locker.Id, cancellationToken))
-            throw new NotFoundException("Locker compartment not found.");
+            throw new NotFoundException(LockerErrorCodes.InvalidCompartment, "Locker compartment not found.");
 
         Guid? assignedOperatorUserId = await dbContext.OperatorAssignments
             .Where(item => item.LockerId == locker.Id && item.RevokedAt == null && item.OperatorUser.Status == UserStatus.Active)
@@ -568,7 +568,7 @@ public sealed class IncidentService(
             : await dbContext.Users.Where(user => user.Role == UserRole.Administrator && user.Status == UserStatus.Active)
                 .Select(user => user.Id).ToListAsync(cancellationToken);
         foreach (Guid recipient in recipients)
-            dbContext.Notifications.Add(CreateNotification(recipient, incident, "GuestIncidentCreated", "Sự cố khách cần xử lý", incident.Title, now));
+            dbContext.Notifications.Add(CreateNotification(recipient, incident, "GuestIncidentCreated", "Guest incident needs attention", incident.Title, now));
         dbContext.AuditLogs.Add(new AuditLog
         {
             Id = Guid.NewGuid(),

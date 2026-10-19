@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using smart_locking_be.Application.DTOs.Auth;
+using smart_locking_be.Application.Errors;
 using smart_locking_be.Application.Exceptions;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -431,6 +432,7 @@ public sealed class AuthServiceTests
         var ex = await Assert.ThrowsAsync<UnauthorizedException>(() =>
             service.LoginAsync(new LoginRequest("0912345678", "wrong-password"), null, default));
         Assert.Equal("Invalid credentials.", ex.Message);
+        Assert.Equal(AuthErrorCodes.InvalidCredentials, ex.ErrorCode);
         Assert.Empty(dbContext.RefreshTokens);
     }
 
@@ -444,6 +446,7 @@ public sealed class AuthServiceTests
         var ex = await Assert.ThrowsAsync<UnauthorizedException>(() =>
             service.LoginAsync(new LoginRequest("missing@example.com", "P@ssw0rd123"), null, default));
         Assert.Equal("Invalid credentials.", ex.Message);
+        Assert.Equal(AuthErrorCodes.InvalidCredentials, ex.ErrorCode);
         Assert.Empty(dbContext.RefreshTokens);
     }
 
@@ -468,6 +471,7 @@ public sealed class AuthServiceTests
         var ex = await Assert.ThrowsAsync<UnauthorizedException>(() =>
             service.LoginAsync(new LoginRequest("0912345678", "P@ssw0rd123"), null, default));
         Assert.Equal("Invalid credentials.", ex.Message);
+        Assert.Equal(AuthErrorCodes.InvalidCredentials, ex.ErrorCode);
         Assert.Empty(dbContext.RefreshTokens);
     }
 
@@ -492,6 +496,7 @@ public sealed class AuthServiceTests
         var ex = await Assert.ThrowsAsync<UnauthorizedException>(() =>
             service.LoginAsync(new LoginRequest("0912345678", "P@ssw0rd123"), null, default));
         Assert.Equal("Invalid credentials.", ex.Message);
+        Assert.Equal(AuthErrorCodes.InvalidCredentials, ex.ErrorCode);
         Assert.Empty(dbContext.RefreshTokens);
     }
     #endregion

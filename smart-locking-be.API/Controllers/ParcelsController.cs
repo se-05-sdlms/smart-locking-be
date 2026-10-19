@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using smart_locking_be.API.Constants;
+using smart_locking_be.API.Middleware;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Enums;
@@ -62,8 +63,14 @@ public sealed class ParcelsController(
         return response.Result switch
         {
             LockerAccessResult.Succeeded => Accepted(response),
-            LockerAccessResult.Blocked => Conflict(response),
-            _ => StatusCode(StatusCodes.Status503ServiceUnavailable, response),
+            LockerAccessResult.Blocked => new ObjectResult(ProblemResponse.Create(HttpContext,
+                StatusCodes.Status409Conflict, LockerErrorCodes.OpenFailed,
+                "Locker compartment could not be opened."))
+            { StatusCode = StatusCodes.Status409Conflict, ContentTypes = { "application/problem+json" } },
+            _ => new ObjectResult(ProblemResponse.Create(HttpContext,
+                StatusCodes.Status503ServiceUnavailable, LockerErrorCodes.OpenFailed,
+                "Locker compartment could not be opened."))
+            { StatusCode = StatusCodes.Status503ServiceUnavailable, ContentTypes = { "application/problem+json" } },
         };
     }
 

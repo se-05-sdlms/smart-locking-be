@@ -24,7 +24,7 @@ public sealed class MqttLockerListenerService(
         string host = configuration["Mqtt:Host"]?.Trim() ?? string.Empty;
         if (string.IsNullOrEmpty(host))
         {
-            logger.LogWarning("[MQTT LISTENER] Chưa cấu hình 'Mqtt:Host'. Dịch vụ lắng nghe MQTT sẽ không khởi động.");
+            logger.LogWarning("[MQTT LISTENER] 'Mqtt:Host' is not configured. MQTT listener will not start.");
             return;
         }
 
@@ -65,7 +65,7 @@ public sealed class MqttLockerListenerService(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[MQTT LISTENER] Lỗi xử lý bản tin từ topic '{Topic}': {Message}",
+                logger.LogError(ex, "[MQTT LISTENER] Failed to process message from topic '{Topic}': {Message}",
                     e.ApplicationMessage.Topic, ex.Message);
             }
         };
@@ -76,17 +76,17 @@ public sealed class MqttLockerListenerService(
             {
                 if (!_mqttClient.IsConnected)
                 {
-                    logger.LogInformation("[MQTT LISTENER] Đang kết nối tới EMQX Broker ({Host}:{Port})...", host, port);
+                    logger.LogInformation("[MQTT LISTENER] Connecting to EMQX broker ({Host}:{Port})...", host, port);
                     await _mqttClient.ConnectAsync(options, stoppingToken);
-                    logger.LogInformation("[MQTT LISTENER] Đã kết nối thành công! Đăng ký lắng nghe 'lockers/+/doors/+/status'...");
+                    logger.LogInformation("[MQTT LISTENER] Connected. Subscribing to 'lockers/+/doors/+/status'...");
 
                     await _mqttClient.SubscribeAsync("lockers/+/doors/+/status", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
-                    logger.LogInformation("[MQTT LISTENER] Đã subscribe thành công topic trạng thái cửa.");
+                    logger.LogInformation("[MQTT LISTENER] Subscribed to door status topic.");
                 }
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
-                logger.LogWarning("[MQTT LISTENER] Kết nối tới EMQX thất bại: {Message}. Thử lại sau 5 giây...", ex.Message);
+                logger.LogWarning("[MQTT LISTENER] EMQX connection failed: {Message}. Retrying in 5 seconds...", ex.Message);
             }
 
             try
@@ -118,7 +118,7 @@ public sealed class MqttLockerListenerService(
         string statusStr = payload.Trim().ToUpperInvariant();
         if (statusStr is not ("OPEN" or "CLOSED"))
         {
-            logger.LogWarning("[MQTT LISTENER] Bỏ qua trạng thái cửa không hợp lệ: '{Payload}'.", payload);
+            logger.LogWarning("[MQTT LISTENER] Ignoring invalid door status: '{Payload}'.", payload);
             return;
         }
         DoorStatus doorStatus = statusStr == "CLOSED" ? DoorStatus.Closed : DoorStatus.Open;
@@ -132,7 +132,7 @@ public sealed class MqttLockerListenerService(
 
         if (locker is null)
         {
-            logger.LogDebug("[MQTT LISTENER] Nhận bản tin từ thiết bị '{DeviceId}' nhưng chưa được đăng ký trong hệ thống.", deviceIdentifier);
+            logger.LogDebug("[MQTT LISTENER] Received a message from unregistered device '{DeviceId}'.", deviceIdentifier);
             return;
         }
 
@@ -156,7 +156,7 @@ public sealed class MqttLockerListenerService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        logger.LogInformation("[MQTT IN] Locker '{DeviceId}' - Ngăn {Channel} -> Cửa: {Status} (Online)",
+        logger.LogInformation("[MQTT IN] Locker '{DeviceId}' - compartment {Channel} -> door: {Status} (online)",
             deviceIdentifier, channel, doorStatus);
     }
 

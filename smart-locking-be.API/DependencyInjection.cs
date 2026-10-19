@@ -1,3 +1,6 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.AspNetCore.WebUtilities;
 using Serilog;
 using smart_locking_be.API.Hubs;
 using smart_locking_be.API.Middleware;
@@ -20,6 +23,17 @@ public static class DependencyInjection
     {
         // 1. Controllers & API Behavior
         services.AddControllers();
+        services.Configure<ApiBehaviorOptions>(options => options.InvalidModelStateResponseFactory = context =>
+        {
+            ProblemDetailsFactory factory = context.HttpContext.RequestServices.GetRequiredService<ProblemDetailsFactory>();
+            ValidationProblemDetails problem = factory.CreateValidationProblemDetails(
+                context.HttpContext, context.ModelState);
+            problem.Extensions["code"] = CommonErrorCodes.InvalidInput;
+            return new BadRequestObjectResult(problem)
+            {
+                ContentTypes = { "application/problem+json" }
+            };
+        });
         services.AddSignalR();
         services.AddScoped<IOperationsRealtimeNotifier, SignalROperationsRealtimeNotifier>();
         IConfigurationSection storageSection = configuration.GetSection(SupabaseStorageOptions.SectionName);
@@ -81,6 +95,19 @@ public static class DependencyInjection
         }
 
         app.UseExceptionHandler();
+        app.UseStatusCodePages(context =>
+        {
+            int status = context.HttpContext.Response.StatusCode;
+            string code = status switch
+            {
+                StatusCodes.Status404NotFound => CommonErrorCodes.RouteNotFound,
+                StatusCodes.Status405MethodNotAllowed => CommonErrorCodes.MethodNotAllowed,
+                >= 500 => CommonErrorCodes.InternalError,
+                _ => CommonErrorCodes.HttpError
+            };
+            string detail = status >= 500 ? "An unexpected error occurred." : ReasonPhrases.GetReasonPhrase(status);
+            return ProblemResponse.WriteAsync(context.HttpContext, status, code, detail);
+        });
 
         // 2. Log request bằng Serilog
         app.UseSerilogRequestLogging();

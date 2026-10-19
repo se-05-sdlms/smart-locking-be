@@ -18,13 +18,13 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
     public async Task<SubscriptionCheckoutResponse> SubscribeAsync(Guid userId, SubscribePlanRequest request, CancellationToken cancellationToken = default)
     {
         var resident = await db.ResidentProfiles.AsNoTracking().SingleOrDefaultAsync(r => r.UserId == userId, cancellationToken)
-            ?? throw new NotFoundException("Không tìm thấy hồ sơ cư dân.");
+            ?? throw new NotFoundException(UserErrorCodes.NotFound, "Resident profile not found.");
         var plan = await db.SubscriptionPlans.AsNoTracking().SingleOrDefaultAsync(p => p.Id == request.PlanId && p.IsActive, cancellationToken)
-            ?? throw new NotFoundException("Gói cước không tồn tại hoặc đã ngừng đăng ký.");
+            ?? throw new NotFoundException(SubscriptionErrorCodes.NotFound, "Subscription plan is unavailable.");
         if (plan.Price <= 0 || plan.Price > int.MaxValue || decimal.Truncate(plan.Price) != plan.Price)
-            throw new BadRequestException("Thanh toán PayOS yêu cầu số tiền VND nguyên dương.");
+            throw new BadRequestException(SubscriptionErrorCodes.InvalidPayment, "PayOS payment requires a positive VND amount.");
         if (!IsHttpUrl(options.Value.ReturnUrl) || !IsHttpUrl(options.Value.CancelUrl))
-            throw new InternalServerException("Chưa cấu hình URL thanh toán PayOS hợp lệ.");
+            throw new InternalServerException("A valid PayOS payment URL is not configured.");
 
         DateTimeOffset now = clock.GetUtcNow();
         // Random positive 52-bit code stays exact in JavaScript and works across API instances.
@@ -54,11 +54,11 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
     public async Task ActivateSubscriptionAsync(PayOSWebhookData payment, CancellationToken cancellationToken = default)
     {
         if (payment.Code != "00" || payment.Currency != "VND" || payment.Amount <= 0 || string.IsNullOrWhiteSpace(payment.Reference) || payment.Reference.Length > 200)
-            throw new BadRequestException("Thông tin thanh toán không hợp lệ.");
+            throw new BadRequestException(SubscriptionErrorCodes.InvalidPayment, "Payment information is invalid.");
         string orderCode = payment.OrderCode.ToString(CultureInfo.InvariantCulture);
         Guid residentId = await db.ResidentSubscriptions.AsNoTracking().Where(s => s.ExternalOrderCode == orderCode)
             .Select(s => s.ResidentProfileId).SingleOrDefaultAsync(cancellationToken);
-        if (residentId == Guid.Empty) throw new NotFoundException("Không tìm thấy đơn đăng ký.");
+        if (residentId == Guid.Empty) throw new NotFoundException(SubscriptionErrorCodes.NotFound, "Subscription not found.");
 
         await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(cancellationToken) : null;
         if (db.Database.IsRelational())
@@ -68,15 +68,15 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
         }
         var subscription = await db.ResidentSubscriptions.SingleAsync(s => s.ExternalOrderCode == orderCode, cancellationToken);
         if (db.Database.IsRelational()) await db.Entry(subscription).ReloadAsync(cancellationToken);
-        if (subscription.PriceSnapshot != payment.Amount) throw new BadRequestException("Số tiền thanh toán không khớp.");
+        if (subscription.PriceSnapshot != payment.Amount) throw new BadRequestException(SubscriptionErrorCodes.InvalidPayment, "Payment amount does not match.");
         if (subscription.PaidAt.HasValue) return;
-        if (subscription.Status != SubscriptionStatus.PendingPayment) throw new ConflictException("Đơn đăng ký không chờ thanh toán.");
+        if (subscription.Status != SubscriptionStatus.PendingPayment) throw new ConflictException(SubscriptionErrorCodes.InvalidState, "Subscription is not awaiting payment.");
         DateTimeOffset now = clock.GetUtcNow();
         DateTimeOffset? latestEnd = await db.ResidentSubscriptions.AsNoTracking()
             .Where(s => s.ResidentProfileId == residentId && s.Status == SubscriptionStatus.Active && s.EndDate > now)
             .MaxAsync(s => (DateTimeOffset?)s.EndDate, cancellationToken);
         TimeSpan duration = subscription.EndDate - subscription.StartDate;
-        if (duration <= TimeSpan.Zero) throw new InternalServerException("Thời hạn đăng ký không hợp lệ.");
+        if (duration <= TimeSpan.Zero) throw new InternalServerException("Subscription duration is invalid.");
         subscription.StartDate = latestEnd ?? now;
         subscription.EndDate = subscription.StartDate.Add(duration);
         subscription.Status = SubscriptionStatus.Active;

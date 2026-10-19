@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using smart_locking_be.API.Authorization;
+using smart_locking_be.API.Middleware;
 using System.Security.Claims;
 using System.Text;
 
@@ -49,7 +50,22 @@ public static class JwtAuthenticationExtensions
                         if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs/operations"))
                             context.Token = accessToken;
                         return Task.CompletedTask;
-                    }
+                    },
+                    OnChallenge = async context =>
+                    {
+                        context.HandleResponse();
+                        context.Response.Headers.WWWAuthenticate = "Bearer";
+                        string code = context.AuthenticateFailure is SecurityTokenExpiredException
+                            ? AuthErrorCodes.TokenExpired
+                            : context.AuthenticateFailure is null
+                                ? AuthErrorCodes.AuthenticationRequired
+                                : AuthErrorCodes.InvalidToken;
+                        await ProblemResponse.WriteAsync(context.HttpContext, StatusCodes.Status401Unauthorized,
+                            code, "Authentication is required or the token is invalid.");
+                    },
+                    OnForbidden = context => ProblemResponse.WriteAsync(context.HttpContext,
+                        StatusCodes.Status403Forbidden, CommonErrorCodes.AccessDenied,
+                        "You do not have permission to perform this action.")
                 };
             });
 
