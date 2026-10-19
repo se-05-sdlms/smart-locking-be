@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.API.Authorization;
 using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -18,20 +17,18 @@ public sealed class NotificationsController(INotificationService notificationSer
         [FromQuery] bool unreadOnly = false,
         [FromQuery] int limit = 50,
         CancellationToken cancellationToken = default) =>
-        await ExecuteForCurrentUserAsync(userId =>
-            notificationService.GetForUserAsync(userId, unreadOnly, limit, cancellationToken));
+        Ok(await notificationService.GetForUserAsync(
+            User.GetRequiredUserId(), unreadOnly, limit, cancellationToken));
 
     [HttpPatch("{id:guid}/read")]
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> MarkRead(Guid id, CancellationToken cancellationToken) =>
-        await ExecuteForCurrentUserAsync(userId =>
-            notificationService.MarkReadAsync(userId, id, cancellationToken));
+        Ok(await notificationService.MarkReadAsync(User.GetRequiredUserId(), id, cancellationToken));
 
     [HttpPatch("read-all")]
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> MarkAllRead(CancellationToken cancellationToken) =>
-        await ExecuteForCurrentUserAsync(userId =>
-            notificationService.MarkAllReadAsync(userId, cancellationToken));
+        Ok(await notificationService.MarkAllReadAsync(User.GetRequiredUserId(), cancellationToken));
 
     [HttpPost("rules")]
     [Authorize(Policy = ApiPolicies.Administrator)]
@@ -39,44 +36,7 @@ public sealed class NotificationsController(INotificationService notificationSer
         CreateNotificationRuleRequest request,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            NotificationRuleResponse response = await notificationService.CreateRuleAsync(request, cancellationToken);
-            return StatusCode(StatusCodes.Status201Created, response);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
-        }
-    }
-
-    private async Task<IActionResult> ExecuteForCurrentUserAsync<TResponse>(
-        Func<Guid, Task<TResponse>> action)
-    {
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
-        {
-            return Unauthorized(new { message = "Invalid authentication token." });
-        }
-
-        try
-        {
-            return Ok(await action(userId));
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
+        NotificationRuleResponse response = await notificationService.CreateRuleAsync(request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, response);
     }
 }

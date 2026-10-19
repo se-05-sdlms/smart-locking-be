@@ -17,9 +17,8 @@ public sealed class PaymentWebhooksController(IPaymentGatewayService gateway, IR
             await subscriptions.ActivateSubscriptionAsync(payment, cancellationToken);
             return Ok();
         }
-        catch (ArgumentException exception) { return BadRequest(new { message = exception.Message }); }
         // PayOS sends a signed sample order when registering the webhook. Other orders
         // on this channel may also be unrelated to subscriptions; never create one here.
-        catch (KeyNotFoundException) { return Ok(); }
+        catch (NotFoundException) { return Ok(); }
     }
 }

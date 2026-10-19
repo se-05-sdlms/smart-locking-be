@@ -1,9 +1,8 @@
 using Serilog;
-using smart_locking_be.API.Middleware;
 using smart_locking_be.API.Hubs;
-using smart_locking_be.Application.Interfaces.Services;
-using smart_locking_be.API.Extensions;
+using smart_locking_be.API.Middleware;
 using smart_locking_be.API.Services;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Infrastructure.Options;
 using smart_locking_be.Infrastructure.Services;
 
@@ -29,7 +28,7 @@ public static class DependencyInjection
         else
             services.AddScoped<IImageStorageService, LocalImageStorageService>();
         services.AddProblemDetails();
-        services.AddExceptionHandler<ApiExceptionHandler>();
+        services.AddExceptionHandler<GlobalExceptionHandler>();
 
         // 2. CORS Policy Configuration
         services.AddCorsPolicy(configuration, environment);

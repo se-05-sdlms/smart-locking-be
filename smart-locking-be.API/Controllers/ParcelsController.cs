@@ -1,12 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http.Timeouts;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using smart_locking_be.API.Constants;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Enums;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -24,21 +23,27 @@ public sealed class ParcelsController(
         [FromQuery] string? search = null,
         [FromQuery] DateTimeOffset? from = null,
         [FromQuery] DateTimeOffset? to = null,
-        CancellationToken cancellationToken = default) =>
-        await ExecuteAsync((userId, role) =>
-            parcelService.GetParcelsAsync(userId, role, view, search, from, to, cancellationToken));
+        CancellationToken cancellationToken = default)
+    {
+        var (userId, role) = User.GetRequiredIdentity();
+        return Ok(await parcelService.GetParcelsAsync(userId, role, view, search, from, to, cancellationToken));
+    }
 
     [HttpGet("{id:guid}")]
     [Authorize(Roles = "Resident,LockerOperator")]
-    public async Task<IActionResult> GetParcel(Guid id, CancellationToken cancellationToken) =>
-        await ExecuteAsync((userId, role) =>
-            parcelService.GetParcelAsync(userId, role, id, cancellationToken));
+    public async Task<IActionResult> GetParcel(Guid id, CancellationToken cancellationToken)
+    {
+        var (userId, role) = User.GetRequiredIdentity();
+        return Ok(await parcelService.GetParcelAsync(userId, role, id, cancellationToken));
+    }
 
     [HttpGet("{id:guid}/history")]
     [Authorize(Roles = "Resident,LockerOperator")]
-    public async Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken) =>
-        await ExecuteAsync((userId, role) =>
-            parcelService.GetHistoryAsync(userId, role, id, cancellationToken));
+    public async Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken)
+    {
+        var (userId, role) = User.GetRequiredIdentity();
+        return Ok(await parcelService.GetHistoryAsync(userId, role, id, cancellationToken));
+    }
 
     [HttpPost("{id:guid}/unlock-pickup")]
     [Authorize(Roles = "Resident")]
@@ -46,76 +51,27 @@ public sealed class ParcelsController(
     [RequestTimeout(RequestTimeoutPolicyNames.DeviceCommand)]
     public async Task<IActionResult> UnlockPickup(Guid id, CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
-        try
+        PickupUnlockResponse response = await parcelPickupService.UnlockAsync(
+            userId,
+            id,
+            HttpContext.Connection.RemoteIpAddress?.ToString(),
+            Request.Headers.UserAgent.ToString(),
+            cancellationToken);
+        return response.Result switch
         {
-            PickupUnlockResponse response = await parcelPickupService.UnlockAsync(
-                userId,
-                id,
-                HttpContext.Connection.RemoteIpAddress?.ToString(),
-                Request.Headers.UserAgent.ToString(),
-                cancellationToken);
-            return response.Result switch
-            {
-                LockerAccessResult.Succeeded => Accepted(response),
-                LockerAccessResult.Blocked => Conflict(response),
-                _ => StatusCode(StatusCodes.Status503ServiceUnavailable, response),
-            };
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
+            LockerAccessResult.Succeeded => Accepted(response),
+            LockerAccessResult.Blocked => Conflict(response),
+            _ => StatusCode(StatusCodes.Status503ServiceUnavailable, response),
+        };
     }
 
-    private async Task<IActionResult> ExecuteAsync<TResponse>(
-        Func<Guid, string, Task<TResponse>> action)
-    {
-        string? idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        string? role = User.FindFirstValue(ClaimTypes.Role);
-        if (!Guid.TryParse(idClaim, out Guid userId) || string.IsNullOrWhiteSpace(role))
-        {
-            return Unauthorized(new { message = "Invalid authentication token." });
-        }
-
-        try
-        {
-            return Ok(await action(userId, role));
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-    }
     [HttpPost("{id:guid}:transferToCollectionPoint")]
     [Authorize(Roles = "Administrator,LockerOperator")]
-    public async Task<IActionResult> TransferToCollectionPoint(Guid id, CancellationToken cancellationToken) =>
-        await ExecuteAsync((userId, role) =>
-            parcelService.TransferOverdueAsync(userId, role, id, cancellationToken));
-
-
+    public async Task<IActionResult> TransferToCollectionPoint(Guid id, CancellationToken cancellationToken)
+    {
+        var (userId, role) = User.GetRequiredIdentity();
+        return Ok(await parcelService.TransferOverdueAsync(userId, role, id, cancellationToken));
+    }
 }

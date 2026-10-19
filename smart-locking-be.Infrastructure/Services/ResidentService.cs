@@ -26,23 +26,23 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
     {
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
-            throw new ArgumentException("Họ và tên không được để trống.", nameof(request.FullName));
+            throw new BadRequestException("Họ và tên không được để trống.");
         }
 
         string trimmedFullName = request.FullName.Trim();
         if (trimmedFullName.Length > 150)
         {
-            throw new ArgumentException("Họ và tên không được vượt quá 150 ký tự.", nameof(request.FullName));
+            throw new BadRequestException("Họ và tên không được vượt quá 150 ký tự.");
         }
 
         if (request.DateOfBirth.HasValue && request.DateOfBirth.Value > DateOnly.FromDateTime(DateTime.UtcNow))
         {
-            throw new ArgumentException("Ngày sinh không được ở trong tương lai.", nameof(request.DateOfBirth));
+            throw new BadRequestException("Ngày sinh không được ở trong tương lai.");
         }
 
         if (!string.IsNullOrWhiteSpace(request.AvatarUrl) && request.AvatarUrl.Trim().Length > 2048)
         {
-            throw new ArgumentException("Đường dẫn ảnh đại diện không được vượt quá 2048 ký tự.", nameof(request.AvatarUrl));
+            throw new BadRequestException("Đường dẫn ảnh đại diện không được vượt quá 2048 ký tự.");
         }
 
         User user = await FindUserWithProfileAsync(userId, cancellationToken);
@@ -68,7 +68,7 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
     {
         if (!Enum.IsDefined(typeof(DeliveryApprovalMode), request.DeliveryApprovalMode))
         {
-            throw new ArgumentException("Chế độ phê duyệt không hợp lệ.", nameof(request.DeliveryApprovalMode));
+            throw new BadRequestException("Chế độ phê duyệt không hợp lệ.");
         }
 
         User user = await FindUserWithProfileAsync(userId, cancellationToken);
@@ -90,29 +90,29 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
         return await dbContext.Users
             .Include(u => u.ResidentProfile)
             .SingleOrDefaultAsync(u => u.Id == userId, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy thông tin tài khoản.");
+            ?? throw new NotFoundException("Không tìm thấy thông tin tài khoản.");
     }
 
     private static void ValidateUserAccess(User user)
     {
         if (user.Status == UserStatus.Locked)
         {
-            throw new InvalidOperationException("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Quản trị viên.");
+            throw new ForbiddenException("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Quản trị viên.");
         }
 
         if (user.Status == UserStatus.Disabled)
         {
-            throw new InvalidOperationException("Tài khoản của bạn đã bị vô hiệu hóa.");
+            throw new ForbiddenException("Tài khoản của bạn đã bị vô hiệu hóa.");
         }
 
         if (user.Status != UserStatus.Active)
         {
-            throw new InvalidOperationException("Tài khoản của bạn hiện không thể thực hiện thao tác.");
+            throw new ForbiddenException("Tài khoản của bạn hiện không thể thực hiện thao tác.");
         }
 
         if (user.Role != UserRole.Resident)
         {
-            throw new InvalidOperationException("Người dùng không mang vai trò Cư dân.");
+            throw new ForbiddenException("Người dùng không mang vai trò Cư dân.");
         }
     }
 

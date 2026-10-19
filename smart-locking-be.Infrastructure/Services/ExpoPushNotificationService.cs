@@ -1,12 +1,12 @@
-using System.Net.Http.Json;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Application.DTOs.Notifications;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
+using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace smart_locking_be.Infrastructure.Services;
 
@@ -177,7 +177,7 @@ public sealed class ExpoPushNotificationService(
     {
         Notification notification = await dbContext.Notifications
             .SingleOrDefaultAsync(item => item.Id == notificationId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Không tìm thấy push notification '{notificationId}'.");
+            ?? throw new NotFoundException($"Không tìm thấy push notification '{notificationId}'.");
 
         if (realtimeNotifier is not null)
         {

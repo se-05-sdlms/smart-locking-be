@@ -42,7 +42,7 @@ public sealed class ParcelReminderService(
 
             int daysUntilTransfer = Math.Max(0, (int)Math.Ceiling((parcel.MaxStorageUntil - now).TotalDays));
             ResidentProfile resident = parcel.DeliveryRequest.ResidentProfile
-                ?? throw new InvalidOperationException("Parcel does not have a resident owner.");
+                ?? throw new InternalServerException("Parcel does not have a resident owner.");
             pushIds.Add(pushNotificationService.EnqueueParcelPickupReminder(
                 resident.UserId,
                 parcel.DeliveryRequestId,

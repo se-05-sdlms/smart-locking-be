@@ -18,7 +18,7 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
         HashSet<Guid> scope = (await ScopeLockers(userId, role).Select(item => item.Id)
             .ToListAsync(cancellationToken)).ToHashSet();
         if (lockerId.HasValue && !scope.Contains(lockerId.Value))
-            throw new UnauthorizedAccessException("Tủ không thuộc phạm vi vận hành.");
+            throw new ForbiddenException("Tủ không thuộc phạm vi vận hành.");
         string term = query?.Trim() ?? string.Empty;
         IQueryable<Parcel> parcels = dbContext.Parcels.Include(item => item.DeliveryRequest).ThenInclude(item => item.Locker).Where(item => scope.Contains(item.DeliveryRequest.LockerId));
         IQueryable<ReturnRequest> returns = dbContext.ReturnRequests.Include(item => item.Locker).Where(item => scope.Contains(item.LockerId));
@@ -180,10 +180,10 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
                     break;
                 }
             default:
-                throw new ArgumentException("Operational record kind is invalid.", nameof(kind));
+                throw new BadRequestException("Operational record kind is invalid.");
         }
         if (result is null || !await ScopeLockers(userId, role).AnyAsync(item => item.Id == result.LockerId, cancellationToken))
-            throw new KeyNotFoundException("Operational record not found.");
+            throw new NotFoundException("Operational record not found.");
         return result;
     }
 
@@ -193,6 +193,6 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
         nameof(UserRole.LockerOperator) => dbContext.Lockers.Where(locker =>
             dbContext.OperatorAssignments.Any(assignment =>
                 assignment.OperatorUserId == userId && assignment.LockerId == locker.Id && assignment.RevokedAt == null)),
-        _ => throw new UnauthorizedAccessException()
+        _ => throw new ForbiddenException()
     };
 }

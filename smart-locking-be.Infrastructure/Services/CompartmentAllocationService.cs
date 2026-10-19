@@ -1,10 +1,10 @@
-using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
+using System.Data;
 
 namespace smart_locking_be.Infrastructure.Services;
 
@@ -91,7 +91,7 @@ public sealed class CompartmentAllocationService(
     {
         if (deliveryRequestId.HasValue == returnRequestId.HasValue)
         {
-            throw new ArgumentException("Exactly one delivery or return request must own the reservation.");
+            throw new BadRequestException("Exactly one delivery or return request must own the reservation.");
         }
     }
 }

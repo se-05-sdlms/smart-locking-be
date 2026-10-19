@@ -21,7 +21,7 @@ public sealed class JwtTokenService(IConfiguration configuration) : IJwtTokenSer
 
         if (signingKey.Length < 32)
         {
-            throw new InvalidOperationException("Jwt:Key must be at least 32 bytes for HMAC SHA-256.");
+            throw new InternalServerException("Jwt:Key must be at least 32 bytes for HMAC SHA-256.");
         }
 
         DateTimeOffset expiresAt = DateTimeOffset.UtcNow.AddMinutes(accessTokenMinutes);
@@ -59,7 +59,7 @@ public sealed class JwtTokenService(IConfiguration configuration) : IJwtTokenSer
         string? value = configuration[key];
 
         return string.IsNullOrWhiteSpace(value)
-            ? throw new InvalidOperationException($"Jwt:{key} is not configured.")
+            ? throw new InternalServerException($"Jwt:{key} is not configured.")
             : value;
     }
 }

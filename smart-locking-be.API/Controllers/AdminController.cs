@@ -16,7 +16,7 @@ public class AdminController(IAdminService adminService) : ControllerBase
         [FromQuery] GetDashboardOverviewRequest? request,
         CancellationToken cancellationToken)
     {
-        return await ExecuteAsync(() => adminService.GetDashboardOverviewAsync(request, cancellationToken));
+        return Ok(await adminService.GetDashboardOverviewAsync(request, cancellationToken));
     }
 
     [HttpGet("statistics")]
@@ -24,27 +24,6 @@ public class AdminController(IAdminService adminService) : ControllerBase
         [FromQuery] GetSystemStatisticsRequest? request,
         CancellationToken cancellationToken)
     {
-        return await ExecuteAsync(() => adminService.GetSystemStatisticsAsync(request, cancellationToken));
-    }
-
-    private async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
-    {
-        try
-        {
-            TResponse result = await action();
-            return Ok(result);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
+        return Ok(await adminService.GetSystemStatisticsAsync(request, cancellationToken));
     }
 }

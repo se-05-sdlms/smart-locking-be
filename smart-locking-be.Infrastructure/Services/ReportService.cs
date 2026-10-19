@@ -11,9 +11,9 @@ public sealed class ReportService(ApplicationDbContext dbContext) : IReportServi
     public async Task<OperationsReportResponse> GetSummaryAsync(
         DateTimeOffset from, DateTimeOffset to, Guid? lockerId = null, CancellationToken cancellationToken = default)
     {
-        if (to <= from) throw new ArgumentException("Khoảng thời gian báo cáo không hợp lệ.");
+        if (to <= from) throw new BadRequestException("Khoảng thời gian báo cáo không hợp lệ.");
         if (lockerId.HasValue && !await dbContext.Lockers.AnyAsync(item => item.Id == lockerId, cancellationToken))
-            throw new KeyNotFoundException("Không tìm thấy locker.");
+            throw new NotFoundException("Không tìm thấy locker.");
         return new OperationsReportResponse(
             from, to,
             await dbContext.DeliveryRequests.CountAsync(item => item.CreatedAt >= from && item.CreatedAt < to && (!lockerId.HasValue || item.LockerId == lockerId), cancellationToken),

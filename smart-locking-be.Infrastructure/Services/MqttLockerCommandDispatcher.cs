@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using MQTTnet;
 using MQTTnet.Protocol;
@@ -21,7 +20,7 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
         string host = configuration["Mqtt:Host"]?.Trim() ?? string.Empty;
         if (host.Length == 0)
         {
-            throw new InvalidOperationException("MQTT broker chưa được cấu hình.");
+            throw new InternalServerException("MQTT broker chưa được cấu hình.");
         }
 
         int port = int.TryParse(configuration["Mqtt:Port"], out int configuredPort)
@@ -45,14 +44,27 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
             });
         }
 
-        using var client = new MqttClientFactory().CreateMqttClient();
-        await client.ConnectAsync(optionsBuilder.Build(), cancellationToken);
-        var message = new MqttApplicationMessageBuilder()
-            .WithTopic($"lockers/{command.DeviceIdentifier}/doors/{command.HardwareChannel}")
-            .WithPayload("OPEN")
-            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-            .Build();
-        await client.PublishAsync(message, cancellationToken);
-        await client.DisconnectAsync(cancellationToken: cancellationToken);
+        try
+        {
+            using var client = new MqttClientFactory().CreateMqttClient();
+            await client.ConnectAsync(optionsBuilder.Build(), cancellationToken);
+            var message = new MqttApplicationMessageBuilder()
+                .WithTopic($"lockers/{command.DeviceIdentifier}/doors/{command.HardwareChannel}")
+                .WithPayload("OPEN")
+                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                .Build();
+            await client.PublishAsync(message, cancellationToken);
+            await client.DisconnectAsync(cancellationToken: cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw new ServiceUnavailableException(
+                "Không thể kết nối tới locker. Vui lòng thử lại sau.",
+                exception);
+        }
     }
 }

@@ -19,7 +19,7 @@ public sealed class NotificationService(
     {
         if (limit is < 1 or > 100)
         {
-            throw new ArgumentException("Limit must be between 1 and 100.", nameof(limit));
+            throw new BadRequestException("Limit must be between 1 and 100.");
         }
 
         IQueryable<Notification> query = dbContext.Notifications
@@ -61,7 +61,7 @@ public sealed class NotificationService(
                 candidate.Id == notificationId &&
                 candidate.UserId == userId &&
                 candidate.Channel == NotificationChannel.InApp,
-            cancellationToken) ?? throw new KeyNotFoundException("Notification not found.");
+            cancellationToken) ?? throw new NotFoundException("Notification not found.");
 
         if (!notification.IsRead)
         {
@@ -100,26 +100,26 @@ public sealed class NotificationService(
         string eventType = request.EventType.Trim();
         if (eventType.Length is < 1 or > 100)
         {
-            throw new ArgumentException("Event type must contain between 1 and 100 characters.");
+            throw new BadRequestException("Event type must contain between 1 and 100 characters.");
         }
         if (!Enum.IsDefined(request.Channel))
         {
-            throw new ArgumentException("Notification channel is invalid.");
+            throw new BadRequestException("Notification channel is invalid.");
         }
         if (request.LeadTimeMinutes < 0)
         {
-            throw new ArgumentException("Lead time cannot be negative.");
+            throw new BadRequestException("Lead time cannot be negative.");
         }
         if (!await dbContext.SystemPolicies.AnyAsync(
             policy => policy.Id == request.SystemPolicyId,
             cancellationToken))
         {
-            throw new KeyNotFoundException("System policy not found.");
+            throw new NotFoundException("System policy not found.");
         }
         if (await dbContext.SystemPolicies.AnyAsync(
             policy => policy.Id == request.SystemPolicyId && policy.IsActive, cancellationToken))
         {
-            throw new InvalidOperationException("Rules of an active policy are immutable.");
+            throw new ConflictException("Rules of an active policy are immutable.");
         }
         if (await dbContext.NotificationRules.AnyAsync(rule =>
             rule.SystemPolicyId == request.SystemPolicyId &&
@@ -127,7 +127,7 @@ public sealed class NotificationService(
             rule.Channel == request.Channel,
             cancellationToken))
         {
-            throw new InvalidOperationException("Notification rule already exists.");
+            throw new ConflictException("Notification rule already exists.");
         }
 
         var rule = new NotificationRule

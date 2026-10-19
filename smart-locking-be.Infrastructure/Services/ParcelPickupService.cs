@@ -26,32 +26,32 @@ public sealed class ParcelPickupService(
             .Include(item => item.DeliveryRequest).ThenInclude(request => request.SystemPolicy)
             .Include(item => item.DeliveryRequest).ThenInclude(request => request.Locker)
             .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy bưu kiện.");
+            ?? throw new NotFoundException("Không tìm thấy bưu kiện.");
 
         if (parcel.DeliveryRequest.ResidentProfile?.UserId != residentUserId)
         {
-            throw new UnauthorizedAccessException("Bạn không có quyền mở ngăn chứa bưu kiện này.");
+            throw new ForbiddenException("Bạn không có quyền mở ngăn chứa bưu kiện này.");
         }
         if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
         {
-            throw new InvalidOperationException("Bưu kiện không còn ở trạng thái có thể nhận.");
+            throw new ConflictException("Bưu kiện không còn ở trạng thái có thể nhận.");
         }
         if (timeProvider.GetUtcNow() >= parcel.MaxStorageUntil)
         {
-            throw new InvalidOperationException(
+            throw new ConflictException(
                 $"Bưu kiện đã hết hạn lưu trữ tối đa. Vui lòng liên hệ điểm tập kết tại {parcel.DeliveryRequest.Locker.RecoveryAddress} để nhận hàng.");
         }
         if (parcel.OverdueCharge?.Status == OverdueChargeStatus.Outstanding)
         {
-            throw new InvalidOperationException("Cần thanh toán phí quá hạn trước khi nhận bưu kiện.");
+            throw new ConflictException("Cần thanh toán phí quá hạn trước khi nhận bưu kiện.");
         }
         if (!parcel.DeliveryRequest.SystemPolicy.EnableRemoteUnlock)
         {
-            throw new InvalidOperationException("Chính sách hiện tại không cho phép mở tủ từ ứng dụng.");
+            throw new ConflictException("Chính sách hiện tại không cho phép mở tủ từ ứng dụng.");
         }
         if (!parcel.DeliveryRequest.AllocatedCompartmentId.HasValue)
         {
-            throw new InvalidOperationException("Bưu kiện chưa được gắn với ngăn locker.");
+            throw new ConflictException("Bưu kiện chưa được gắn với ngăn locker.");
         }
 
         OpenLockerResponse access = await lockerAccessService.OpenAsync(new OpenLockerRequest(
@@ -81,23 +81,23 @@ public sealed class ParcelPickupService(
         LockerAccessEvent accessEvent = await dbContext.LockerAccessEvents
             .AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == lockerAccessEventId, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy lượt mở ngăn lấy hàng.");
+            ?? throw new NotFoundException("Không tìm thấy lượt mở ngăn lấy hàng.");
 
         if (accessEvent.AccessType != LockerAccessType.ResidentPickup ||
             accessEvent.Result != LockerAccessResult.Succeeded ||
             !accessEvent.ParcelId.HasValue)
         {
-            throw new InvalidOperationException("Lượt mở ngăn không hợp lệ để xác nhận lấy hàng.");
+            throw new ConflictException("Lượt mở ngăn không hợp lệ để xác nhận lấy hàng.");
         }
 
         Parcel parcel = await dbContext.Parcels
             .Include(item => item.DeliveryRequest)
             .SingleOrDefaultAsync(item => item.Id == accessEvent.ParcelId.Value, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy bưu kiện.");
+            ?? throw new NotFoundException("Không tìm thấy bưu kiện.");
 
         if (parcel.DeliveryRequest.AllocatedCompartmentId != accessEvent.LockerCompartmentId)
         {
-            throw new InvalidOperationException("Lượt mở ngăn không khớp với vị trí bưu kiện.");
+            throw new ConflictException("Lượt mở ngăn không khớp với vị trí bưu kiện.");
         }
         if (parcel.Status == ParcelStatus.Retrieved && parcel.RetrievedAt.HasValue)
         {
@@ -105,7 +105,7 @@ public sealed class ParcelPickupService(
         }
         if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
         {
-            throw new InvalidOperationException("Bưu kiện không còn ở trạng thái có thể xác nhận lấy hàng.");
+            throw new ConflictException("Bưu kiện không còn ở trạng thái có thể xác nhận lấy hàng.");
         }
 
         DateTimeOffset now = timeProvider.GetUtcNow();

@@ -21,11 +21,11 @@ public sealed class LockerAccessService(
         LockerCompartment compartment = await dbContext.LockerCompartments
             .Include(item => item.Locker)
             .SingleOrDefaultAsync(item => item.Id == request.LockerCompartmentId, cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy ngăn locker.");
+            ?? throw new NotFoundException("Không tìm thấy ngăn locker.");
 
         if (compartment.LockerId != request.LockerId)
         {
-            throw new ArgumentException("Ngăn locker không thuộc locker được yêu cầu.");
+            throw new BadRequestException("Ngăn locker không thuộc locker được yêu cầu.");
         }
 
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -104,15 +104,15 @@ public sealed class LockerAccessService(
         };
         if (missingContext)
         {
-            throw new ArgumentException("Thiếu định danh nghiệp vụ cho thao tác mở locker.");
+            throw new BadRequestException("Thiếu định danh nghiệp vụ cho thao tác mở locker.");
         }
         if (request.AccessMethod == LockerAccessMethod.RemoteApp && !request.UserId.HasValue)
         {
-            throw new ArgumentException("Mở locker từ ứng dụng yêu cầu người dùng đã xác thực.");
+            throw new BadRequestException("Mở locker từ ứng dụng yêu cầu người dùng đã xác thực.");
         }
         if (TrimToNull(request.IpAddress)?.Length > 45)
         {
-            throw new ArgumentException("Địa chỉ IP không hợp lệ.");
+            throw new BadRequestException("Địa chỉ IP không hợp lệ.");
         }
     }
 
