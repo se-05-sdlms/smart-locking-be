@@ -55,7 +55,7 @@ public sealed class UserService(
 
         var items = users.Select(u => new UserListItemResponse(
             u.Id,
-            u.ResidentProfile?.FullName ?? u.PhoneNumber ?? u.Email ?? "Người dùng",
+            u.ResidentProfile?.FullName ?? u.PhoneNumber ?? u.Email ?? "User",
             u.PhoneNumber,
             u.Email,
             u.Role,
@@ -81,7 +81,7 @@ public sealed class UserService(
 
         if (user is null)
         {
-            throw new NotFoundException("Không tìm thấy người dùng.");
+            throw new NotFoundException(UserErrorCodes.NotFound, "User not found.");
         }
 
         return MapToDetail(user);
@@ -95,12 +95,12 @@ public sealed class UserService(
     {
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
-            throw new BadRequestException("Họ và tên không được để trống.");
+            throw BadRequestException.For("fullName", "Full name is required.");
         }
 
         if (string.IsNullOrWhiteSpace(request.Email) || !request.Email.Contains('@'))
         {
-            throw new BadRequestException("Email không hợp lệ.");
+            throw BadRequestException.For("email", "Email is invalid.");
         }
 
         string email = request.Email.Trim().ToLowerInvariant();
@@ -111,7 +111,7 @@ public sealed class UserService(
 
         if (exists)
         {
-            throw new ConflictException("Email hoặc số điện thoại đã được sử dụng.");
+            throw new ConflictException(UserErrorCodes.AlreadyExists, "Email or phone number is already in use.");
         }
 
         string temporaryPassword = string.IsNullOrWhiteSpace(request.Password)
@@ -155,7 +155,7 @@ public sealed class UserService(
                 LockerId = request.LockerId.Value,
                 AssignedByUserId = actorAdminId,
                 AssignedAt = now,
-                Reason = request.AssignmentReason ?? "Phân công ban đầu khi tạo tài khoản"
+                Reason = request.AssignmentReason ?? "Initial assignment when creating the account"
             };
 
             dbContext.OperatorAssignments.Add(assignment);
@@ -170,7 +170,7 @@ public sealed class UserService(
             EntityId = user.Id,
             Result = AuditLogResult.Succeeded,
             IpAddress = ipAddress,
-            Details = $"Tạo tài khoản {user.Role}: {email}, Họ tên: {profile.FullName}",
+            Details = $"Created {user.Role} account: {email}, full name: {profile.FullName}",
             OccurredAt = now
         };
 
@@ -202,12 +202,12 @@ public sealed class UserService(
 
         if (user is null)
         {
-            throw new NotFoundException("Không tìm thấy người dùng.");
+            throw new NotFoundException(UserErrorCodes.NotFound, "User not found.");
         }
 
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
-            throw new BadRequestException("Họ và tên không được để trống.");
+            throw BadRequestException.For("fullName", "Full name is required.");
         }
 
         string? email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToLowerInvariant();
@@ -218,7 +218,7 @@ public sealed class UserService(
             bool emailExists = await dbContext.Users.AnyAsync(u => u.Id != id && u.Email == email, cancellationToken);
             if (emailExists)
             {
-                throw new ConflictException("Email đã được sử dụng bởi tài khoản khác.");
+                throw new ConflictException(UserErrorCodes.AlreadyExists, "Email is already used by another account.");
             }
             user.Email = email;
         }
@@ -228,7 +228,7 @@ public sealed class UserService(
             bool phoneExists = await dbContext.Users.AnyAsync(u => u.Id != id && u.PhoneNumber == phone, cancellationToken);
             if (phoneExists)
             {
-                throw new ConflictException("Số điện thoại đã được sử dụng bởi tài khoản khác.");
+                throw new ConflictException(UserErrorCodes.AlreadyExists, "Phone number is already used by another account.");
             }
             user.PhoneNumber = phone;
         }
@@ -264,7 +264,7 @@ public sealed class UserService(
             EntityId = user.Id,
             Result = AuditLogResult.Succeeded,
             IpAddress = ipAddress,
-            Details = $"Cập nhật thông tin người dùng {id}: Họ tên: {request.FullName}, Email: {user.Email}, SĐT: {user.PhoneNumber}",
+            Details = $"Updated user {id}: full name: {request.FullName}, email: {user.Email}, phone: {user.PhoneNumber}",
             OccurredAt = now
         };
 
@@ -287,7 +287,7 @@ public sealed class UserService(
 
         if (user is null)
         {
-            throw new NotFoundException("Không tìm thấy người dùng.");
+            throw new NotFoundException(UserErrorCodes.NotFound, "User not found.");
         }
 
         if (user.Status != request.Status)
@@ -325,7 +325,7 @@ public sealed class UserService(
                 EntityId = user.Id,
                 Result = AuditLogResult.Succeeded,
                 IpAddress = ipAddress,
-                Details = $"Đổi trạng thái tài khoản người dùng từ {oldStatus} sang {request.Status}. Lý do: {request.Reason}",
+                Details = $"Changed user account status from {oldStatus} to {request.Status}. Reason: {request.Reason}",
                 OccurredAt = DateTimeOffset.UtcNow
             };
 
@@ -348,12 +348,12 @@ public sealed class UserService(
 
         if (user is null)
         {
-            throw new NotFoundException("Không tìm thấy nhân viên vận hành.");
+            throw new NotFoundException(UserErrorCodes.NotFound, "Locker operator not found.");
         }
 
         if (request.LockerId == Guid.Empty)
         {
-            throw new BadRequestException("Phải chỉ định LockerId hợp lệ.");
+            throw BadRequestException.For("lockerId", "A valid LockerId is required.");
         }
 
         bool activeExists = await dbContext.OperatorAssignments.AnyAsync(a =>
@@ -362,7 +362,7 @@ public sealed class UserService(
 
         if (activeExists)
         {
-            throw new ConflictException("Tủ này đã được phân công cho một nhân viên vận hành khác.");
+            throw new ConflictException(UserErrorCodes.AssignmentConflict, "Locker is assigned to another operator.");
         }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -387,7 +387,7 @@ public sealed class UserService(
             EntityId = assignment.Id,
             Result = AuditLogResult.Succeeded,
             IpAddress = ipAddress,
-            Details = $"Phân công phạm vi cho Operator {operatorId}. Lý do: {request.Reason}",
+            Details = $"Assigned scope to operator {operatorId}. Reason: {request.Reason}",
             OccurredAt = now
         };
 
@@ -422,17 +422,17 @@ public sealed class UserService(
 
         if (assignment is null)
         {
-            throw new NotFoundException("Không tìm thấy bản ghi phân công.");
+            throw new NotFoundException(UserErrorCodes.NotFound, "Operator assignment not found.");
         }
 
         if (assignment.RevokedAt.HasValue)
         {
-            throw new ConflictException("Phân công này đã bị thu hồi trước đó.");
+            throw new ConflictException(UserErrorCodes.AssignmentConflict, "Operator assignment was already revoked.");
         }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         assignment.RevokedAt = now;
-        assignment.Reason = reason ?? "Thu hồi phân công bởi quản trị viên";
+        assignment.Reason = reason ?? "Assignment revoked by administrator";
 
         var auditLog = new AuditLog
         {
@@ -443,7 +443,7 @@ public sealed class UserService(
             EntityId = assignment.Id,
             Result = AuditLogResult.Succeeded,
             IpAddress = ipAddress,
-            Details = $"Thu hồi phân công phạm vi {assignment.Id} của Operator {operatorId}. Lý do: {reason}",
+            Details = $"Revoked scope assignment {assignment.Id} for operator {operatorId}. Reason: {reason}",
             OccurredAt = now
         };
 
@@ -466,7 +466,7 @@ public sealed class UserService(
 
         return new UserDetailResponse(
             user.Id,
-            user.ResidentProfile?.FullName ?? user.PhoneNumber ?? user.Email ?? "Người dùng",
+            user.ResidentProfile?.FullName ?? user.PhoneNumber ?? user.Email ?? "User",
             user.PhoneNumber,
             user.Email,
             user.Role,

@@ -20,7 +20,7 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
         string host = configuration["Mqtt:Host"]?.Trim() ?? string.Empty;
         if (host.Length == 0)
         {
-            throw new InternalServerException("MQTT broker chưa được cấu hình.");
+            throw new InternalServerException("MQTT broker is not configured.");
         }
 
         int port = int.TryParse(configuration["Mqtt:Port"], out int configuredPort)
@@ -63,7 +63,7 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
         catch (Exception exception)
         {
             throw new ServiceUnavailableException(
-                "Không thể kết nối tới locker. Vui lòng thử lại sau.",
+                LockerErrorCodes.OpenFailed, "Cannot connect to the locker.",
                 exception);
         }
     }

@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.WebUtilities;
+using smart_locking_be.Application.Errors;
 
 namespace smart_locking_be.API.Middleware;
 
@@ -39,23 +38,14 @@ public sealed class GlobalExceptionHandler(
             httpContext.Response.Headers.WWWAuthenticate = "Bearer";
 
         httpContext.Response.StatusCode = statusCode;
+        string code = exception is ApiException apiException
+            ? apiException.ErrorCode
+            : CommonErrorCodes.InternalError;
         return await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
         {
             HttpContext = httpContext,
-            ProblemDetails = new ProblemDetails
-            {
-                Status = statusCode,
-                Title = ReasonPhrases.GetReasonPhrase(statusCode),
-                Detail = detail,
-                Extensions =
-                {
-                    ["message"] = detail,
-                    ["code"] = exception is ApiException apiException
-                        ? apiException.ErrorCode
-                        : "internal_server_error",
-                    ["traceId"] = httpContext.TraceIdentifier
-                }
-            },
+            ProblemDetails = ProblemResponse.Create(httpContext, statusCode, code, detail,
+                (exception as BadRequestException)?.Errors),
             Exception = exception
         });
     }

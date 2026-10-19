@@ -22,7 +22,7 @@ public sealed class NotificationRuleService(ApplicationDbContext dbContext) : IN
     public async Task<NotificationRuleResponse> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         await dbContext.NotificationRules.AsNoTracking().Where(item => item.Id == id)
             .Select(item => new NotificationRuleResponse(item.Id, item.SystemPolicyId, item.EventType, item.Channel, item.LeadTimeMinutes, item.IsEnabled))
-            .SingleOrDefaultAsync(cancellationToken) ?? throw new NotFoundException("Notification rule not found.");
+            .SingleOrDefaultAsync(cancellationToken) ?? throw new NotFoundException(NotificationErrorCodes.NotFound, "Notification rule not found.");
 
     public async Task<NotificationRuleResponse> CreateAsync(
         Guid adminUserId,
@@ -31,20 +31,20 @@ public sealed class NotificationRuleService(ApplicationDbContext dbContext) : IN
     {
         string eventType = request.EventType.Trim();
         if (eventType.Length is < 1 or > 100)
-            throw new BadRequestException("Event type must contain between 1 and 100 characters.");
+            throw BadRequestException.For("eventType", "Event type must contain between 1 and 100 characters.");
         if (!Enum.IsDefined(request.Channel))
-            throw new BadRequestException("Notification channel is invalid.");
+            throw BadRequestException.For("channel", "Notification channel is invalid.");
         if (request.LeadTimeMinutes < 0)
-            throw new BadRequestException("Lead time cannot be negative.");
+            throw BadRequestException.For("leadTimeMinutes", "Lead time cannot be negative.");
         SystemPolicy policy = await dbContext.SystemPolicies.SingleOrDefaultAsync(
             candidate => candidate.Id == request.SystemPolicyId, cancellationToken)
-            ?? throw new NotFoundException("System policy not found.");
-        if (policy.IsActive) throw new ConflictException("Rules of an active policy are immutable.");
+            ?? throw new NotFoundException(PolicyErrorCodes.NotFound, "System policy not found.");
+        if (policy.IsActive) throw new ConflictException(PolicyErrorCodes.Immutable, "Rules of an active policy are immutable.");
         if (await dbContext.NotificationRules.AnyAsync(rule =>
             rule.SystemPolicyId == request.SystemPolicyId &&
             rule.EventType == eventType && rule.Channel == request.Channel,
             cancellationToken))
-            throw new ConflictException("Notification rule already exists.");
+            throw new ConflictException(NotificationErrorCodes.RuleAlreadyExists, "Notification rule already exists.");
 
         NotificationRule rule = new()
         {
@@ -68,9 +68,9 @@ public sealed class NotificationRuleService(ApplicationDbContext dbContext) : IN
     {
         NotificationRule rule = await dbContext.NotificationRules.Include(item => item.SystemPolicy)
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
-            ?? throw new NotFoundException("Notification rule not found.");
-        if (rule.SystemPolicy.IsActive) throw new ConflictException("Rules of an active policy are immutable.");
-        if (request.LeadTimeMinutes < 0) throw new BadRequestException("Lead time cannot be negative.");
+            ?? throw new NotFoundException(NotificationErrorCodes.NotFound, "Notification rule not found.");
+        if (rule.SystemPolicy.IsActive) throw new ConflictException(PolicyErrorCodes.Immutable, "Rules of an active policy are immutable.");
+        if (request.LeadTimeMinutes < 0) throw BadRequestException.For("leadTimeMinutes", "Lead time cannot be negative.");
         rule.LeadTimeMinutes = request.LeadTimeMinutes;
         rule.IsEnabled = request.IsEnabled;
         AddAudit(adminUserId, "NotificationRule.Updated", rule.Id, $"Enabled={rule.IsEnabled}");

@@ -21,11 +21,11 @@ public sealed class LockerAccessService(
         LockerCompartment compartment = await dbContext.LockerCompartments
             .Include(item => item.Locker)
             .SingleOrDefaultAsync(item => item.Id == request.LockerCompartmentId, cancellationToken)
-            ?? throw new NotFoundException("Không tìm thấy ngăn locker.");
+            ?? throw new NotFoundException(LockerErrorCodes.InvalidCompartment, "Locker compartment not found.");
 
         if (compartment.LockerId != request.LockerId)
         {
-            throw new BadRequestException("Ngăn locker không thuộc locker được yêu cầu.");
+            throw new BadRequestException(LockerErrorCodes.InvalidCompartment, "Compartment does not belong to the requested locker.");
         }
 
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -66,7 +66,7 @@ public sealed class LockerAccessService(
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 accessEvent.Result = LockerAccessResult.Failed;
-                accessEvent.FailureReason = "Không thể gửi lệnh mở ngăn tới locker.";
+                accessEvent.FailureReason = "Could not send the unlock command to the locker.";
             }
         }
 
@@ -79,15 +79,15 @@ public sealed class LockerAccessService(
     {
         if (compartment.Locker.OperationalStatus != LockerOperationalStatus.Operational)
         {
-            return "Locker hiện không sẵn sàng vận hành.";
+            return "Locker is not operational.";
         }
         if (compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
         {
-            return "Locker hiện không trực tuyến.";
+            return "Locker is offline.";
         }
         if (compartment.OperationalStatus != LockerCompartmentOperationalStatus.Operational)
         {
-            return "Ngăn locker hiện không sẵn sàng vận hành.";
+            return "Locker compartment is not operational.";
         }
         return null;
     }
@@ -104,15 +104,15 @@ public sealed class LockerAccessService(
         };
         if (missingContext)
         {
-            throw new BadRequestException("Thiếu định danh nghiệp vụ cho thao tác mở locker.");
+            throw new BadRequestException(CommonErrorCodes.InvalidRequest, "A business identifier is required to open the locker.");
         }
         if (request.AccessMethod == LockerAccessMethod.RemoteApp && !request.UserId.HasValue)
         {
-            throw new BadRequestException("Mở locker từ ứng dụng yêu cầu người dùng đã xác thực.");
+            throw new BadRequestException(AuthErrorCodes.AuthenticationRequired, "Opening a locker from the app requires an authenticated user.");
         }
         if (TrimToNull(request.IpAddress)?.Length > 45)
         {
-            throw new BadRequestException("Địa chỉ IP không hợp lệ.");
+            throw BadRequestException.For("ipAddress", "IP address is invalid.");
         }
     }
 

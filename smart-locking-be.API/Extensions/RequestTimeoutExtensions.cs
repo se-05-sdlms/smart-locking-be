@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http.Timeouts;
 using smart_locking_be.API.Constants;
 using smart_locking_be.API.Options;
+using smart_locking_be.API.Middleware;
 
 namespace smart_locking_be.API.Extensions;
 
@@ -17,18 +18,23 @@ public static class RequestTimeoutExtensions
 
         services.AddRequestTimeouts(options =>
         {
-            options.DefaultPolicy = new RequestTimeoutPolicy
+            RequestTimeoutPolicy Policy(int seconds) => new()
             {
-                Timeout = TimeSpan.FromSeconds(settings.DefaultSeconds),
-                TimeoutStatusCode = StatusCodes.Status504GatewayTimeout
+                Timeout = TimeSpan.FromSeconds(seconds),
+                TimeoutStatusCode = StatusCodes.Status504GatewayTimeout,
+                WriteTimeoutResponse = context => ProblemResponse.WriteAsync(context,
+                    StatusCodes.Status504GatewayTimeout, CommonErrorCodes.RequestTimedOut,
+                    "Request timed out.")
             };
 
-            options.AddPolicy(RequestTimeoutPolicyNames.Default, TimeSpan.FromSeconds(settings.DefaultSeconds));
-            options.AddPolicy(RequestTimeoutPolicyNames.Auth, TimeSpan.FromSeconds(settings.AuthSeconds));
-            options.AddPolicy(RequestTimeoutPolicyNames.Search, TimeSpan.FromSeconds(settings.SearchSeconds));
-            options.AddPolicy(RequestTimeoutPolicyNames.Upload, TimeSpan.FromSeconds(settings.UploadSeconds));
-            options.AddPolicy(RequestTimeoutPolicyNames.HeavyAction, TimeSpan.FromSeconds(settings.HeavyActionSeconds));
-            options.AddPolicy(RequestTimeoutPolicyNames.DeviceCommand, TimeSpan.FromSeconds(settings.DeviceCommandSeconds));
+            options.DefaultPolicy = Policy(settings.DefaultSeconds);
+
+            options.AddPolicy(RequestTimeoutPolicyNames.Default, Policy(settings.DefaultSeconds));
+            options.AddPolicy(RequestTimeoutPolicyNames.Auth, Policy(settings.AuthSeconds));
+            options.AddPolicy(RequestTimeoutPolicyNames.Search, Policy(settings.SearchSeconds));
+            options.AddPolicy(RequestTimeoutPolicyNames.Upload, Policy(settings.UploadSeconds));
+            options.AddPolicy(RequestTimeoutPolicyNames.HeavyAction, Policy(settings.HeavyActionSeconds));
+            options.AddPolicy(RequestTimeoutPolicyNames.DeviceCommand, Policy(settings.DeviceCommandSeconds));
         });
 
         return services;

@@ -26,23 +26,23 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
     {
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
-            throw new BadRequestException("Họ và tên không được để trống.");
+            throw BadRequestException.For("fullName", "Full name is required.");
         }
 
         string trimmedFullName = request.FullName.Trim();
         if (trimmedFullName.Length > 150)
         {
-            throw new BadRequestException("Họ và tên không được vượt quá 150 ký tự.");
+            throw BadRequestException.For("fullName", "Full name must not exceed 150 characters.");
         }
 
         if (request.DateOfBirth.HasValue && request.DateOfBirth.Value > DateOnly.FromDateTime(DateTime.UtcNow))
         {
-            throw new BadRequestException("Ngày sinh không được ở trong tương lai.");
+            throw BadRequestException.For("dateOfBirth", "Date of birth cannot be in the future.");
         }
 
         if (!string.IsNullOrWhiteSpace(request.AvatarUrl) && request.AvatarUrl.Trim().Length > 2048)
         {
-            throw new BadRequestException("Đường dẫn ảnh đại diện không được vượt quá 2048 ký tự.");
+            throw BadRequestException.For("avatarUrl", "Avatar URL must not exceed 2048 characters.");
         }
 
         User user = await FindUserWithProfileAsync(userId, cancellationToken);
@@ -68,7 +68,7 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
     {
         if (!Enum.IsDefined(typeof(DeliveryApprovalMode), request.DeliveryApprovalMode))
         {
-            throw new BadRequestException("Chế độ phê duyệt không hợp lệ.");
+            throw BadRequestException.For("approvalMode", "Approval mode is invalid.");
         }
 
         User user = await FindUserWithProfileAsync(userId, cancellationToken);
@@ -90,29 +90,29 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
         return await dbContext.Users
             .Include(u => u.ResidentProfile)
             .SingleOrDefaultAsync(u => u.Id == userId, cancellationToken)
-            ?? throw new NotFoundException("Không tìm thấy thông tin tài khoản.");
+            ?? throw new NotFoundException(UserErrorCodes.NotFound, "Account not found.");
     }
 
     private static void ValidateUserAccess(User user)
     {
         if (user.Status == UserStatus.Locked)
         {
-            throw new ForbiddenException("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Quản trị viên.");
+            throw new ForbiddenException(UserErrorCodes.Inactive, "Account is locked. Contact an administrator.");
         }
 
         if (user.Status == UserStatus.Disabled)
         {
-            throw new ForbiddenException("Tài khoản của bạn đã bị vô hiệu hóa.");
+            throw new ForbiddenException(UserErrorCodes.Inactive, "Account is disabled.");
         }
 
         if (user.Status != UserStatus.Active)
         {
-            throw new ForbiddenException("Tài khoản của bạn hiện không thể thực hiện thao tác.");
+            throw new ForbiddenException(UserErrorCodes.Inactive, "Account cannot perform this action.");
         }
 
         if (user.Role != UserRole.Resident)
         {
-            throw new ForbiddenException("Người dùng không mang vai trò Cư dân.");
+            throw new ForbiddenException(UserErrorCodes.Inactive, "User does not have the resident role.");
         }
     }
 
@@ -122,7 +122,7 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
 
         string defaultFullName = !string.IsNullOrWhiteSpace(user.PhoneNumber)
             ? user.PhoneNumber
-            : (!string.IsNullOrWhiteSpace(user.Email) ? user.Email : "Cư dân");
+            : (!string.IsNullOrWhiteSpace(user.Email) ? user.Email : "Resident");
 
         ResidentProfile profile = new()
         {

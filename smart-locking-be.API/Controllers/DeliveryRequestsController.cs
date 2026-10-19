@@ -35,7 +35,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!TryGetGuestSessionToken(out string token))
         {
-            throw new UnauthorizedException($"Thiếu {GuestSessionHeaderName}.");
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
         }
 
         return Ok(await deliveryRequestService.SubmitAsync(id, token, request, cancellationToken));
@@ -47,7 +47,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!TryGetGuestSessionToken(out string token))
         {
-            throw new UnauthorizedException($"Thiếu {GuestSessionHeaderName}.");
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
         }
 
         return Ok(await deliveryRequestService.GetAsync(id, token, cancellationToken));
@@ -67,7 +67,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase))
         {
-            throw new BadRequestException("Hiện chỉ hỗ trợ lọc status=pending.");
+            throw BadRequestException.For("status", "Only status=pending is supported.");
         }
         Guid userId = User.GetRequiredUserId();
 
@@ -99,7 +99,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!TryGetGuestSessionToken(out string token))
         {
-            throw new UnauthorizedException($"Thiếu {GuestSessionHeaderName}.");
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
         }
 
         return Ok(await deliveryRequestService.OpenCompartmentAsync(id, token, cancellationToken));

@@ -26,7 +26,7 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
 
     public async Task<SystemPolicyResponse> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         Map(await dbContext.SystemPolicies.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
-            ?? throw new NotFoundException("System policy not found."));
+            ?? throw new NotFoundException(PolicyErrorCodes.NotFound, "System policy not found."));
 
     public async Task<SystemPolicyResponse> CreateAsync(
         Guid adminUserId, SaveSystemPolicyRequest request, CancellationToken cancellationToken = default)
@@ -47,8 +47,8 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
     {
         Validate(request);
         SystemPolicy policy = await dbContext.SystemPolicies.SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
-            ?? throw new NotFoundException("System policy not found.");
-        if (policy.IsActive) throw new ConflictException("Active policy is immutable. Create a new version instead.");
+            ?? throw new NotFoundException(PolicyErrorCodes.NotFound, "System policy not found.");
+        if (policy.IsActive) throw new ConflictException(PolicyErrorCodes.Immutable, "Active policy is immutable. Create a new version instead.");
         Apply(policy, request);
         AddAudit(adminUserId, "SystemPolicy.Updated", policy.Id, $"Version={policy.Version}", timeProvider.GetUtcNow());
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -61,7 +61,7 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
         await using IDbContextTransaction? transaction = dbContext.Database.IsRelational()
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
         SystemPolicy target = await dbContext.SystemPolicies.SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
-            ?? throw new NotFoundException("System policy not found.");
+            ?? throw new NotFoundException(PolicyErrorCodes.NotFound, "System policy not found.");
         DateTimeOffset now = timeProvider.GetUtcNow();
         List<SystemPolicy> active = await dbContext.SystemPolicies.Where(item => item.IsActive && item.Id != id).ToListAsync(cancellationToken);
         foreach (SystemPolicy policy in active)
@@ -81,15 +81,15 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
     private static void Validate(SaveSystemPolicyRequest request)
     {
         if (request.GuestSessionTimeoutMinutes <= 0 || request.ManualApprovalTimeoutMinutes <= 0 || request.CompartmentReservationMinutes <= 0)
-            throw new BadRequestException("Timeout values must be positive.");
+            throw BadRequestException.For("timeout", "Timeout values must be positive.");
         if (request.OverdueStartAfterHours != 7 * 24 || request.MaxStorageHours != 14 * 24)
-            throw new BadRequestException("Storage timeline must be 7 normal days followed by 7 overdue days.");
+            throw BadRequestException.For("storageTimeline", "Storage timeline must be 7 normal days followed by 7 overdue days.");
         if (request.PickupReminderStartDay <= 0 || request.PickupReminderStartDay > Math.Ceiling(request.MaxStorageHours / 24d))
-            throw new BadRequestException("Pickup reminder start day is outside the storage period.");
+            throw BadRequestException.For("pickupReminderStartDay", "Pickup reminder start day is outside the storage period.");
         if (request.OverdueFeePerHour < 0 || request.Currency.Trim().Length != 3)
-            throw new BadRequestException("Fee or currency is invalid.");
+            throw BadRequestException.For("fee", "Fee or currency is invalid.");
         if (request.OtpMaxAttempts <= 0 || request.OtpLockoutMinutes <= 0)
-            throw new BadRequestException("OTP policy is invalid.");
+            throw BadRequestException.For("otpPolicy", "OTP policy is invalid.");
     }
 
     private static void Apply(SystemPolicy policy, SaveSystemPolicyRequest request)
