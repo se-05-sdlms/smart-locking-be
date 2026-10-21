@@ -116,8 +116,12 @@ public sealed class ReportService(ApplicationDbContext dbContext, TimeProvider t
             ordered => ordered.OrderByDescending(item => item.StoredAt).ThenBy(item => item.Id),
             item => new
             {
-                item.StoredAt, Locker = item.DeliveryRequest.Locker.Code, item.ParcelCode, item.Status,
-                item.RetrievedAt, item.MaxStorageUntil
+                item.StoredAt,
+                Locker = item.DeliveryRequest.Locker.Code,
+                item.ParcelCode,
+                item.Status,
+                item.RetrievedAt,
+                item.MaxStorageUntil
             },
             row => Row(("storedAt", row.StoredAt), ("locker", row.Locker), ("parcelCode", row.ParcelCode),
                 ("status", row.Status.ToString()), ("retrievedAt", row.RetrievedAt), ("maxStorageUntil", row.MaxStorageUntil)),
@@ -163,7 +167,10 @@ public sealed class ReportService(ApplicationDbContext dbContext, TimeProvider t
             ordered => ordered.OrderBy(item => item.Code),
             item => new
             {
-                item.Code, item.Address, item.OperationalStatus, item.ConnectionStatus,
+                item.Code,
+                item.Address,
+                item.OperationalStatus,
+                item.ConnectionStatus,
                 Total = dbContext.LockerCompartments.Count(compartment => compartment.LockerId == item.Id),
                 Usable = dbContext.LockerCompartments.Count(compartment =>
                     compartment.LockerId == item.Id &&
@@ -285,8 +292,14 @@ public sealed class ReportService(ApplicationDbContext dbContext, TimeProvider t
             ordered => ordered.OrderByDescending(item => item.RequestedAt).ThenBy(item => item.Id),
             item => new
             {
-                item.RequestedAt, Locker = item.OverdueCharge.Parcel.DeliveryRequest.Locker.Code, item.ExternalOrderCode,
-                item.Status, item.Amount, item.Currency, item.CompletedAt, item.FailureReason
+                item.RequestedAt,
+                Locker = item.OverdueCharge.Parcel.DeliveryRequest.Locker.Code,
+                item.ExternalOrderCode,
+                item.Status,
+                item.Amount,
+                item.Currency,
+                item.CompletedAt,
+                item.FailureReason
             },
             row => Row(("requestedAt", row.RequestedAt), ("locker", row.Locker), ("orderCode", row.ExternalOrderCode),
                 ("status", row.Status.ToString()), ("amount", row.Amount), ("currency", row.Currency),
