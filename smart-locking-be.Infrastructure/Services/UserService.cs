@@ -205,6 +205,12 @@ public sealed class UserService(
             throw new NotFoundException(UserErrorCodes.NotFound, "User not found.");
         }
 
+        if (user.Role == UserRole.Resident)
+        {
+            throw new ForbiddenException(UserErrorCodes.ResidentProfileReadOnly,
+                "Administrators cannot edit resident personal information. Residents must update their own profile.");
+        }
+
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
             throw BadRequestException.For("fullName", "Full name is required.");
