@@ -210,6 +210,21 @@ public sealed class UserService(
             throw new ConflictException(UserErrorCodes.EmailUnavailable, "Locker operator has no email address.");
 
         string temporaryPassword = GenerateTemporaryPassword();
+
+        // Deliver the new password first and only then change the account. If the email cannot be sent,
+        // nothing is written: the old password keeps working and the existing sessions stay valid.
+        try
+        {
+            await emailSender.SendAsync(user.Email, "Your new Smart Locking temporary password",
+                $"Sign in with {user.Email} and temporary password: {temporaryPassword}\nChange it after signing in.",
+                cancellationToken);
+        }
+        catch (ServiceUnavailableException exception)
+        {
+            throw new ServiceUnavailableException(UserErrorCodes.EmailUnavailable,
+                "The credential email was not delivered, so the password was not changed. Try again.", exception);
+        }
+
         DateTimeOffset now = DateTimeOffset.UtcNow;
         user.PasswordHash = passwordHashService.HashPassword(temporaryPassword);
         user.MustChangePassword = true;
@@ -229,18 +244,6 @@ public sealed class UserService(
             OccurredAt = now
         });
         await dbContext.SaveChangesAsync(cancellationToken);
-
-        try
-        {
-            await emailSender.SendAsync(user.Email, "Your new Smart Locking temporary password",
-                $"Sign in with {user.Email} and temporary password: {temporaryPassword}\nChange it after signing in.",
-                cancellationToken);
-        }
-        catch (ServiceUnavailableException exception)
-        {
-            throw new ServiceUnavailableException(UserErrorCodes.EmailUnavailable,
-                "Password was reset, but the credential email was not delivered. Reissue it again.", exception);
-        }
     }
 
     public async Task<UserDetailResponse> UpdateUserAsync(
