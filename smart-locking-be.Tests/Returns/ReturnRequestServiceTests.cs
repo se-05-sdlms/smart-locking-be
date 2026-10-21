@@ -1,3 +1,6 @@
+using smart_locking_be.Application.Exceptions;
+using smart_locking_be.Application.Errors;
+using smart_locking_be.Application.Services;
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.DTOs.Returns;
@@ -12,6 +15,56 @@ namespace smart_locking_be.Tests.Returns;
 
 public sealed class ReturnRequestServiceTests
 {
+    [Theory]
+    [InlineData(false, true, -1, 1)]
+    [InlineData(true, false, -1, 1)]
+    [InlineData(true, true, -2, -1)]
+    [InlineData(true, true, 1, 2)]
+    public async Task BluetoothDisabledOrOutsidePolicyWindow_DoesNotIssueCommandOrPermit(bool enabled, bool active, int starts, int ends)
+    {
+        await using var db = CreateDb(); var now = DateTimeOffset.UtcNow;
+        db.SystemPolicies.Add(new SystemPolicy
+        {
+            Id = Guid.NewGuid(),
+            Version = 1,
+            Currency = "VND",
+            IsActive = active,
+            EnableBluetoothUnlock = enabled,
+            EffectiveFrom = now.AddHours(starts),
+            EffectiveTo = now.AddHours(ends)
+        });
+        await db.SaveChangesAsync();
+        var workflow = new BluetoothWorkflowService(new BluetoothWorkflowStore(db), new BluetoothProtocol(), TimeProvider.System,
+            null!, null!, null!, null!, null!);
+        var error = await Assert.ThrowsAsync<ConflictException>(() => workflow.GetPermitAsync(Guid.NewGuid()));
+        Assert.Equal(BluetoothErrorCodes.Disabled, error.ErrorCode);
+        await Assert.ThrowsAsync<ConflictException>(() => workflow.PrepareAsync(Guid.NewGuid(), new("N", Guid.NewGuid(), DeviceIdentifier: "LKR-B")));
+        Assert.Empty(db.ReturnRequests); Assert.Empty(db.LockerAccessEvents);
+    }
+
+    [Fact]
+    public async Task ActiveBluetoothPolicy_IssuesResidentPermitWithoutBindingToRegisteredLocker()
+    {
+        await using var db = CreateDb(); var now = DateTimeOffset.UtcNow;
+        var user = new User { Id = Guid.NewGuid(), PhoneNumber = "0900000001", PasswordHash = "x", Role = UserRole.Resident, Status = UserStatus.Active };
+        db.AddRange(user, new ResidentProfile { Id = Guid.NewGuid(), UserId = user.Id, User = user, FullName = "Resident" },
+            new SystemPolicy
+            {
+                Id = Guid.NewGuid(),
+                Version = 1,
+                Currency = "VND",
+                IsActive = true,
+                EnableBluetoothUnlock = true,
+                EffectiveFrom = now.AddHours(-1)
+            });
+        await db.SaveChangesAsync();
+        var workflow = new BluetoothWorkflowService(new BluetoothWorkflowStore(db), new BluetoothProtocol(), TimeProvider.System,
+            null!, null!, null!, null!, null!);
+        var permit = await workflow.GetPermitAsync(user.Id);
+        Assert.Equal("*", permit.DeviceIdentifier); Assert.StartsWith("r1|*|", permit.Permit);
+        Assert.Empty(db.ReturnRequests);
+    }
+
     [Fact]
     public async Task BluetoothAllocation_UsesDeviceDoorCheckAndStillRespectsReservations()
     {
@@ -87,7 +140,7 @@ public sealed class ReturnRequestServiceTests
         Assert.Matches("^[0-9]{6}$", deposited.PickupCode);
         Assert.Equal("A01", opened.CompartmentCode);
         Assert.Equal(ReturnRequestStatus.Completed, completed.Status);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new ValidateReturnPickupRequest("LK-01", deposited.PickupCode)));
+        await Assert.ThrowsAsync<ConflictException>(() => service.CreateAsync(new ValidateReturnPickupRequest("LK-01", deposited.PickupCode)));
     }
 
     private static ApplicationDbContext CreateDb() => new(new DbContextOptionsBuilder<ApplicationDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);

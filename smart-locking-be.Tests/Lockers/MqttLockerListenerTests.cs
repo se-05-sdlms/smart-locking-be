@@ -201,14 +201,35 @@ public sealed class MqttLockerListenerTests
         using var provider = services.BuildServiceProvider();
         var db = provider.GetRequiredService<ApplicationDbContext>();
         var locker = new Locker { Id = Guid.NewGuid(), Code = "LKR-B", DeviceIdentifier = "LKR-1A0844", Address = "B", RecoveryAddress = "B" };
-        var compartment = new LockerCompartment { Id = Guid.NewGuid(), LockerId = locker.Id, Locker = locker,
-            Code = "B-01", HardwareCode = "CH1", HardwareChannel = 1, DoorStatus = DoorStatus.Open };
-        var request = new ReturnRequest { Id = Guid.NewGuid(), LockerId = locker.Id,
-            AllocatedCompartmentId = compartment.Id, Status = ReturnRequestStatus.Deposited, ReturnCode = "123456" };
-        db.AddRange(locker, compartment, request, new LockerAccessEvent {
-            Id = Guid.NewGuid(), LockerId = locker.Id, LockerCompartmentId = compartment.Id,
-            ReturnRequestId = request.Id, AccessType = LockerAccessType.ShipperReturnPickup,
-            AccessMethod = method, Result = LockerAccessResult.Succeeded, OccurredAt = Now });
+        var compartment = new LockerCompartment
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            Locker = locker,
+            Code = "B-01",
+            HardwareCode = "CH1",
+            HardwareChannel = 1,
+            DoorStatus = DoorStatus.Open
+        };
+        var request = new ReturnRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            AllocatedCompartmentId = compartment.Id,
+            Status = ReturnRequestStatus.Deposited,
+            ReturnCode = "123456"
+        };
+        db.AddRange(locker, compartment, request, new LockerAccessEvent
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            LockerCompartmentId = compartment.Id,
+            ReturnRequestId = request.Id,
+            AccessType = LockerAccessType.ShipperReturnPickup,
+            AccessMethod = method,
+            Result = LockerAccessResult.Succeeded,
+            OccurredAt = Now
+        });
         await db.SaveChangesAsync();
         var listener = new MqttLockerListenerService(new ConfigurationBuilder().Build(),
             provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<MqttLockerListenerService>.Instance);

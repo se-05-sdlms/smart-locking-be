@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Security.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -41,6 +40,5 @@ public sealed class BluetoothWorkflowController(IBluetoothWorkflowService servic
         return NoContent();
     }
 
-    private Guid UserId() => Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
-        ? id : throw new AuthenticationException("Token thiếu thông tin định danh hợp lệ.");
+    private Guid UserId() => User.GetRequiredUserId();
 }

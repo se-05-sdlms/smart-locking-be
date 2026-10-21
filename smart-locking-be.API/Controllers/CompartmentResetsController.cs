@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Security.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.Application.DTOs.Lockers;
@@ -19,9 +18,7 @@ namespace smart_locking_be.API.Controllers;
 public sealed class CompartmentResetsController(ICompartmentResetService service) : ControllerBase
 {
     // Lấy ID người thực hiện từ JWT đã được xác thực để kiểm tra quyền và ghi nhật ký thao tác.
-    private Guid Actor => Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var actor)
-        ? actor
-        : throw new AuthenticationException("Token thiếu thông tin định danh hợp lệ.");
+    private Guid Actor => User.GetRequiredUserId();
 
     // Truyền vai trò trong JWT xuống service để kiểm tra quyền trên đúng tủ được yêu cầu.
     private string Role => User.FindFirstValue(ClaimTypes.Role) ?? "";
@@ -64,6 +61,6 @@ public sealed class CompartmentResetsController(ICompartmentResetService service
     public async Task<IActionResult> Confirm(Guid commandId, CompartmentResetConfirmation request, CancellationToken ct)
         => Ok(await service.ConfirmAsync(Actor, Role, commandId, request.Proof, ct));
 
-    // ApiExceptionHandler xử lý lỗi tập trung: 401 token không hợp lệ, 403 sai phạm vi quyền,
+    // GlobalExceptionHandler xử lý lỗi tập trung: 401 token không hợp lệ, 403 sai phạm vi quyền,
     // 404 không tìm thấy dữ liệu, 400 đầu vào không hợp lệ, 409 xung đột trạng thái.
 }

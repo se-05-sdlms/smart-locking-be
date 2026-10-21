@@ -1,12 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http.Timeouts;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using smart_locking_be.API.Constants;
+using smart_locking_be.API.Middleware;
 using smart_locking_be.Application.DTOs.Parcels;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Enums;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -24,21 +24,27 @@ public sealed class ParcelsController(
         [FromQuery] string? search = null,
         [FromQuery] DateTimeOffset? from = null,
         [FromQuery] DateTimeOffset? to = null,
-        CancellationToken cancellationToken = default) =>
-        await ExecuteAsync((userId, role) =>
-            parcelService.GetParcelsAsync(userId, role, view, search, from, to, cancellationToken));
+        CancellationToken cancellationToken = default)
+    {
+        var (userId, role) = User.GetRequiredIdentity();
+        return Ok(await parcelService.GetParcelsAsync(userId, role, view, search, from, to, cancellationToken));
+    }
 
     [HttpGet("{id:guid}")]
     [Authorize(Roles = "Resident,LockerOperator")]
-    public async Task<IActionResult> GetParcel(Guid id, CancellationToken cancellationToken) =>
-        await ExecuteAsync((userId, role) =>
-            parcelService.GetParcelAsync(userId, role, id, cancellationToken));
+    public async Task<IActionResult> GetParcel(Guid id, CancellationToken cancellationToken)
+    {
+        var (userId, role) = User.GetRequiredIdentity();
+        return Ok(await parcelService.GetParcelAsync(userId, role, id, cancellationToken));
+    }
 
     [HttpGet("{id:guid}/history")]
     [Authorize(Roles = "Resident,LockerOperator")]
-    public async Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken) =>
-        await ExecuteAsync((userId, role) =>
-            parcelService.GetHistoryAsync(userId, role, id, cancellationToken));
+    public async Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken)
+    {
+        var (userId, role) = User.GetRequiredIdentity();
+        return Ok(await parcelService.GetHistoryAsync(userId, role, id, cancellationToken));
+    }
 
     [HttpPost("{id:guid}/unlock-pickup")]
     [Authorize(Roles = "Resident")]
@@ -46,112 +52,45 @@ public sealed class ParcelsController(
     [RequestTimeout(RequestTimeoutPolicyNames.DeviceCommand)]
     public async Task<IActionResult> UnlockPickup(Guid id, CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
-        try
+        PickupUnlockResponse response = await parcelPickupService.UnlockAsync(
+            userId,
+            id,
+            HttpContext.Connection.RemoteIpAddress?.ToString(),
+            Request.Headers.UserAgent.ToString(),
+            cancellationToken);
+        return response.Result switch
         {
-            PickupUnlockResponse response = await parcelPickupService.UnlockAsync(
-                userId,
-                id,
-                HttpContext.Connection.RemoteIpAddress?.ToString(),
-                Request.Headers.UserAgent.ToString(),
-                cancellationToken);
-            return response.Result switch
-            {
-                LockerAccessResult.Succeeded => Accepted(response),
-                LockerAccessResult.Blocked => Conflict(response),
-                _ => StatusCode(StatusCodes.Status503ServiceUnavailable, response),
-            };
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
+            LockerAccessResult.Succeeded => Accepted(response),
+            LockerAccessResult.Blocked => new ObjectResult(ProblemResponse.Create(HttpContext,
+                StatusCodes.Status409Conflict, LockerErrorCodes.OpenFailed,
+                "Locker compartment could not be opened."))
+            { StatusCode = StatusCodes.Status409Conflict, ContentTypes = { "application/problem+json" } },
+            _ => new ObjectResult(ProblemResponse.Create(HttpContext,
+                StatusCodes.Status503ServiceUnavailable, LockerErrorCodes.OpenFailed,
+                "Locker compartment could not be opened."))
+            { StatusCode = StatusCodes.Status503ServiceUnavailable, ContentTypes = { "application/problem+json" } },
+        };
     }
 
+    // Chỉ đọc kết quả đã đồng bộ từ ESP; không coi nút xác nhận là bằng chứng cửa đã mở/đóng.
     [HttpPost("{id:guid}/confirm-pickup")]
     [Authorize(Roles = "Resident")]
-    public async Task<IActionResult> ConfirmPickup(
-        Guid id,
-        [FromBody] ConfirmPickupRequest request,
-        CancellationToken cancellationToken)
+    public async Task<IActionResult> ConfirmPickup(Guid id, [FromBody] ConfirmPickupRequest request, CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
-
-        try
-        {
-            PickupConfirmationResponse response = await parcelPickupService.ConfirmPickupAsync(
-                userId,
-                request.AccessEventId,
-                cancellationToken);
-            return response.ParcelId == id
-                ? Ok(response)
-                : BadRequest(new { message = "Lượt mở ngăn không thuộc bưu kiện được yêu cầu." });
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Conflict(new { message = exception.Message });
-        }
+        var response = await parcelPickupService.ConfirmPickupAsync(User.GetRequiredUserId(), request.AccessEventId, cancellationToken);
+        if (response.ParcelId != id)
+            throw new BadRequestException(ParcelErrorCodes.InvalidAccessEvent, "Lượt mở ngăn không thuộc kiện hàng được yêu cầu.");
+        return Ok(response);
     }
 
-    private async Task<IActionResult> ExecuteAsync<TResponse>(
-        Func<Guid, string, Task<TResponse>> action)
-    {
-        string? idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        string? role = User.FindFirstValue(ClaimTypes.Role);
-        if (!Guid.TryParse(idClaim, out Guid userId) || string.IsNullOrWhiteSpace(role))
-        {
-            return Unauthorized(new { message = "Invalid authentication token." });
-        }
-
-        try
-        {
-            return Ok(await action(userId, role));
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
-        }
-    }
     [HttpPost("{id:guid}:transferToCollectionPoint")]
     [Authorize(Roles = "Administrator,LockerOperator")]
-    public async Task<IActionResult> TransferToCollectionPoint(Guid id, CancellationToken cancellationToken) =>
-        await ExecuteAsync((userId, role) =>
-            parcelService.TransferOverdueAsync(userId, role, id, cancellationToken));
-
-
+    public async Task<IActionResult> TransferToCollectionPoint(Guid id, CancellationToken cancellationToken)
+    {
+        var (userId, role) = User.GetRequiredIdentity();
+        var response = await parcelService.TransferOverdueAsync(userId, role, id, cancellationToken);
+        return response.ResetStatus == "Pending" ? Accepted(response) : Ok(response);
+    }
 }

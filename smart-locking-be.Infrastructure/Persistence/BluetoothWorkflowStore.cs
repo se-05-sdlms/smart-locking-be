@@ -17,10 +17,10 @@ public sealed class BluetoothWorkflowStore(ApplicationDbContext db) : IBluetooth
     public async Task<BluetoothResidentContext> GetResidentAsync(Guid userId, CancellationToken ct, string? deviceIdentifier = null)
     {
         var resident = await db.ResidentProfiles.Include(x => x.User)
-            .SingleOrDefaultAsync(x => x.UserId == userId, ct) ?? throw new KeyNotFoundException("Không tìm thấy resident.");
+            .SingleOrDefaultAsync(x => x.UserId == userId, ct) ?? throw new NotFoundException(BluetoothErrorCodes.NotFound, "Không tìm thấy resident.");
         var locker = string.IsNullOrWhiteSpace(deviceIdentifier) ? null :
             await db.Lockers.SingleOrDefaultAsync(x => x.DeviceIdentifier == deviceIdentifier, ct);
-        if (!string.IsNullOrWhiteSpace(deviceIdentifier) && locker is null) throw new KeyNotFoundException("Không tìm thấy tủ đang kết nối.");
+        if (!string.IsNullOrWhiteSpace(deviceIdentifier) && locker is null) throw new NotFoundException(BluetoothErrorCodes.NotFound, "Không tìm thấy tủ đang kết nối.");
         // Trả dữ liệu gốc; Application quyết định tài khoản/tủ có được thao tác hay không.
         // "*" là permit chưa gắn tủ, không phải mã thiết bị ESP thực tế.
         return new(resident.Id, locker?.Id ?? Guid.Empty, locker?.DeviceIdentifier ?? "*", resident.User.PhoneNumber,
@@ -35,21 +35,21 @@ public sealed class BluetoothWorkflowStore(ApplicationDbContext db) : IBluetooth
             "R" or "G" => await db.ReturnRequests.Where(x => x.Id == id).Select(x => x.Locker.DeviceIdentifier).SingleOrDefaultAsync(ct),
             "P" => await db.Parcels.Where(x => x.Id == id).Select(x => x.DeliveryRequest.Locker.DeviceIdentifier).SingleOrDefaultAsync(ct),
             "D" => await db.DeliveryRequests.Where(x => x.Id == id).Select(x => x.Locker.DeviceIdentifier).SingleOrDefaultAsync(ct),
-            _ => throw new ArgumentException("Loại giao dịch không hợp lệ.")
+            _ => throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Loại giao dịch không hợp lệ.")
         };
-        return device ?? throw new KeyNotFoundException("Không tìm thấy giao dịch.");
+        return device ?? throw new NotFoundException(BluetoothErrorCodes.NotFound, "Không tìm thấy giao dịch.");
     }
 
     // Chỉ projection dữ liệu cần cho retry; quyền sở hữu/session đã được use case kiểm tra qua service gốc.
     public async Task<BluetoothReturnContext> GetReturnAsync(Guid id, CancellationToken ct) =>
         await db.ReturnRequests.Where(x => x.Id == id).Select(x => new BluetoothReturnContext(x.LockerId,
             x.AllocatedCompartmentId, x.Status, x.ReservationExpiresAt)).SingleOrDefaultAsync(ct)
-        ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu gửi đồ.");
+        ?? throw new NotFoundException(BluetoothErrorCodes.NotFound, "Không tìm thấy yêu cầu gửi đồ.");
 
     public async Task<BluetoothDeliveryContext> GetDeliveryAsync(Guid id, CancellationToken ct) =>
         await db.DeliveryRequests.Where(x => x.Id == id).Select(x => new BluetoothDeliveryContext(x.LockerId,
             x.AllocatedCompartmentId, x.Status, x.ReservationExpiresAt)).SingleOrDefaultAsync(ct)
-        ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu giao hàng.");
+        ?? throw new NotFoundException(BluetoothErrorCodes.NotFound, "Không tìm thấy yêu cầu giao hàng.");
 
     public Task<ReturnRequest?> FindReturnDraftAsync(Guid id, CancellationToken ct) =>
         db.ReturnRequests.SingleOrDefaultAsync(x => x.Id == id, ct);

@@ -79,6 +79,19 @@ public sealed class CompartmentResetStore(ApplicationDbContext db) : ICompartmen
     public Task<DeliveryRequest?> FindDeliveryAsync(Guid subjectId, CancellationToken ct) =>
         db.DeliveryRequests.SingleOrDefaultAsync(x => x.Id == subjectId, ct);
 
+    public Task<Parcel?> FindTransferParcelAsync(Guid parcelId, CancellationToken ct) => db.Parcels
+        .Include(x => x.DeliveryRequest).ThenInclude(x => x.Locker)
+        .Include(x => x.DeliveryRequest).ThenInclude(x => x.ResidentProfile)
+        .SingleOrDefaultAsync(x => x.Id == parcelId, ct);
+
+    public Task<List<AuditLog>> GetPendingRequestsAsync(CancellationToken ct) => db.AuditLogs
+        .Where(x => x.Action == CompartmentResetActions.Requested && !db.LockerEvents.Any(e => e.Id == x.Id))
+        .OrderBy(x => x.OccurredAt).ToListAsync(ct);
+
+    public Task<List<AuditLog>> GetAppliedRequestsAsync(Guid slotId, CancellationToken ct) => db.AuditLogs
+        .Where(x => x.EntityId == slotId && x.Action == CompartmentResetActions.Requested && db.LockerEvents.Any(e => e.Id == x.Id))
+        .OrderByDescending(x => x.OccurredAt).ToListAsync(ct);
+
     public Task<List<Parcel>> GetStoredParcelsAsync(Guid deliveryId, CancellationToken ct) => db.Parcels
         .Where(x => x.DeliveryRequestId == deliveryId && (x.Status == ParcelStatus.Stored || x.Status == ParcelStatus.Overdue)).ToListAsync(ct);
 
@@ -92,6 +105,7 @@ public sealed class CompartmentResetStore(ApplicationDbContext db) : ICompartmen
     public void Add(AuditLog audit) => db.AuditLogs.Add(audit);
     public void Add(ParcelStatusHistory history) => db.ParcelStatusHistories.Add(history);
     public void Add(LockerEvent lockerEvent) => db.LockerEvents.Add(lockerEvent);
+    public void Add(Notification notification) => db.Notifications.Add(notification);
     public async Task SaveChangesAsync(CancellationToken ct) => await db.SaveChangesAsync(ct);
 
     // Serializable giữ nhất quán giữa kiểm tra giao dịch khác, đặt OutOfService và ghi nhận ACK.

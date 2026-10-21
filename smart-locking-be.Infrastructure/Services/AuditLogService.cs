@@ -47,5 +47,5 @@ public sealed class AuditLogService(ApplicationDbContext dbContext) : IAuditLogS
                 item.ActorUser == null ? "System/Guest" : item.ActorUser.Email ?? item.ActorUser.PhoneNumber ?? item.ActorUser.Id.ToString(),
                 item.Action, item.EntityType, item.EntityId, item.Result, item.IpAddress, item.Details, item.OccurredAt))
             .SingleOrDefaultAsync(cancellationToken)
-            ?? throw new KeyNotFoundException("Audit log not found.");
+            ?? throw new NotFoundException(AuditErrorCodes.NotFound, "Audit log not found.");
 }

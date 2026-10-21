@@ -28,12 +28,14 @@ public sealed class OfflinePinNotificationWorker(IServiceScopeFactory scopes,
     {
         using IServiceScope scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var notifications = await db.Notifications.Include(x => x.User).Include(x => x.Parcel).Where(x => (x.Type == "OfflinePinParcelStored" || ((x.Type == "ReturnDeposited" || x.Type == "ReturnPickedUp" || x.Type == "ParcelStored") && (x.ReturnRequestId != null || x.ParcelId != null) && x.Channel == NotificationChannel.Push)) &&
+        // Các yêu cầu thu hồi đã được ghi trước khi gửi; thử lại cùng ID sau mất mạng/restart.
+        await scope.ServiceProvider.GetRequiredService<ICompartmentResetService>().RetryPendingTransfersAsync(ct);
+        var notifications = await db.Notifications.Include(x => x.User).Include(x => x.Parcel).Where(x => (x.Type == "OfflinePinParcelStored" || ((x.Type == "ReturnDeposited" || x.Type == "ReturnPickedUp" || x.Type == "ParcelStored" || x.Type == "ParcelTransferred") && (x.ReturnRequestId != null || x.ParcelId != null) && x.Channel == NotificationChannel.Push)) &&
             x.Channel == NotificationChannel.Push &&
             x.DeliveryStatus != NotificationDeliveryStatus.Sent).OrderBy(x => x.CreatedAt).Take(50).ToListAsync(ct);
         foreach (var notification in notifications)
         {
-            if (notification.Parcel?.Status is ParcelStatus.Retrieved or ParcelStatus.Removed)
+            if (notification.Type == "OfflinePinParcelStored" && notification.Parcel?.Status is ParcelStatus.Retrieved or ParcelStatus.Removed)
                 notification.Message = "Kiện hàng đã được nhận hoặc chuyển khỏi ngăn. PIN cũ không còn hiệu lực.";
             await scope.ServiceProvider.GetRequiredService<IPushNotificationService>().TrySendAsync(notification.Id, ct);
         }

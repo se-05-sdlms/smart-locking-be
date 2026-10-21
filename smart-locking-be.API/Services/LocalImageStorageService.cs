@@ -18,14 +18,14 @@ public sealed class LocalImageStorageService(IWebHostEnvironment environment) : 
         string extension = Path.GetExtension(fileName).ToLowerInvariant();
         if (!AllowedExtensions.Contains(extension) || !IsAllowedContentType(contentType, extension))
         {
-            throw new ArgumentException("Ảnh phải là JPG, PNG hoặc WEBP.");
+            throw new BadRequestException(ImageErrorCodes.InvalidFormat, "Image must be JPG, PNG, or WEBP.");
         }
 
         byte[] header = new byte[12];
         int read = await image.ReadAtLeastAsync(header, 12, false, cancellationToken);
         if (!HasValidSignature(header.AsSpan(0, read), extension))
         {
-            throw new ArgumentException("Nội dung tệp không đúng định dạng ảnh.");
+            throw new BadRequestException(ImageErrorCodes.InvalidFormat, "File content is not a supported image format.");
         }
 
         string folder = Path.Combine(

@@ -28,7 +28,7 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
 
         if (tokenOwner is not null && installation is not null && tokenOwner.Id != installation.Id)
         {
-            throw new InvalidOperationException("Expo push token đã được đăng ký cho thiết bị khác.");
+            throw new ConflictException(DeviceErrorCodes.TokenAlreadyRegistered, "Expo push token is registered to another device.");
         }
 
         installation ??= tokenOwner;
@@ -63,7 +63,7 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
             .SingleOrDefaultAsync(
                 device => device.UserId == userId && device.InstallationId == normalizedInstallationId,
                 cancellationToken)
-            ?? throw new KeyNotFoundException("Không tìm thấy thiết bị đã đăng ký.");
+            ?? throw new NotFoundException(DeviceErrorCodes.NotFound, "Registered device not found.");
 
         installation.IsActive = false;
         installation.UpdatedAt = DateTimeOffset.UtcNow;
@@ -78,13 +78,13 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
 
         if (!isActiveResident)
         {
-            throw new UnauthorizedAccessException("Tài khoản Cư dân không hợp lệ hoặc không còn hoạt động.");
+            throw new ForbiddenException(UserErrorCodes.Inactive, "Resident account is invalid or inactive.");
         }
     }
 
     private static string RequireExpoPushToken(string value)
     {
-        string token = RequireValue(value, nameof(value), 256);
+        string token = RequireValue(value, "ExpoPushToken", 256);
         bool isExpoToken =
             (token.StartsWith("ExpoPushToken[", StringComparison.Ordinal) ||
              token.StartsWith("ExponentPushToken[", StringComparison.Ordinal)) &&
@@ -92,29 +92,29 @@ public sealed class DeviceInstallationService(ApplicationDbContext dbContext) : 
 
         return isExpoToken
             ? token
-            : throw new ArgumentException("ExpoPushToken không hợp lệ.", nameof(value));
+            : throw new BadRequestException(DeviceErrorCodes.InvalidToken, "ExpoPushToken is invalid.");
     }
 
     private static string NormalizePlatform(string value)
     {
-        string platform = RequireValue(value, nameof(value), 20);
+        string platform = RequireValue(value, "Platform", 20);
         if (platform.Equals("android", StringComparison.OrdinalIgnoreCase)) return "Android";
         if (platform.Equals("ios", StringComparison.OrdinalIgnoreCase)) return "iOS";
 
-        throw new ArgumentException("Platform chỉ hỗ trợ Android hoặc iOS.", nameof(value));
+        throw BadRequestException.For("platform", "Platform must be Android or iOS.");
     }
 
     private static string RequireValue(string value, string parameterName, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new ArgumentException("Giá trị không được để trống.", parameterName);
+            throw BadRequestException.For(parameterName, $"{parameterName} is required.");
         }
 
         string trimmed = value.Trim();
         return trimmed.Length <= maxLength
             ? trimmed
-            : throw new ArgumentException($"Giá trị không được vượt quá {maxLength} ký tự.", parameterName);
+            : throw BadRequestException.For(parameterName, $"{parameterName} must not exceed {maxLength} characters.");
     }
 
     private static DeviceInstallationResponse MapResponse(DeviceInstallation installation) =>

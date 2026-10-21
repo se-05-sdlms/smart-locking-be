@@ -18,12 +18,9 @@ public sealed class PasswordChangeRequiredMiddleware(RequestDelegate next)
             string.Equals(context.User.FindFirstValue("must_change_password"), "true", StringComparison.OrdinalIgnoreCase);
         if (passwordChangeRequired && !AllowedPaths.Any(path => context.Request.Path.Equals(path)))
         {
-            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsJsonAsync(new
-            {
-                code = "PasswordChangeRequired",
-                message = "You must change the temporary password before continuing."
-            });
+            await ProblemResponse.WriteAsync(context, StatusCodes.Status403Forbidden,
+                AuthErrorCodes.PasswordChangeRequired,
+                "You must change the temporary password before continuing.");
             return;
         }
 

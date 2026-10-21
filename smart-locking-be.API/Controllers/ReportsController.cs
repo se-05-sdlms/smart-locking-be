@@ -1,8 +1,8 @@
-using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.Application.DTOs.Operations;
 using smart_locking_be.Application.Interfaces.Services;
+using System.Text;
 
 namespace smart_locking_be.API.Controllers;
 

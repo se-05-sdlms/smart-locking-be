@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.Application.DTOs.Operations;
@@ -12,13 +11,7 @@ public sealed class EmergencyUnlocksController(IEmergencyUnlockService service) 
     [HttpPost]
     public async Task<IActionResult> Create(EmergencyUnlockRequest request, CancellationToken ct)
     {
-        if (!TryGetIdentity(out Guid userId, out string role)) return Unauthorized();
+        var (userId, role) = User.GetRequiredIdentity();
         return StatusCode(201, await service.CreateAsync(userId, role, request, ct));
-    }
-
-    private bool TryGetIdentity(out Guid userId, out string role)
-    {
-        role = User.FindFirstValue(ClaimTypes.Role) ?? string.Empty;
-        return Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
     }
 }

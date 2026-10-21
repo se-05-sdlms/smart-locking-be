@@ -57,7 +57,7 @@ public sealed class LockerAccessServiceTests
         OpenLockerResponse response = await service.OpenAsync(MaintenanceRequest(locker, compartment));
 
         Assert.Equal(LockerAccessResult.Blocked, response.Result);
-        Assert.Contains("không trực tuyến", response.FailureReason);
+        Assert.Contains("offline", response.FailureReason);
         Assert.Empty(dispatcher.Commands);
     }
 

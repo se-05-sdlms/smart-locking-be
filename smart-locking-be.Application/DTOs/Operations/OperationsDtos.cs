@@ -4,7 +4,8 @@ namespace smart_locking_be.Application.DTOs.Operations;
 
 public sealed record OperationalLockerResponse(Guid Id, string Code, string Address, LockerOperationalStatus Status, LockerConnectionStatus Connection, DateTimeOffset? LastSeenAt, int AvailableCompartments, int StoredParcels, int OpenIncidents);
 public sealed record UpdateOperationalStatusRequest(string Status, string Reason);
-public sealed record OverdueTransferResponse(Guid ParcelId, string ParcelCode, string CollectionAddress, string Status);
+public sealed record OverdueTransferResponse(Guid ParcelId, string ParcelCode, string CollectionAddress, string Status,
+    Guid? ResetCommandId = null, string? ResetStatus = null);
 
 public sealed record EmergencyUnlockRequest(Guid LockerId, Guid CompartmentId, Guid? IncidentId, string Reason);
 

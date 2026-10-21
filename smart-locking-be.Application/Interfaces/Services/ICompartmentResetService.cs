@@ -18,4 +18,8 @@ public interface ICompartmentResetService
     Task<CompartmentResetResponse> ConfirmAsync(Guid userId, string role, Guid commandId, string proof, CancellationToken ct = default);
     // Đối chiếu phản hồi và áp dụng một lần; ACK trùng qua MQTT/BLE không cập nhật lần hai.
     Task ReceiveAsync(string device, string proof, CancellationToken ct = default);
+    // Chuyển hàng chỉ hoàn tất sau khi ESP đã xóa trạng thái/PIN của đúng kiện, không mở chốt.
+    Task<DTOs.Parcels.OverdueTransferResponse> RequestTransferAsync(Guid userId, string role, Guid parcelId, CancellationToken ct = default);
+    // Worker thử lại các yêu cầu chuyển hàng đã lưu, giữ cùng commandId qua restart/mất mạng.
+    Task RetryPendingTransfersAsync(CancellationToken ct = default);
 }

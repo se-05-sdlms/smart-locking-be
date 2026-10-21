@@ -1,8 +1,8 @@
-using System.Net;
-using System.Net.Http.Headers;
 using Microsoft.Extensions.Options;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Infrastructure.Options;
+using System.Net;
+using System.Net.Http.Headers;
 
 namespace smart_locking_be.Infrastructure.Services;
 
@@ -24,14 +24,14 @@ public sealed class SupabaseImageStorageService(
         string extension = Path.GetExtension(fileName).ToLowerInvariant();
         if (!AllowedExtensions.Contains(extension) || !IsAllowedContentType(contentType, extension))
         {
-            throw new ArgumentException("Ảnh phải là JPG, PNG hoặc WEBP.");
+            throw new BadRequestException(ImageErrorCodes.InvalidFormat, "Image must be JPG, PNG, or WEBP.");
         }
 
         byte[] header = new byte[12];
         int read = await image.ReadAtLeastAsync(header, 12, false, cancellationToken);
         if (!HasValidSignature(header.AsSpan(0, read), extension))
         {
-            throw new ArgumentException("Nội dung tệp không đúng định dạng ảnh.");
+            throw new BadRequestException(ImageErrorCodes.InvalidFormat, "File content is not a supported image format.");
         }
 
         // The upload endpoint limits images to 8 MB. Replay the header without requiring a seekable input.
@@ -60,18 +60,26 @@ public sealed class SupabaseImageStorageService(
                 request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (response.StatusCode == HttpStatusCode.RequestEntityTooLarge)
             {
-                throw new ArgumentException("Ảnh vượt quá giới hạn kích thước của dịch vụ lưu trữ.");
+                throw new BadRequestException(ImageErrorCodes.TooLarge, "Image exceeds the storage size limit.");
             }
 
             if (!response.IsSuccessStatusCode)
             {
                 // Never expose provider response bodies, keys, or request URLs to clients.
-                throw new HttpRequestException("Image storage rejected the upload.", null, response.StatusCode);
+                throw new ServiceUnavailableException(
+                    ImageErrorCodes.StorageUnavailable, "Image storage is currently unavailable.");
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new HttpRequestException("Image storage upload timed out.");
+            throw new ServiceUnavailableException(
+                ImageErrorCodes.StorageUnavailable, "Image storage is currently unavailable.");
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new ServiceUnavailableException(
+                ImageErrorCodes.StorageUnavailable, "Image storage is currently unavailable.",
+                exception);
         }
 
         return $"{storageUrl}/public/{encodedPath}";

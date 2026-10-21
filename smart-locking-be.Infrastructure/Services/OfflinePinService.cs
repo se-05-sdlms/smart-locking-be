@@ -15,13 +15,13 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
 {
     public async Task<OfflinePinSyncResponse> SyncAsync(OfflinePinSyncRequest request, CancellationToken ct = default)
     {
-        if (request.Events is null || request.Events.Count is < 1 or > 100) throw new ArgumentException("Supply 1..100 device events.");
+        if (request.Events is null || request.Events.Count is < 1 or > 100) throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Supply 1..100 device events.");
         List<OfflinePinSyncResult> results = [];
         foreach (string proof in request.Events)
         {
-            if (string.IsNullOrEmpty(proof) || proof.Length > 512) throw new ArgumentException("Invalid device event.");
+            if (string.IsNullOrEmpty(proof) || proof.Length > 512) throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Invalid device event.");
             string[] parts = proof.Split('|');
-            if (parts.Length != 12) throw new ArgumentException("Invalid device event.");
+            if (parts.Length != 12) throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Invalid device event.");
             results.Add(await ReceiveAsync(parts[3], proof, ct));
         }
         return new(results);
@@ -31,7 +31,7 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
     public async Task<IReadOnlyList<OfflinePinEventResponse>> GetEventsAsync(Guid userId, string role, string? device, string? status,
         int page = 1, int pageSize = 50, CancellationToken ct = default)
     {
-        if (role is not ("Administrator" or "LockerOperator")) throw new UnauthorizedAccessException();
+        if (role is not ("Administrator" or "LockerOperator")) throw new ForbiddenException(BluetoothErrorCodes.AccessDenied, "Bạn không có quyền thực hiện thao tác.");
         var query = db.OfflineLockerEvents.AsNoTracking();
         if (role == "LockerOperator")
         {
@@ -76,11 +76,11 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
         OfflineLockerEvent? existing = await db.OfflineLockerEvents.SingleOrDefaultAsync(x => x.Id == evidence.EventId, ct);
         if (existing is not null)
         {
-            if (existing.DeviceIdentifier != device || existing.PayloadHash != hash) throw new UnauthorizedAccessException("Conflicting event ID.");
+            if (existing.DeviceIdentifier != device || existing.PayloadHash != hash) throw new ForbiddenException(BluetoothErrorCodes.AccessDenied, "Conflicting event ID.");
             return Result(existing);
         }
         if (await db.OfflineLockerEvents.AnyAsync(x => x.DeviceIdentifier == device && x.Sequence == evidence.Sequence, ct))
-            throw new UnauthorizedAccessException("Conflicting device sequence. Device storage requires reconciliation.");
+            throw new ForbiddenException(BluetoothErrorCodes.AccessDenied, "Conflicting device sequence. Device storage requires reconciliation.");
         DateTimeOffset now = clock.GetUtcNow();
         OfflineLockerEvent item = new()
         {
@@ -99,6 +99,16 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
             ReceivedAt = now
         };
         db.OfflineLockerEvents.Add(item);
+        db.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            Action = "OfflinePin.Received",
+            EntityType = nameof(OfflineLockerEvent),
+            EntityId = item.Id,
+            Result = AuditLogResult.Succeeded,
+            OccurredAt = now,
+            Details = $"Device={device}; sequence={item.Sequence}; waiting for ordered reconciliation."
+        });
         // Lưu trước khi tra theo số thứ tự; transaction chưa commit nên chưa gửi ACK.
         await db.SaveChangesAsync(ct);
         OfflineLockerCursor? cursor = await db.OfflineLockerCursors.SingleOrDefaultAsync(x => x.DeviceIdentifier == device, ct);
@@ -138,7 +148,7 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
         var occurred = item.ClosedAt ?? item.ReceivedAt;
         if (delivery.Status == DeliveryRequestStatus.Allocated)
         {
-            if (deliveries is null) throw new InvalidOperationException("Missing delivery workflow service.");
+            if (deliveries is null) throw new ConflictException(BluetoothErrorCodes.InvalidState, "Missing delivery workflow service.");
             if (delivery.ReservationExpiresAt <= occurred)
             { Review(item, "Physical drop-off completed after reservation expiry.", compartment); return; }
             await deliveries.FinalizeDropOffAsync(delivery.Id, occurred, ct);
@@ -270,6 +280,39 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
     {
         item.Status = "NeedsReview";
         item.ReviewReason = reason;
+        // Không biến sự kiện không đối chiếu được thành lượt mở thành công. Nếu biết ngăn thật,
+        // ghi lượt truy cập lỗi không gắn FK giao dịch chưa được xác minh; nếu đã ghi Success theo
+        // thực tế nhận hàng thì giữ kết quả đó và ghi audit đối soát riêng (ví dụ phí chưa thanh toán).
+        if (compartment is not null && !db.LockerAccessEvents.Local.Any(x => x.Id == item.Id) &&
+            !db.LockerAccessEvents.Any(x => x.Id == item.Id))
+            db.LockerAccessEvents.Add(new LockerAccessEvent
+            {
+                Id = item.Id,
+                LockerId = compartment.LockerId,
+                LockerCompartmentId = compartment.Id,
+                AccessMethod = LockerAccessMethod.Bluetooth,
+                AccessType = item.Kind switch
+                {
+                    "D" => LockerAccessType.ShipperDropOff,
+                    "R" => LockerAccessType.ResidentReturnDropOff,
+                    "G" => LockerAccessType.ShipperReturnPickup,
+                    _ => LockerAccessType.ResidentPickup
+                },
+                Result = LockerAccessResult.Failed,
+                FailureReason = reason,
+                DeviceContext = "Offline reconciliation; event=" + item.Id.ToString("N"),
+                OccurredAt = item.OpenedAt ?? item.ReceivedAt
+            });
+        db.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            Action = "OfflinePin.NeedsReview",
+            EntityType = nameof(OfflineLockerEvent),
+            EntityId = item.Id,
+            Result = AuditLogResult.Failed,
+            Details = reason,
+            OccurredAt = item.ReceivedAt
+        });
         db.Incidents.Add(new()
         {
             Id = Guid.NewGuid(),

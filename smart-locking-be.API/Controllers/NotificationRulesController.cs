@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using smart_locking_be.API.Authorization;
 using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -25,7 +24,7 @@ public sealed class NotificationRulesController(INotificationRuleService service
         CreateNotificationRuleRequest request,
         CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(out Guid userId)) return Unauthorized();
+        Guid userId = User.GetRequiredUserId();
         NotificationRuleResponse response = await service.CreateAsync(userId, request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, response);
     }
@@ -33,9 +32,7 @@ public sealed class NotificationRulesController(INotificationRuleService service
     [HttpPatch("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, UpdateNotificationRuleRequest request, CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(out Guid userId)) return Unauthorized();
+        Guid userId = User.GetRequiredUserId();
         return Ok(await service.UpdateAsync(userId, id, request, cancellationToken));
     }
-
-    private bool TryGetUserId(out Guid userId) => Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
 }

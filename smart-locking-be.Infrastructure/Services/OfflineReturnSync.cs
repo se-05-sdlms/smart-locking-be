@@ -30,11 +30,18 @@ public sealed partial class OfflinePinService
                 { Review(item, "Offline return conflicts with another parcel or reservation.", compartment); return; }
                 request = new()
                 {
-                    Id = item.DeliveryId, ResidentProfileId = residents[0].Id, ResidentProfile = residents[0],
-                    LockerId = compartment.LockerId, AllocatedCompartmentId = compartment.Id,
-                    ReturnCode = item.PinCode!, ReturnReason = "Offline Bluetooth; image pending upload.",
-                    Status = ReturnRequestStatus.Deposited, CreatedAt = item.OpenedAt ?? occurred,
-                    AllocatedAt = item.OpenedAt ?? occurred, ResidentDepositedAt = occurred, UpdatedAt = item.ReceivedAt
+                    Id = item.DeliveryId,
+                    ResidentProfileId = residents[0].Id,
+                    ResidentProfile = residents[0],
+                    LockerId = compartment.LockerId,
+                    AllocatedCompartmentId = compartment.Id,
+                    ReturnCode = item.PinCode!,
+                    ReturnReason = "Offline Bluetooth; image pending upload.",
+                    Status = ReturnRequestStatus.Deposited,
+                    CreatedAt = item.OpenedAt ?? occurred,
+                    AllocatedAt = item.OpenedAt ?? occurred,
+                    ResidentDepositedAt = occurred,
+                    UpdatedAt = item.ReceivedAt
                 };
                 db.ReturnRequests.Add(request);
             }
@@ -74,29 +81,43 @@ public sealed partial class OfflinePinService
         // Access này là kết quả cảm biến, không phải chỉ là lệnh mở chốt.
         db.LockerAccessEvents.Add(new()
         {
-            Id = item.Id, LockerId = compartment.LockerId, LockerCompartmentId = compartment.Id,
-            ReturnRequestId = request.Id, UserId = item.Kind == "R" ? request.ResidentProfile.UserId : null,
+            Id = item.Id,
+            LockerId = compartment.LockerId,
+            LockerCompartmentId = compartment.Id,
+            ReturnRequestId = request.Id,
+            UserId = item.Kind == "R" ? request.ResidentProfile.UserId : null,
             AccessType = item.Kind == "R" ? LockerAccessType.ResidentReturnDropOff : LockerAccessType.ShipperReturnPickup,
-            AccessMethod = LockerAccessMethod.Bluetooth, Result = LockerAccessResult.Succeeded,
-            OccurredAt = item.OpenedAt ?? occurred, DeviceContext = "Device door cycle; sequence=" + item.Sequence
+            AccessMethod = LockerAccessMethod.Bluetooth,
+            Result = LockerAccessResult.Succeeded,
+            OccurredAt = item.OpenedAt ?? occurred,
+            DeviceContext = "Device door cycle; sequence=" + item.Sequence
         });
         db.AuditLogs.Add(new()
         {
-            Id = Guid.NewGuid(), Action = "BluetoothReturn." + item.Kind, EntityType = nameof(ReturnRequest),
-            EntityId = request.Id, ActorUserId = item.Kind == "R" ? request.ResidentProfile.UserId : null,
-            OccurredAt = item.ReceivedAt, Result = AuditLogResult.Succeeded, Details = "Door open/close confirmed."
+            Id = Guid.NewGuid(),
+            Action = "BluetoothReturn." + item.Kind,
+            EntityType = nameof(ReturnRequest),
+            EntityId = request.Id,
+            ActorUserId = item.Kind == "R" ? request.ResidentProfile.UserId : null,
+            OccurredAt = item.ReceivedAt,
+            Result = AuditLogResult.Succeeded,
+            Details = "Door open/close confirmed."
         });
         if (notify)
-        foreach (var notificationChannel in new[] { NotificationChannel.InApp, NotificationChannel.Push })
-        db.Notifications.Add(new()
-        {
-            Id = Guid.NewGuid(), UserId = request.ResidentProfile.UserId, ReturnRequestId = request.Id,
-            Type = item.Kind == "R" ? "ReturnDeposited" : "ReturnPickedUp", Channel = notificationChannel,
-            Title = item.Kind == "R" ? "Da gui do vao tu" : "Guest da lay do",
-            Message = item.Kind == "R" ? $"Do da o ngan {compartment.Code}. Mo app de chia se ma lay do." : $"Do tai ngan {compartment.Code} da duoc lay.",
-            DeliveryStatus = notificationChannel == NotificationChannel.InApp ? NotificationDeliveryStatus.Sent : NotificationDeliveryStatus.Pending,
-            SentAt = notificationChannel == NotificationChannel.InApp ? item.ReceivedAt : null, CreatedAt = item.ReceivedAt
-        });
+            foreach (var notificationChannel in new[] { NotificationChannel.InApp, NotificationChannel.Push })
+                db.Notifications.Add(new()
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = request.ResidentProfile.UserId,
+                    ReturnRequestId = request.Id,
+                    Type = item.Kind == "R" ? "ReturnDeposited" : "ReturnPickedUp",
+                    Channel = notificationChannel,
+                    Title = item.Kind == "R" ? "Da gui do vao tu" : "Guest da lay do",
+                    Message = item.Kind == "R" ? $"Do da o ngan {compartment.Code}. Mo app de chia se ma lay do." : $"Do tai ngan {compartment.Code} da duoc lay.",
+                    DeliveryStatus = notificationChannel == NotificationChannel.InApp ? NotificationDeliveryStatus.Sent : NotificationDeliveryStatus.Pending,
+                    SentAt = notificationChannel == NotificationChannel.InApp ? item.ReceivedAt : null,
+                    CreatedAt = item.ReceivedAt
+                });
         item.Status = "Applied";
         if (!item.ClosedAt.HasValue || compartment.OperationalStatus != LockerCompartmentOperationalStatus.Operational)
             Review(item, "Physical return imported; event clock or device availability requires review.", compartment);

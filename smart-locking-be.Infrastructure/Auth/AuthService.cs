@@ -37,24 +37,22 @@ public sealed class AuthService(
     {
         string? email = NormalizeEmail(request.Email);
         string phoneNumber = NormalizePhone(request.PhoneNumber)
-            ?? throw new ArgumentException("Phone number is required.", nameof(request.PhoneNumber));
+            ?? throw BadRequestException.For("phoneNumber", "Phone number is required.");
 
         if (!PhonePattern.IsMatch(phoneNumber))
         {
-            throw new ArgumentException(
-                "Phone number must contain 10 digits and start with 0.",
-                nameof(request.PhoneNumber));
+            throw BadRequestException.For("phoneNumber", "Phone number must contain 10 digits and start with 0.");
         }
 
         if (request.Password.Length < 8)
         {
-            throw new ArgumentException("Password must contain at least 8 characters.", nameof(request.Password));
+            throw BadRequestException.For("password", "Password must contain at least 8 characters.");
         }
 
         string fullName = request.FullName.Trim();
         if (string.IsNullOrWhiteSpace(fullName) || fullName.Length > 150)
         {
-            throw new ArgumentException("Full name must contain between 1 and 150 characters.", nameof(request.FullName));
+            throw BadRequestException.For("fullName", "Full name must contain between 1 and 150 characters.");
         }
 
         bool exists = await dbContext.Users.AnyAsync(user =>
@@ -62,15 +60,15 @@ public sealed class AuthService(
 
         if (exists)
         {
-            throw new InvalidOperationException("User already exists.");
+            throw new ConflictException(AuthErrorCodes.UserAlreadyExists, "User already exists.");
         }
 
         Locker locker = await dbContext.Lockers.SingleOrDefaultAsync(
             candidate => candidate.Id == request.RegisteredLockerId,
-            cancellationToken) ?? throw new KeyNotFoundException("Registered locker not found.");
+            cancellationToken) ?? throw new NotFoundException(LockerErrorCodes.NotFound, "Registered locker not found.");
         if (locker.OperationalStatus != LockerOperationalStatus.Operational)
         {
-            throw new InvalidOperationException("Registered locker is not operational.");
+            throw new ConflictException(LockerErrorCodes.NotOperational, "Registered locker is not operational.");
         }
 
         DeliveryApprovalMode defaultApprovalMode = DeliveryApprovalMode.Manual;
@@ -139,7 +137,7 @@ public sealed class AuthService(
         CancellationToken cancellationToken)
     {
         string phoneNumber = NormalizePhone(request.PhoneNumber)
-            ?? throw new InvalidOperationException("Phone number is required.");
+            ?? throw BadRequestException.For("phoneNumber", "Phone number is required.");
         bool exists = await dbContext.Users.AnyAsync(user => user.PhoneNumber == phoneNumber, cancellationToken);
         if (exists)
         {
@@ -155,12 +153,12 @@ public sealed class AuthService(
         CancellationToken cancellationToken)
     {
         User user = await FindUserByIdentifierAsync(request.LoginIdentifier, cancellationToken)
-            ?? throw new InvalidOperationException(InvalidCredentialsMessage);
+            ?? throw new UnauthorizedException(AuthErrorCodes.InvalidCredentials, InvalidCredentialsMessage);
 
         if (user.Status != UserStatus.Active ||
             !passwordHashService.VerifyPassword(request.Password, user.PasswordHash))
         {
-            throw new InvalidOperationException(InvalidCredentialsMessage);
+            throw new UnauthorizedException(AuthErrorCodes.InvalidCredentials, InvalidCredentialsMessage);
         }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -186,11 +184,11 @@ public sealed class AuthService(
                 refreshToken.TokenHash == tokenHash &&
                 refreshToken.RevokedAt == null &&
                 refreshToken.ExpiresAt > now, cancellationToken)
-            ?? throw new InvalidOperationException("Invalid refresh token.");
+            ?? throw new UnauthorizedException(AuthErrorCodes.InvalidRefreshToken, "Invalid refresh token.");
 
         if (token.User.Status != UserStatus.Active)
         {
-            throw new InvalidOperationException("Invalid refresh token.");
+            throw new UnauthorizedException(AuthErrorCodes.InvalidRefreshToken, "Invalid refresh token.");
         }
 
         (AuthTokenResponse response, RefreshToken replacementToken) = IssueTokens(token.User, ipAddress, now);
@@ -227,7 +225,7 @@ public sealed class AuthService(
     public async Task<UserProfileResponse> GetCurrentUserAsync(Guid userId, CancellationToken cancellationToken)
     {
         User user = await dbContext.Users.AsNoTracking().SingleOrDefaultAsync(user => user.Id == userId, cancellationToken)
-            ?? throw new KeyNotFoundException("User not found.");
+            ?? throw new NotFoundException(UserErrorCodes.NotFound, "User not found.");
 
         return ToProfile(user);
     }
@@ -251,16 +249,16 @@ public sealed class AuthService(
         CancellationToken cancellationToken)
     {
         User user = await FindUserByIdentifierAsync(request.LoginIdentifier, cancellationToken)
-            ?? throw new InvalidOperationException("Invalid OTP.");
+            ?? throw new BadRequestException(AuthErrorCodes.InvalidOtp, "Invalid OTP.");
 
         if (user.PhoneNumber is null)
         {
-            throw new InvalidOperationException("Invalid OTP.");
+            throw new BadRequestException(AuthErrorCodes.InvalidOtp, "Invalid OTP.");
         }
 
         if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
         {
-            throw new InvalidOperationException("Password must contain at least 8 characters.");
+            throw BadRequestException.For("newPassword", "Password must contain at least 8 characters.");
         }
 
         await otpService.VerifyAndConsumeAsync(
@@ -351,14 +349,14 @@ public sealed class AuthService(
         User user = await dbContext.Users
             .Include(candidate => candidate.RefreshTokens)
             .SingleOrDefaultAsync(candidate => candidate.Id == userId, cancellationToken)
-            ?? throw new KeyNotFoundException("User not found.");
+            ?? throw new NotFoundException(UserErrorCodes.NotFound, "User not found.");
 
         if (!passwordHashService.VerifyPassword(request.CurrentPassword, user.PasswordHash))
-            throw new InvalidOperationException("Current password is incorrect.");
+            throw new BadRequestException(AuthErrorCodes.InvalidPassword, "Current password is incorrect.");
         if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
-            throw new ArgumentException("Password must contain at least 8 characters.", nameof(request.NewPassword));
+            throw BadRequestException.For("newPassword", "Password must contain at least 8 characters.");
         if (passwordHashService.VerifyPassword(request.NewPassword, user.PasswordHash))
-            throw new ArgumentException("New password must be different from the current password.", nameof(request.NewPassword));
+            throw new BadRequestException(AuthErrorCodes.InvalidPassword, "New password must be different from the current password.");
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         user.PasswordHash = passwordHashService.HashPassword(request.NewPassword);

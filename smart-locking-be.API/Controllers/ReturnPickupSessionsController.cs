@@ -25,9 +25,9 @@ public sealed class ReturnPickupSessionsController(IReturnPickupSessionService s
     private Task<IActionResult> WithToken<T>(Func<string, Task<T>> action)
     {
         string token = Request.Headers[GuestSessionHeaderName].FirstOrDefault()?.Trim() ?? string.Empty;
-        return token.Length == 0
-            ? Task.FromResult<IActionResult>(Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." }))
-            : Execute(() => action(token));
+        if (token.Length == 0)
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
+        return Execute(() => action(token));
     }
 
     private static async Task<IActionResult> Execute<T>(Func<Task<T>> action, int statusCode = StatusCodes.Status200OK)

@@ -18,7 +18,7 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
         HashSet<Guid> scope = (await ScopeLockers(userId, role).Select(item => item.Id)
             .ToListAsync(cancellationToken)).ToHashSet();
         if (lockerId.HasValue && !scope.Contains(lockerId.Value))
-            throw new UnauthorizedAccessException("Tủ không thuộc phạm vi vận hành.");
+            throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.");
         string term = query?.Trim() ?? string.Empty;
         IQueryable<Parcel> parcels = dbContext.Parcels.Include(item => item.DeliveryRequest).ThenInclude(item => item.Locker).Where(item => scope.Contains(item.DeliveryRequest.LockerId));
         IQueryable<ReturnRequest> returns = dbContext.ReturnRequests.Include(item => item.Locker).Where(item => scope.Contains(item.LockerId));
@@ -54,10 +54,10 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
         }
         // ponytail: materialize scoped records for cross-type paging; use a database union if volume grows.
         List<OperationalRecordResponse> result = [];
-        result.AddRange(await parcels.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("Parcel", item.Id, item.ParcelCode, item.Status.ToString(), item.DeliveryRequest.Locker.Code, "Kiện hàng cư dân", item.UpdatedAt)).ToListAsync(cancellationToken));
-        result.AddRange(await returns.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("Return", item.Id, item.ReturnCode, item.Status.ToString(), item.Locker.Code, "Hàng cư dân gửi", item.UpdatedAt)).ToListAsync(cancellationToken));
+        result.AddRange(await parcels.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("Parcel", item.Id, item.ParcelCode, item.Status.ToString(), item.DeliveryRequest.Locker.Code, "Resident parcel", item.UpdatedAt)).ToListAsync(cancellationToken));
+        result.AddRange(await returns.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("Return", item.Id, item.ReturnCode, item.Status.ToString(), item.Locker.Code, "Resident return", item.UpdatedAt)).ToListAsync(cancellationToken));
         result.AddRange(await incidents.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("Incident", item.Id, item.Id.ToString(), item.Status.ToString(), item.Locker!.Code, item.Title, item.UpdatedAt)).ToListAsync(cancellationToken));
-        result.AddRange(await deliveries.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("DeliveryRequest", item.Id, item.Id.ToString(), item.Status.ToString(), item.Locker.Code, item.RecipientPhoneSnapshot ?? "Yêu cầu giao hàng", item.UpdatedAt)).ToListAsync(cancellationToken));
+        result.AddRange(await deliveries.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("DeliveryRequest", item.Id, item.Id.ToString(), item.Status.ToString(), item.Locker.Code, item.RecipientPhoneSnapshot ?? "Delivery request", item.UpdatedAt)).ToListAsync(cancellationToken));
         result.AddRange(await maintenance.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("MaintenanceRequest", item.Id, item.Id.ToString(), item.Status.ToString(), item.Locker.Code, item.Description, item.UpdatedAt)).ToListAsync(cancellationToken));
         result.AddRange(await events.OrderByDescending(item => item.OccurredAt).Select(item => new OperationalRecordResponse("LockerEvent", item.Id, item.Id.ToString(), item.EventType.ToString(), item.Locker.Code, item.Details ?? item.Reason ?? item.EventType.ToString(), item.OccurredAt)).ToListAsync(cancellationToken));
         result.AddRange(await lockers.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("Locker", item.Id, item.Code, item.OperationalStatus.ToString(), item.Code, item.Address, item.UpdatedAt)).ToListAsync(cancellationToken));
@@ -180,10 +180,10 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
                     break;
                 }
             default:
-                throw new ArgumentException("Operational record kind is invalid.", nameof(kind));
+                throw BadRequestException.For("kind", "Operational record kind is invalid.");
         }
         if (result is null || !await ScopeLockers(userId, role).AnyAsync(item => item.Id == result.LockerId, cancellationToken))
-            throw new KeyNotFoundException("Operational record not found.");
+            throw new NotFoundException(OperationalRecordErrorCodes.NotFound, "Operational record not found.");
         return result;
     }
 
@@ -193,6 +193,6 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
         nameof(UserRole.LockerOperator) => dbContext.Lockers.Where(locker =>
             dbContext.OperatorAssignments.Any(assignment =>
                 assignment.OperatorUserId == userId && assignment.LockerId == locker.Id && assignment.RevokedAt == null)),
-        _ => throw new UnauthorizedAccessException()
+        _ => throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.")
     };
 }

@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
@@ -22,10 +21,8 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     public async Task<IActionResult> Create(
         [FromBody] InitiateDeliveryRequest request,
         CancellationToken cancellationToken) =>
-        await ExecuteAsync(
-            async () => StatusCode(
-                StatusCodes.Status201Created,
-                await deliveryRequestService.CreateAsync(request, cancellationToken)));
+        StatusCode(StatusCodes.Status201Created,
+            await deliveryRequestService.CreateAsync(request, cancellationToken));
 
     [HttpPost("{id:guid}:submit")]
     [AllowAnonymous]
@@ -38,10 +35,10 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!TryGetGuestSessionToken(out string token))
         {
-            return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
         }
 
-        return await ExecuteAsync(() => deliveryRequestService.SubmitAsync(id, token, request, cancellationToken));
+        return Ok(await deliveryRequestService.SubmitAsync(id, token, request, cancellationToken));
     }
 
     [HttpGet("{id:guid}")]
@@ -50,10 +47,10 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!TryGetGuestSessionToken(out string token))
         {
-            return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
         }
 
-        return await ExecuteAsync(() => deliveryRequestService.GetAsync(id, token, cancellationToken));
+        return Ok(await deliveryRequestService.GetAsync(id, token, cancellationToken));
     }
 
     // ==========================================
@@ -70,14 +67,11 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest(new { message = "Hiện chỉ hỗ trợ lọc status=pending." });
+            throw BadRequestException.For("status", "Only status=pending is supported.");
         }
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
-        return await ExecuteAsync(() => deliveryRequestService.GetPendingRequestsForResidentAsync(
+        return Ok(await deliveryRequestService.GetPendingRequestsForResidentAsync(
             userId, cancellationToken, pageNumber, pageSize));
     }
 
@@ -85,24 +79,18 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> ApproveRequest(Guid id, CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
-        return await ExecuteAsync(() => deliveryRequestService.ApproveDeliveryRequestAsync(userId, id, cancellationToken));
+        return Ok(await deliveryRequestService.ApproveDeliveryRequestAsync(userId, id, cancellationToken));
     }
 
     [HttpPost("{id:guid}:reject")]
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> RejectRequest(Guid id, CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(out Guid userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu thông tin định danh." });
-        }
+        Guid userId = User.GetRequiredUserId();
 
-        return await ExecuteAsync(() => deliveryRequestService.RejectDeliveryRequestAsync(userId, id, cancellationToken));
+        return Ok(await deliveryRequestService.RejectDeliveryRequestAsync(userId, id, cancellationToken));
     }
 
     [HttpPost("{id:guid}:openCompartment")]
@@ -111,27 +99,15 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     {
         if (!TryGetGuestSessionToken(out string token))
         {
-            return Unauthorized(new { message = $"Thiếu {GuestSessionHeaderName}." });
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
         }
 
-        return await ExecuteAsync(() => deliveryRequestService.OpenCompartmentAsync(id, token, cancellationToken));
+        return Ok(await deliveryRequestService.OpenCompartmentAsync(id, token, cancellationToken));
     }
 
     private bool TryGetGuestSessionToken(out string token)
     {
         token = Request.Headers[GuestSessionHeaderName].FirstOrDefault()?.Trim() ?? string.Empty;
         return token.Length > 0;
-    }
-
-    private bool TryGetUserId(out Guid userId)
-    {
-        string? claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claimValue, out userId);
-    }
-
-    private async Task<IActionResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> action)
-    {
-        TResponse result = await action();
-        return result is IActionResult actionResult ? actionResult : Ok(result);
     }
 }

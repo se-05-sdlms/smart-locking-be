@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -10,37 +9,60 @@ namespace smart_locking_be.API.Controllers;
 [ApiController, Route("api/operations"), Authorize(Roles = "Administrator,LockerOperator")]
 public sealed class OperationsController(IOperationsService service) : ControllerBase
 {
-    [HttpGet("lockers")] public Task<IActionResult> Lockers(CancellationToken ct) => Execute((id, role) => service.GetLockersAsync(id, role, ct));
-    [HttpGet("search")] public Task<IActionResult> Search([FromQuery] string? query, [FromQuery] Guid? lockerId, CancellationToken ct) => Execute((id, role) => service.SearchAsync(id, role, query, lockerId, ct));
-    [HttpPost("emergency-unlocks")] public Task<IActionResult> Emergency(EmergencyUnlockRequest request, CancellationToken ct) => Execute((id, role) => service.EmergencyUnlockAsync(id, role, request, ct));
-    [HttpPatch("lockers/{lockerId:guid}/status")] public Task<IActionResult> LockerStatus(Guid lockerId, UpdateOperationalStatusRequest request, CancellationToken ct) => Execute(async (id, role) => { await service.UpdateLockerStatusAsync(id, role, lockerId, request, ct); return new { success = true }; });
-    [HttpPatch("lockers/{lockerId:guid}/compartments/{compartmentId:guid}/status")] public Task<IActionResult> CompartmentStatus(Guid lockerId, Guid compartmentId, UpdateOperationalStatusRequest request, CancellationToken ct) => Execute(async (id, role) => { await service.UpdateCompartmentStatusAsync(id, role, lockerId, compartmentId, request, ct); return new { success = true }; });
-    [HttpGet("maintenance")] public Task<IActionResult> Maintenance(CancellationToken ct) => Execute((id, role) => service.GetMaintenanceAsync(id, role, ct));
-    [HttpPost("maintenance")] public Task<IActionResult> CreateMaintenance(CreateMaintenanceRequest request, CancellationToken ct) => Execute((id, role) => service.CreateMaintenanceAsync(id, role, request, ct));
-    [HttpPatch("maintenance/{id:guid}")] public Task<IActionResult> UpdateMaintenance(Guid id, UpdateMaintenanceRequest request, CancellationToken ct) => Execute((user, role) => service.UpdateMaintenanceAsync(user, role, id, request, ct));
-    [HttpPost("overdue/{parcelId:guid}/transfer")] public Task<IActionResult> Transfer(Guid parcelId, CancellationToken ct) => Execute((id, role) => service.TransferOverdueAsync(id, role, parcelId, ct));
+    private Guid Actor => User.GetRequiredIdentity().UserId;
+    private string Role => User.GetRequiredIdentity().Role;
 
-    private async Task<IActionResult> Execute<T>(Func<Guid, string, Task<T>> action)
+    [HttpGet("lockers")]
+    public async Task<IActionResult> Lockers(CancellationToken ct) => Ok(await service.GetLockersAsync(Actor, Role, ct));
+    [HttpGet("search")]
+    public async Task<IActionResult> Search([FromQuery] string? query, [FromQuery] Guid? lockerId, CancellationToken ct)
+        => Ok(await service.SearchAsync(Actor, Role, query, lockerId, ct));
+    [HttpPost("emergency-unlocks")]
+    public async Task<IActionResult> Emergency(EmergencyUnlockRequest request, CancellationToken ct)
+        => Ok(await service.EmergencyUnlockAsync(Actor, Role, request, ct));
+    [HttpPatch("lockers/{lockerId:guid}/status")]
+    public async Task<IActionResult> LockerStatus(Guid lockerId, UpdateOperationalStatusRequest request, CancellationToken ct)
     {
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid id)) return Unauthorized();
-        string role = User.FindFirstValue(ClaimTypes.Role) ?? string.Empty;
-        try { return Ok(await action(id, role)); }
-        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
-        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
-        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        await service.UpdateLockerStatusAsync(Actor, Role, lockerId, request, ct);
+        return Ok(new { success = true });
     }
+    [HttpPatch("lockers/{lockerId:guid}/compartments/{compartmentId:guid}/status")]
+    public async Task<IActionResult> CompartmentStatus(Guid lockerId, Guid compartmentId, UpdateOperationalStatusRequest request, CancellationToken ct)
+    {
+        await service.UpdateCompartmentStatusAsync(Actor, Role, lockerId, compartmentId, request, ct);
+        return Ok(new { success = true });
+    }
+    [HttpGet("maintenance")]
+    public async Task<IActionResult> Maintenance(CancellationToken ct) => Ok(await service.GetMaintenanceAsync(Actor, Role, ct));
+    [HttpPost("maintenance")]
+    public async Task<IActionResult> CreateMaintenance(CreateMaintenanceRequest request, CancellationToken ct)
+        => Ok(await service.CreateMaintenanceAsync(Actor, Role, request, ct));
+    [HttpPatch("maintenance/{id:guid}")]
+    public async Task<IActionResult> UpdateMaintenance(Guid id, UpdateMaintenanceRequest request, CancellationToken ct)
+        => Ok(await service.UpdateMaintenanceAsync(Actor, Role, id, request, ct));
+
+    // Gọi sau khi nhân viên đã lấy hàng bằng luồng mở vận hành riêng.
+    // 202 nghĩa còn chờ ESP thu hồi PIN; chưa báo hàng đã chuyển hoặc ngăn đã trống.
+    [HttpPost("overdue/{parcelId:guid}/transfer")]
+    public async Task<IActionResult> Transfer(Guid parcelId, CancellationToken ct)
+    {
+        var response = await service.TransferOverdueAsync(Actor, Role, parcelId, ct);
+        return response.ResetStatus == "Pending" ? Accepted(response) : Ok(response);
+    }
+
 }
 
 [ApiController, Route("api/operations/reports"), Authorize(Roles = "Administrator")]
 public sealed class LegacyOperationsReportsController(IOperationsService service) : ControllerBase
 {
-    [HttpGet("summary")] public async Task<IActionResult> Summary([FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, CancellationToken ct)
+    [HttpGet("summary")]
+    public async Task<IActionResult> Summary([FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, CancellationToken ct)
     {
         DateTimeOffset end = to ?? DateTimeOffset.UtcNow; DateTimeOffset start = from ?? end.AddDays(-30);
-        try { return Ok(await service.GetReportAsync(start, end, ct)); } catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+        return Ok(await service.GetReportAsync(start, end, ct));
     }
-    [HttpGet("export.csv")] public async Task<IActionResult> Export([FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, CancellationToken ct)
+    [HttpGet("export.csv")]
+    public async Task<IActionResult> Export([FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, CancellationToken ct)
     {
         DateTimeOffset end = to ?? DateTimeOffset.UtcNow; DateTimeOffset start = from ?? end.AddDays(-30);
         OperationsReportResponse r = await service.GetReportAsync(start, end, ct);

@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.RateLimiting;
 using smart_locking_be.API.Constants;
 using smart_locking_be.Application.DTOs.Auth;
 using smart_locking_be.Application.Interfaces.Services;
-using System.Security.Claims;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -20,29 +19,8 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
 
     [HttpPost("register")]
     [AllowAnonymous]
-    public async Task<IActionResult> Register(RegisterRequest request, CancellationToken cancellationToken)
-    {
-        try
-        {
-            return Ok(await authService.RegisterAsync(request, GetIpAddress(), cancellationToken));
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception) when (exception.Message == "User already exists.")
-        {
-            return Conflict(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-    }
+    public async Task<IActionResult> Register(RegisterRequest request, CancellationToken cancellationToken) =>
+        Ok(await authService.RegisterAsync(request, GetIpAddress(), cancellationToken));
 
     [HttpPost("registration-otp/request")]
     [AllowAnonymous]
@@ -50,58 +28,34 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         RequestRegistrationOtpRequest request,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            await authService.RequestRegistrationOtpAsync(request, cancellationToken);
-            return NoContent();
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
+        await authService.RequestRegistrationOtpAsync(request, cancellationToken);
+        return NoContent();
     }
 
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<IActionResult> Login(LoginRequest request, CancellationToken cancellationToken) =>
-        await Handle(() => authService.LoginAsync(request, GetIpAddress(), cancellationToken));
+        Ok(await authService.LoginAsync(request, GetIpAddress(), cancellationToken));
 
     [HttpPost("refresh-token")]
     [AllowAnonymous]
     public async Task<IActionResult> RefreshToken(RefreshTokenRequest request, CancellationToken cancellationToken) =>
-        await Handle(() => authService.RefreshTokenAsync(request, GetIpAddress(), cancellationToken));
+        Ok(await authService.RefreshTokenAsync(request, GetIpAddress(), cancellationToken));
 
     [HttpPost("logout")]
     [AllowAnonymous]
     public async Task<IActionResult> Logout(RefreshTokenRequest request, CancellationToken cancellationToken)
     {
-        try
-        {
-            await authService.LogoutAsync(request, GetIpAddress(), cancellationToken);
-
-            return NoContent();
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
+        await authService.LogoutAsync(request, GetIpAddress(), cancellationToken);
+        return NoContent();
     }
 
     [HttpGet("me")]
     [Authorize]
     public async Task<IActionResult> Me(CancellationToken cancellationToken)
     {
-        string? userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userId, out Guid parsedUserId))
-        {
-            return Unauthorized();
-        }
-
-        return await Handle(() => authService.GetCurrentUserAsync(parsedUserId, cancellationToken));
+        Guid parsedUserId = User.GetRequiredUserId();
+        return Ok(await authService.GetCurrentUserAsync(parsedUserId, cancellationToken));
     }
 
     [HttpPost("forgot-password")]
@@ -110,16 +64,8 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         RequestPasswordResetRequest request,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            await authService.RequestPasswordResetAsync(request, cancellationToken);
-
-            return NoContent();
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
+        await authService.RequestPasswordResetAsync(request, cancellationToken);
+        return NoContent();
     }
 
     [HttpPost("reset-password")]
@@ -128,32 +74,8 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         ResetPasswordRequest request,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            await authService.ResetPasswordAsync(request, GetIpAddress(), cancellationToken);
-
-            return NoContent();
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-    }
-
-    private async Task<IActionResult> Handle<TResponse>(Func<Task<TResponse>> action)
-    {
-        try
-        {
-            return Ok(await action());
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return NotFound(new { message = exception.Message });
-        }
+        await authService.ResetPasswordAsync(request, GetIpAddress(), cancellationToken);
+        return NoContent();
     }
 
     private string? GetIpAddress() => HttpContext.Connection.RemoteIpAddress?.ToString();
@@ -163,11 +85,8 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         ChangePasswordRequest request,
         CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
-            return Unauthorized();
-        return await Handle(() => authService.ChangePasswordAsync(
+        Guid userId = User.GetRequiredUserId();
+        return Ok(await authService.ChangePasswordAsync(
             userId, request, GetIpAddress(), cancellationToken));
     }
-
-
 }

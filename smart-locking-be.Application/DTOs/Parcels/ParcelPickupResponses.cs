@@ -1,6 +1,6 @@
 using smart_locking_be.Application.DTOs.Lockers;
-using System.Text.Json.Serialization;
 using smart_locking_be.Domain.Enums;
+using System.Text.Json.Serialization;
 
 namespace smart_locking_be.Application.DTOs.Parcels;
 

@@ -21,12 +21,16 @@ public interface ICompartmentResetStore
     Task<string?> GetLastFailureAsync(Guid commandId, CancellationToken ct);
     Task<ReturnRequest?> FindReturnAsync(Guid subjectId, CancellationToken ct);
     Task<DeliveryRequest?> FindDeliveryAsync(Guid subjectId, CancellationToken ct);
+    Task<Parcel?> FindTransferParcelAsync(Guid parcelId, CancellationToken ct);
+    Task<List<AuditLog>> GetPendingRequestsAsync(CancellationToken ct);
+    Task<List<AuditLog>> GetAppliedRequestsAsync(Guid slotId, CancellationToken ct);
     Task<List<Parcel>> GetStoredParcelsAsync(Guid deliveryId, CancellationToken ct);
     Task<List<CompartmentReservation>> GetReservationsAsync(Guid slotId, Guid subjectId, CancellationToken ct);
     Task<List<OfflineLockerPin>> GetPinsAsync(Guid subjectId, CancellationToken ct);
     void Add(AuditLog audit);
     void Add(ParcelStatusHistory history);
     void Add(LockerEvent lockerEvent);
+    void Add(Notification notification);
     Task SaveChangesAsync(CancellationToken ct);
     Task<ICompartmentResetTransaction?> BeginTransactionAsync(CancellationToken ct);
 }

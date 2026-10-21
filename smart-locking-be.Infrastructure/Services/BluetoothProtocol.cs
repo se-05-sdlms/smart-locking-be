@@ -23,16 +23,16 @@ public sealed class BluetoothProtocol : IBluetoothMessageCodec, ICompartmentRese
     public CompartmentResetReceipt ParseResetReceipt(string proof)
     {
         if (string.IsNullOrEmpty(proof) || proof.Length > 300)
-            throw new ArgumentException("Phản hồi đặt lại không hợp lệ.");
+            throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Phản hồi đặt lại không hợp lệ.");
 
         string[] fields = proof.Split('|');
         if (fields.Length != 7 || fields[0] != "z2" || !Guid.TryParseExact(fields[1], "N", out var commandId) ||
             !int.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out int channel) || channel is < 1 or > 4 ||
             !Guid.TryParseExact(fields[4], "N", out var subjectId) || fields[5] is not ("OPEN" or "CLOSED" or "UNKNOWN"))
-            throw new ArgumentException("Phản hồi đặt lại không hợp lệ.");
+            throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Phản hồi đặt lại không hợp lệ.");
 
         if (fields[6] != "OK" && (!fields[6].StartsWith("FAIL_", StringComparison.Ordinal) || fields[6].Length > 80))
-            throw new ArgumentException("Kết quả không hợp lệ.");
+            throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Kết quả không hợp lệ.");
 
         var door = fields[5] == "CLOSED" ? DoorStatus.Closed : fields[5] == "OPEN" ? DoorStatus.Open : DoorStatus.Unknown;
         return new(commandId, fields[2], channel, subjectId, door, fields[6]);
@@ -52,7 +52,7 @@ public sealed class BluetoothProtocol : IBluetoothMessageCodec, ICompartmentRese
             !long.TryParse(f[10], NumberStyles.None, CultureInfo.InvariantCulture, out long elapsed) || elapsed < 50 ||
             !long.TryParse(f[11], NumberStyles.None, CultureInfo.InvariantCulture, out long sequence) || sequence < 1 ||
             (opened != 0 && closed != 0 && closed < opened))
-            throw new ArgumentException("Invalid offline PIN event.");
+            throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Invalid offline PIN event.");
         return new(id, deliveryId, device, channel, f[5], f[6], f[7], opened, closed, elapsed, sequence);
     }
 
@@ -60,7 +60,7 @@ public sealed class BluetoothProtocol : IBluetoothMessageCodec, ICompartmentRese
     {
         string[] fields = ReadMessage(proof, device).Split('|');
         if (fields.Length != 3 || fields[0] != "q1" || !Guid.TryParseExact(fields[1], "N", out Guid id) || !Regex.IsMatch(fields[2], "^[0-9]{6}$"))
-            throw new ArgumentException("Invalid PIN provisioning confirmation.");
+            throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Invalid PIN provisioning confirmation.");
         return (id, fields[2]);
     }
 
@@ -79,7 +79,7 @@ public sealed class BluetoothProtocol : IBluetoothMessageCodec, ICompartmentRese
         string[] f = ReadMessage(permit, device).Split('|');
         if (f.Length != 5 || f[0] != "r1" || (f[1] != "*" && f[1] != device) || !Guid.TryParseExact(f[2], "N", out var user) ||
             !Regex.IsMatch(f[3], "^0[0-9]{9}$") || !long.TryParse(f[4], out long expiry) || expiry <= now.ToUnixTimeSeconds())
-            throw new UnauthorizedAccessException("Quyen resident khong hop le hoac da het han.");
+            throw new ForbiddenException(BluetoothErrorCodes.AccessDenied, "Quyen resident khong hop le hoac da het han.");
         return (user, f[3]);
     }
 
@@ -87,7 +87,7 @@ public sealed class BluetoothProtocol : IBluetoothMessageCodec, ICompartmentRese
     {
         if (!Regex.IsMatch(device, "^[A-Za-z0-9_-]{1,100}$") || string.IsNullOrEmpty(value) || value.Length > 512 ||
             value.Any(c => c < 32 || c > 126))
-            throw new ArgumentException("Invalid Bluetooth message.");
+            throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Invalid Bluetooth message.");
         return value;
     }
 }

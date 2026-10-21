@@ -15,24 +15,13 @@ public sealed class ImagesController(IImageStorageService imageStorageService) :
     public async Task<IActionResult> UploadImage(IFormFile file, CancellationToken cancellationToken)
     {
         if (file.Length == 0 || file.Length > 8 * 1024 * 1024)
-            return BadRequest(new { message = "Ảnh phải là JPG, PNG hoặc WEBP và không vượt quá 8 MB." });
-        try
-        {
-            await using Stream stream = file.OpenReadStream();
-            string path = await imageStorageService.UploadAsync(stream, file.FileName, file.ContentType, cancellationToken);
-            string url = Uri.IsWellFormedUriString(path, UriKind.Absolute)
-                ? path
-                : $"{Request.Scheme}://{Request.Host}{path}";
-            return StatusCode(StatusCodes.Status201Created, new { url });
-        }
-        catch (ArgumentException exception)
-        {
-            return BadRequest(new { message = exception.Message });
-        }
-        catch (HttpRequestException)
-        {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable,
-                new { message = "Dịch vụ lưu trữ ảnh hiện không khả dụng. Vui lòng thử lại sau." });
-        }
+            throw new BadRequestException(ImageErrorCodes.InvalidImage, "Image must be JPG, PNG, or WEBP and no larger than 8 MB.");
+
+        await using Stream stream = file.OpenReadStream();
+        string path = await imageStorageService.UploadAsync(stream, file.FileName, file.ContentType, cancellationToken);
+        string url = Uri.IsWellFormedUriString(path, UriKind.Absolute)
+            ? path
+            : $"{Request.Scheme}://{Request.Host}{path}";
+        return StatusCode(StatusCodes.Status201Created, new { url });
     }
 }

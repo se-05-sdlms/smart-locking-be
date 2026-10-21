@@ -7,5 +7,6 @@ public sealed record AdminDashboardResponse(
     IReadOnlyList<DailyParcelStatisticResponse> RecentParcelsTrend,
     IReadOnlyList<AttentionLockerResponse> AttentionLockers,
     IReadOnlyList<RecentLockerResponse> RecentLockers,
-    IReadOnlyList<RecentAuditLogResponse> RecentAuditLogs
+    IReadOnlyList<RecentAuditLogResponse> RecentAuditLogs,
+    DateTimeOffset GeneratedAt
 );

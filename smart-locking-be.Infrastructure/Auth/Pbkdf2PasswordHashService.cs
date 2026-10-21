@@ -14,7 +14,7 @@ public sealed class Pbkdf2PasswordHashService : IPasswordHashService
     {
         if (string.IsNullOrWhiteSpace(password))
         {
-            throw new ArgumentException("Password is required.", nameof(password));
+            throw BadRequestException.For("password", "Password is required.");
         }
 
         byte[] salt = RandomNumberGenerator.GetBytes(SaltSize);

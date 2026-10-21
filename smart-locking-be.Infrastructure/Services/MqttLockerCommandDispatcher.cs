@@ -17,28 +17,34 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
             return;
         }
 
-        var options = BuildMqttClientOptions();
-        using var client = new MqttClientFactory().CreateMqttClient();
-        await client.ConnectAsync(options, cancellationToken);
-        var message = new MqttApplicationMessageBuilder()
-            .WithTopic($"lockers/{command.DeviceIdentifier}/doors/{command.HardwareChannel}")
-            .WithPayload(command.WorkflowCommand ?? (command.OperatorOverride ? "OPEN:OPERATOR" : command.DeliveryId.HasValue ? $"OPEN:{command.DeliveryId.Value:N}" : "OPEN"))
-            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-            .Build();
-        await client.PublishAsync(message, cancellationToken);
-        await client.DisconnectAsync(cancellationToken: cancellationToken);
+        await PublishAsync($"lockers/{command.DeviceIdentifier}/doors/{command.HardwareChannel}",
+            command.WorkflowCommand ?? (command.OperatorOverride ? "OPEN:OPERATOR" : command.DeliveryId.HasValue ? $"OPEN:{command.DeliveryId.Value:N}" : "OPEN"), cancellationToken);
     }
 
-    // Lệnh đặt lại trạng thái không đi qua nhánh tạo lệnh mở relay.
-    public async Task DispatchResetAsync(string device, int channel, string command, CancellationToken ct = default)
+    // Reset/thu hồi không dùng nhánh tạo OPEN và không được báo thành công giả ở chế độ mô phỏng.
+    public Task DispatchResetAsync(string device, int channel, string command, CancellationToken ct = default)
     {
         if (bool.TryParse(configuration["Mqtt:Simulate"], out bool simulate) && simulate)
-            throw new InvalidOperationException("Không gửi lệnh đặt lại thật trong chế độ mô phỏng.");
-        using var client = new MqttClientFactory().CreateMqttClient();
-        await client.ConnectAsync(BuildMqttClientOptions(), ct);
-        await client.PublishAsync(new MqttApplicationMessageBuilder().WithTopic($"lockers/{device}/doors/{channel}")
-            .WithPayload(command).WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build(), ct);
-        await client.DisconnectAsync(cancellationToken: ct);
+            throw new ConflictException(BluetoothErrorCodes.InvalidState, "Không gửi lệnh đặt lại thật trong chế độ mô phỏng.");
+        return PublishAsync($"lockers/{device}/doors/{channel}", command, ct);
+    }
+
+    private async Task PublishAsync(string topic, string payload, CancellationToken ct)
+    {
+        var options = BuildMqttClientOptions();
+        try
+        {
+            using var client = new MqttClientFactory().CreateMqttClient();
+            await client.ConnectAsync(options, ct);
+            await client.PublishAsync(new MqttApplicationMessageBuilder().WithTopic(topic).WithPayload(payload)
+                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build(), ct);
+            await client.DisconnectAsync(cancellationToken: ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            throw new ServiceUnavailableException(LockerErrorCodes.OpenFailed, "Cannot connect to the locker.", exception);
+        }
     }
 
     private MqttClientOptions BuildMqttClientOptions()
@@ -46,7 +52,7 @@ public sealed class MqttLockerCommandDispatcher(IConfiguration configuration) : 
         string host = configuration["Mqtt:Host"]?.Trim() ?? string.Empty;
         if (host.Length == 0)
         {
-            throw new InvalidOperationException("MQTT broker chưa được cấu hình.");
+            throw new InternalServerException("MQTT broker is not configured.");
         }
 
         int port = int.TryParse(configuration["Mqtt:Port"], out int configuredPort)

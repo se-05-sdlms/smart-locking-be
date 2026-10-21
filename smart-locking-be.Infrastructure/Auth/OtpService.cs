@@ -124,8 +124,8 @@ public sealed class OtpService(
         string normalized = phoneNumber.Trim();
         return PhonePattern.IsMatch(normalized)
             ? normalized
-            : throw new ArgumentException("Phone number must contain 10 digits and start with 0.", nameof(phoneNumber));
+            : throw BadRequestException.For("phoneNumber", "Phone number must contain 10 digits and start with 0.");
     }
 
-    private static InvalidOperationException InvalidOtp() => new("Invalid OTP.");
+    private static BadRequestException InvalidOtp() => new(AuthErrorCodes.InvalidOtp, "Invalid OTP.");
 }
