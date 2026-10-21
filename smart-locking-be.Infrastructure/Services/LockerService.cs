@@ -120,6 +120,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     }
 
     public async Task<LockerDetailResponse> CreateLockerAsync(
+        Guid actorUserId,
         CreateLockerRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -155,6 +156,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         };
 
         dbContext.Lockers.Add(locker);
+        dbContext.AuditLogs.Add(CreateAudit(actorUserId, "Locker.Created", nameof(Locker), locker.Id, null, now));
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return MapToDetailResponse(locker);
@@ -204,6 +206,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         locker.DeviceIdentifier = deviceIdentifier;
         locker.OperationalStatus = request.OperationalStatus;
         locker.UpdatedAt = now;
+        dbContext.AuditLogs.Add(CreateAudit(actorUserId, "Locker.Updated", nameof(Locker), locker.Id, null, now));
 
         if (previousStatus != locker.OperationalStatus)
         {
@@ -299,6 +302,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     }
 
     public async Task<LockerCompartmentResponse> CreateCompartmentAsync(
+        Guid actorUserId,
         Guid lockerId,
         CreateCompartmentRequest request,
         CancellationToken cancellationToken = default)
@@ -350,6 +354,8 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         };
 
         dbContext.LockerCompartments.Add(compartment);
+        dbContext.AuditLogs.Add(CreateAudit(actorUserId, "LockerCompartment.Created", nameof(LockerCompartment), compartment.Id,
+            $"LockerId={lockerId}", now));
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return MapCompartmentToResponse(compartment);
@@ -476,7 +482,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     }
 
     private static AuditLog CreateAudit(Guid actorUserId, string action, string entityType, Guid entityId,
-        string details, DateTimeOffset now) => new()
+        string? details, DateTimeOffset now) => new()
         {
             Id = Guid.NewGuid(),
             ActorUserId = actorUserId,

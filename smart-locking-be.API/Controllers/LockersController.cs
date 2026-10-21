@@ -39,7 +39,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         [FromBody] CreateLockerRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await lockerService.CreateLockerAsync(request, cancellationToken);
+        var result = await lockerService.CreateLockerAsync(User.GetRequiredUserId(), request, cancellationToken);
         return CreatedAtAction(nameof(GetLockerById), new { id = result.Id }, result);
     }
 
@@ -99,7 +99,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         [FromBody] CreateCompartmentRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await lockerService.CreateCompartmentAsync(id, request, cancellationToken);
+        var result = await lockerService.CreateCompartmentAsync(User.GetRequiredUserId(), id, request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
