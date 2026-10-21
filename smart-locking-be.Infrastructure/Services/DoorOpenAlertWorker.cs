@@ -57,17 +57,21 @@ public sealed class DoorOpenAlertWorker(
                 .Where(item => item.LockerCompartmentId == compartment.Id && item.EventType == LockerEventType.DoorChanged)
                 .OrderByDescending(item => item.OccurredAt)
                 .FirstOrDefaultAsync(cancellationToken);
-            if (opened?.NewValue != nameof(DoorStatus.Open) || opened.OccurredAt > now - timeout) continue;
+            if (opened is not null && opened.NewValue != nameof(DoorStatus.Open)) continue;
+            DateTimeOffset openedAt = opened?.OccurredAt ?? compartment.DoorStatusObservedAt ?? compartment.UpdatedAt;
+            DateTimeOffset receivedAt = opened?.ReceivedAt ?? openedAt;
+            DateTimeOffset alertSince = opened?.ReceivedAt ?? DateTimeOffset.MinValue;
+            if (openedAt > now - timeout) continue;
 
             bool alerted = await dbContext.Incidents.AnyAsync(item =>
                 item.LockerCompartmentId == compartment.Id && item.Type == "DoorOpenTooLong" &&
-                item.CreatedAt >= opened.ReceivedAt, cancellationToken);
+                item.CreatedAt >= alertSince, cancellationToken);
             if (alerted) continue;
 
             LockerAccessEvent? access = await dbContext.LockerAccessEvents.AsNoTracking()
                 .Where(item => item.LockerCompartmentId == compartment.Id &&
                     item.Result == LockerAccessResult.Succeeded &&
-                    item.OccurredAt <= opened.ReceivedAt && item.OccurredAt >= opened.ReceivedAt.AddMinutes(-2))
+                    item.OccurredAt <= receivedAt && item.OccurredAt >= receivedAt.AddMinutes(-2))
                 .OrderByDescending(item => item.OccurredAt)
                 .FirstOrDefaultAsync(cancellationToken);
             Guid? operatorId = await dbContext.OperatorAssignments
@@ -89,7 +93,7 @@ public sealed class DoorOpenAlertWorker(
                 Source = IncidentSource.System,
                 Status = IncidentStatus.Open,
                 Title = title,
-                Description = $"Door has been open since {opened.OccurredAt:O}.",
+                Description = $"Door has been open since {openedAt:O}.",
                 CreatedAt = now,
                 UpdatedAt = now
             };
