@@ -105,7 +105,8 @@ public static class DependencyInjection
 
         services.AddHostedService<MqttLockerListenerService>();
         services.AddScoped<LockerConnectionMonitor>();
-        services.AddHostedService<LockerConnectionWorker>();
+        if (configuration.GetValue<bool>("LockerMonitoring:Enabled"))
+            services.AddHostedService<LockerConnectionWorker>();
 
         services.AddScoped<INotificationRuleService, NotificationRuleService>();
 
