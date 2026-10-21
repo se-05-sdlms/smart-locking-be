@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using smart_locking_be.Application.DTOs.Payments;
 using smart_locking_be.Application.Interfaces.Services;
@@ -12,7 +13,7 @@ using System.Security.Cryptography;
 namespace smart_locking_be.Infrastructure.Services;
 
 public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatewayService gateway,
-    IOptions<PayOSOptions> options, TimeProvider clock) : IOverduePaymentService
+    IOptions<PayOSOptions> options, TimeProvider clock, ILogger<OverduePaymentService> logger) : IOverduePaymentService
 {
     public async Task<OverduePaymentResponse> CreateCheckoutAsync(Guid residentUserId, Guid chargeId,
         CancellationToken cancellationToken = default)
@@ -38,6 +39,52 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
         PaymentTransaction? payment = await db.PaymentTransactions
             .SingleOrDefaultAsync(item => item.OverdueChargeId == chargeId &&
                 item.Status == PaymentTransactionStatus.Pending, cancellationToken);
+        DateTimeOffset now = clock.GetUtcNow();
+        if (payment is not null && (payment.CheckoutUrl is not null || payment.RequestedAt.AddMinutes(15) <= now))
+        {
+            long existingCode = long.Parse(payment.ExternalOrderCode!, CultureInfo.InvariantCulture);
+            string? status;
+            try
+            {
+                status = await gateway.GetPaymentLinkStatusAsync(existingCode, cancellationToken);
+            }
+            catch (ServiceUnavailableException) when (payment.CheckoutUrl is null)
+            {
+                // The original create call may have failed before PayOS received the order.
+                status = null;
+            }
+            if (status == "PENDING" && payment.RequestedAt.AddMinutes(15) <= now)
+                status = await gateway.CancelPaymentLinkAsync(existingCode, cancellationToken);
+
+            if (status is "CANCELLED" or "EXPIRED")
+            {
+                payment.Status = PaymentTransactionStatus.Cancelled;
+                payment.CompletedAt = now;
+                payment.FailureReason = "Payment link cancelled or expired.";
+                DateTimeOffset cutoff = now > charge.Parcel.MaxStorageUntil ? charge.Parcel.MaxStorageUntil : now;
+                int billableHours = (int)Math.Ceiling((cutoff - charge.Parcel.PickupDueAt).TotalHours);
+                charge.Amount = billableHours * charge.RatePerHourSnapshot;
+                charge.CalculatedThrough = cutoff;
+                charge.UpdatedAt = now;
+                await db.SaveChangesAsync(cancellationToken);
+                if (charge.Amount <= 0 || charge.Amount > int.MaxValue || decimal.Truncate(charge.Amount) != charge.Amount)
+                {
+                    if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+                    throw new BadRequestException(PaymentErrorCodes.InvalidRequest, "PayOS requires a positive whole VND amount.");
+                }
+                payment = null;
+            }
+            else if (status == "PENDING")
+            {
+                if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+                return Map(payment);
+            }
+            else if (status is not null)
+            {
+                throw new ConflictException(PaymentErrorCodes.InvalidRequest,
+                    "Payment is being processed; wait for the verified webhook before trying again.");
+            }
+        }
         if (payment is null)
         {
             long orderCode = (BitConverter.ToInt64(RandomNumberGenerator.GetBytes(8)) & 0x000FFFFFFFFFFFFF) + 1;
@@ -49,7 +96,7 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
                 Amount = charge.Amount,
                 Currency = charge.Currency,
                 Status = PaymentTransactionStatus.Pending,
-                RequestedAt = clock.GetUtcNow()
+                RequestedAt = now
             };
             db.PaymentTransactions.Add(payment);
             await db.SaveChangesAsync(cancellationToken);
@@ -60,7 +107,8 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
         // Persist the order before calling PayOS so a fast webhook or provider timeout remains reconcilable.
         long code = long.Parse(payment.ExternalOrderCode!, CultureInfo.InvariantCulture);
         CreatePaymentLinkResult link = await gateway.CreatePaymentLinkAsync(new(code, checked((int)payment.Amount),
-            "Overdue storage fee", options.Value.OverdueReturnUrl, options.Value.OverdueCancelUrl), cancellationToken);
+            "Overdue storage fee", options.Value.OverdueReturnUrl, options.Value.OverdueCancelUrl,
+            clock.GetUtcNow().AddMinutes(15)), cancellationToken);
         payment.CheckoutUrl = link.CheckoutUrl;
         await db.SaveChangesAsync(cancellationToken);
         return Map(payment);
@@ -99,7 +147,10 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
             .SingleAsync(item => item.ExternalOrderCode == orderCode, cancellationToken);
         if (payment.Amount != webhook.Amount || payment.Currency != webhook.Currency ||
             string.IsNullOrWhiteSpace(webhook.Reference) || webhook.Reference.Length > 150)
-            throw new BadRequestException(PaymentErrorCodes.InvalidWebhook, "Payment amount or reference is invalid.");
+        {
+            logger.LogWarning("Ignoring PayOS webhook with mismatched payment data for order {OrderCode}.", orderCode);
+            return true;
+        }
         if (payment.Status != PaymentTransactionStatus.Pending) return true;
 
         DateTimeOffset now = clock.GetUtcNow();

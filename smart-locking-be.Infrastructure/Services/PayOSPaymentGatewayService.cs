@@ -24,7 +24,8 @@ public sealed class PayOSPaymentGatewayService(IOptions<PayOSOptions> options) :
         try
         {
             var result = await client.createPaymentLink(new PaymentData(request.OrderCode, request.Amount,
-                request.Description, [], request.CancelUrl, request.ReturnUrl));
+                request.Description, [], request.CancelUrl, request.ReturnUrl,
+                expiredAt: request.ExpiresAt is null ? null : checked((int)request.ExpiresAt.Value.ToUnixTimeSeconds())));
             return new(result.checkoutUrl, result.paymentLinkId, result.qrCode);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -36,6 +37,34 @@ public sealed class PayOSPaymentGatewayService(IOptions<PayOSOptions> options) :
             throw new ServiceUnavailableException(
                 PaymentErrorCodes.Unavailable, "Payment service is currently unavailable.",
                 exception);
+        }
+    }
+
+    public async Task<string> GetPaymentLinkStatusAsync(long orderCode, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            return (await CreateClient().getPaymentLinkInformation(orderCode)).status;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new ServiceUnavailableException(PaymentErrorCodes.Unavailable,
+                "Payment status is currently unavailable.", exception);
+        }
+    }
+
+    public async Task<string> CancelPaymentLinkAsync(long orderCode, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            return (await CreateClient().cancelPaymentLink(orderCode, "Checkout expired")).status;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new ServiceUnavailableException(PaymentErrorCodes.Unavailable,
+                "Payment cancellation is currently unavailable.", exception);
         }
     }
 
