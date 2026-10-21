@@ -26,6 +26,8 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
         IQueryable<DeliveryRequest> deliveries = dbContext.DeliveryRequests.Include(item => item.Locker).Where(item => scope.Contains(item.LockerId));
         IQueryable<MaintenanceRequest> maintenance = dbContext.MaintenanceRequests.Include(item => item.Locker).Where(item => scope.Contains(item.LockerId));
         IQueryable<LockerEvent> events = dbContext.LockerEvents.Include(item => item.Locker).Where(item => scope.Contains(item.LockerId));
+        IQueryable<EmergencyUnlock> unlocks = dbContext.EmergencyUnlocks.Include(item => item.Locker)
+            .Where(item => scope.Contains(item.LockerId));
         IQueryable<Locker> lockers = dbContext.Lockers.Where(item => scope.Contains(item.Id));
         IQueryable<LockerCompartment> compartments = dbContext.LockerCompartments.Include(item => item.Locker).Where(item => scope.Contains(item.LockerId));
         if (lockerId.HasValue)
@@ -36,6 +38,7 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
             deliveries = deliveries.Where(item => item.LockerId == lockerId);
             maintenance = maintenance.Where(item => item.LockerId == lockerId);
             events = events.Where(item => item.LockerId == lockerId);
+            unlocks = unlocks.Where(item => item.LockerId == lockerId);
             lockers = lockers.Where(item => item.Id == lockerId);
             compartments = compartments.Where(item => item.LockerId == lockerId);
         }
@@ -49,6 +52,7 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
             maintenance = maintenance.Where(item => item.Description.Contains(term));
             events = events.Where(item =>
                 (item.Details != null && item.Details.Contains(term)) || (item.Reason != null && item.Reason.Contains(term)));
+            unlocks = unlocks.Where(item => item.Reason.Contains(term) || item.Locker.Code.Contains(term));
             lockers = lockers.Where(item => item.Code.Contains(term) || item.Address.Contains(term));
             compartments = compartments.Where(item => item.Code.Contains(term) || item.HardwareCode.Contains(term));
         }
@@ -60,6 +64,7 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
         result.AddRange(await deliveries.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("DeliveryRequest", item.Id, item.Id.ToString(), item.Status.ToString(), item.Locker.Code, item.RecipientPhoneSnapshot ?? "Delivery request", item.UpdatedAt)).ToListAsync(cancellationToken));
         result.AddRange(await maintenance.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("MaintenanceRequest", item.Id, item.Id.ToString(), item.Status.ToString(), item.Locker.Code, item.Description, item.UpdatedAt)).ToListAsync(cancellationToken));
         result.AddRange(await events.OrderByDescending(item => item.OccurredAt).Select(item => new OperationalRecordResponse("LockerEvent", item.Id, item.Id.ToString(), item.EventType.ToString(), item.Locker.Code, item.Details ?? item.Reason ?? item.EventType.ToString(), item.OccurredAt)).ToListAsync(cancellationToken));
+        result.AddRange(await unlocks.OrderByDescending(item => item.RequestedAt).Select(item => new OperationalRecordResponse("EmergencyUnlock", item.Id, item.Id.ToString(), item.Result.ToString(), item.Locker.Code, item.Reason, item.RequestedAt)).ToListAsync(cancellationToken));
         result.AddRange(await lockers.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("Locker", item.Id, item.Code, item.OperationalStatus.ToString(), item.Code, item.Address, item.UpdatedAt)).ToListAsync(cancellationToken));
         result.AddRange(await compartments.OrderByDescending(item => item.UpdatedAt).Select(item => new OperationalRecordResponse("LockerCompartment", item.Id, item.Code, item.OperationalStatus.ToString(), item.Locker.Code, item.HardwareCode, item.UpdatedAt)).ToListAsync(cancellationToken));
         pageNumber = Math.Max(pageNumber, 1);
@@ -96,7 +101,9 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
                             ["compartmentCode"] = item.DeliveryRequest.AllocatedCompartment?.Code,
                             ["storedAt"] = item.StoredAt.ToString("O"),
                             ["pickupDueAt"] = item.PickupDueAt.ToString("O"),
-                            ["maxStorageUntil"] = item.MaxStorageUntil.ToString("O")
+                            ["maxStorageUntil"] = item.MaxStorageUntil.ToString("O"),
+                            ["removedAt"] = item.RemovedAt.HasValue ? item.RemovedAt.Value.ToString("O") : null,
+                            ["removalReason"] = item.RemovalReason
                         });
                     break;
                 }
@@ -176,6 +183,24 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
                             ["newValue"] = item.NewValue,
                             ["reason"] = item.Reason,
                             ["details"] = item.Details
+                        });
+                    break;
+                }
+            case "emergencyunlock":
+            case "emergency-unlock":
+                {
+                    EmergencyUnlock? item = await dbContext.EmergencyUnlocks.AsNoTracking()
+                        .Include(item => item.Locker).Include(item => item.LockerCompartment)
+                        .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+                    result = item is null ? null : new OperationalRecordDetailResponse(
+                        "EmergencyUnlock", item.Id, item.Id.ToString(), item.Result.ToString(), item.LockerId,
+                        item.Locker.Code, item.RequestedAt, new Dictionary<string, string?>
+                        {
+                            ["compartmentCode"] = item.LockerCompartment?.Code,
+                            ["operatorUserId"] = item.OperatorUserId.ToString(),
+                            ["incidentId"] = item.IncidentId?.ToString(),
+                            ["reason"] = item.Reason,
+                            ["completedAt"] = item.CompletedAt?.ToString("O")
                         });
                     break;
                 }
