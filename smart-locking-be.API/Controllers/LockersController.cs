@@ -30,7 +30,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         [FromBody] CreateLockerRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await lockerService.CreateLockerAsync(request, cancellationToken);
+        var result = await lockerService.CreateLockerAsync(User.GetRequiredUserId(), request, cancellationToken);
         return CreatedAtAction(nameof(GetLockerById), new { id = result.Id }, result);
     }
 
@@ -55,7 +55,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         [FromBody] UpdateLockerRequest request,
         CancellationToken cancellationToken)
     {
-        return Ok(await lockerService.UpdateLockerAsync(id, request, cancellationToken));
+        return Ok(await lockerService.UpdateLockerAsync(User.GetRequiredUserId(), id, request, cancellationToken));
     }
 
     /// <summary>
@@ -65,7 +65,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     [Authorize(Roles = "Administrator")]
     public async Task<IActionResult> SoftDeleteLocker(Guid id, CancellationToken cancellationToken)
     {
-        await lockerService.SoftDeleteLockerAsync(id, cancellationToken);
+        await lockerService.SoftDeleteLockerAsync(User.GetRequiredUserId(), id, cancellationToken);
         return NoContent();
     }
 
@@ -90,7 +90,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         [FromBody] CreateCompartmentRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await lockerService.CreateCompartmentAsync(id, request, cancellationToken);
+        var result = await lockerService.CreateCompartmentAsync(User.GetRequiredUserId(), id, request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, result);
     }
 

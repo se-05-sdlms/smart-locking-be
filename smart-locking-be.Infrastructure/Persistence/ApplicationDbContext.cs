@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using smart_locking_be.Domain.Entities;
+using smart_locking_be.Domain.Enums;
 
 namespace smart_locking_be.Infrastructure.Persistence;
 
@@ -38,14 +39,44 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        AddStatusAudits();
         EnforceAuditLogImmutability();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        AddStatusAudits();
         EnforceAuditLogImmutability();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void AddStatusAudits()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries().Where(item => item.State == EntityState.Modified &&
+            item.Entity is not AuditLog).ToArray())
+        {
+            string[] changes = entry.Properties
+                .Where(property => property.IsModified &&
+                    (property.Metadata.Name.EndsWith("Status", StringComparison.Ordinal) ||
+                     property.Metadata.Name is "Result" or "IsActive"))
+                .Select(property => $"{property.Metadata.Name}: {property.OriginalValue} -> {property.CurrentValue}")
+                .ToArray();
+            if (changes.Length == 0) continue;
+            Guid? entityId = entry.Properties.FirstOrDefault(property => property.Metadata.Name == "Id")?.CurrentValue is Guid id
+                ? id : null;
+            AuditLogs.Add(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                Action = $"{entry.Metadata.ClrType.Name}.StatusChanged",
+                EntityType = entry.Metadata.ClrType.Name,
+                EntityId = entityId,
+                Result = AuditLogResult.Succeeded,
+                Details = string.Join("; ", changes),
+                OccurredAt = DateTimeOffset.UtcNow
+            });
+        }
     }
 
     private void EnforceAuditLogImmutability()

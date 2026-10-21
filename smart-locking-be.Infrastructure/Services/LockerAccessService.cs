@@ -79,6 +79,17 @@ public sealed class LockerAccessService(
         }
 
         dbContext.LockerAccessEvents.Add(accessEvent);
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = request.UserId,
+            Action = "Locker.UnlockCommand",
+            EntityType = nameof(LockerAccessEvent),
+            EntityId = accessEvent.Id,
+            Result = accessEvent.Result == LockerAccessResult.Succeeded ? AuditLogResult.Succeeded : AuditLogResult.Failed,
+            Details = $"LockerId={request.LockerId}; CompartmentId={request.LockerCompartmentId}; AccessType={request.AccessType}; Result={accessEvent.Result}",
+            OccurredAt = now
+        });
         await dbContext.SaveChangesAsync(cancellationToken);
         return Map(accessEvent, compartment);
     }

@@ -63,6 +63,17 @@ public sealed class LockerConnectionMonitor(
     private async Task RecordTransitionAsync(Locker locker, LockerConnectionStatus previous,
         LockerConnectionStatus status, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        if (dbContext.Entry(locker).State == EntityState.Detached)
+            dbContext.AuditLogs.Add(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                Action = "Locker.StatusChanged",
+                EntityType = nameof(Locker),
+                EntityId = locker.Id,
+                Result = AuditLogResult.Succeeded,
+                Details = $"ConnectionStatus: {previous} -> {status}",
+                OccurredAt = now
+            });
         dbContext.LockerEvents.Add(new LockerEvent
         {
             Id = Guid.NewGuid(),

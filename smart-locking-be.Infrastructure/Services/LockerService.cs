@@ -104,6 +104,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     }
 
     public async Task<LockerDetailResponse> CreateLockerAsync(
+        Guid actorUserId,
         CreateLockerRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -139,12 +140,14 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         };
 
         dbContext.Lockers.Add(locker);
+        AddAudit(actorUserId, "Locker.Created", nameof(Locker), locker.Id, null, now);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return MapToDetailResponse(locker);
     }
 
     public async Task<LockerDetailResponse> UpdateLockerAsync(
+        Guid actorUserId,
         Guid lockerId,
         UpdateLockerRequest request,
         CancellationToken cancellationToken = default)
@@ -184,6 +187,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         locker.DeviceIdentifier = deviceIdentifier;
         locker.OperationalStatus = request.OperationalStatus;
         locker.UpdatedAt = now;
+        AddAudit(actorUserId, "Locker.Updated", nameof(Locker), locker.Id, null, now);
 
         if (previousStatus != locker.OperationalStatus)
             dbContext.LockerEvents.Add(new LockerEvent
@@ -203,7 +207,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         return MapToDetailResponse(locker);
     }
 
-    public async Task<bool> SoftDeleteLockerAsync(Guid lockerId, CancellationToken cancellationToken = default)
+    public async Task<bool> SoftDeleteLockerAsync(Guid actorUserId, Guid lockerId, CancellationToken cancellationToken = default)
     {
         var locker = await dbContext.Lockers
             .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
@@ -213,6 +217,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         DateTimeOffset now = DateTimeOffset.UtcNow;
         locker.OperationalStatus = LockerOperationalStatus.Inactive;
         locker.UpdatedAt = now;
+        AddAudit(actorUserId, "Locker.Deactivated", nameof(Locker), locker.Id, null, now);
         if (previousStatus != locker.OperationalStatus)
             dbContext.LockerEvents.Add(new LockerEvent
             {
@@ -269,6 +274,7 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
     }
 
     public async Task<LockerCompartmentResponse> CreateCompartmentAsync(
+        Guid actorUserId,
         Guid lockerId,
         CreateCompartmentRequest request,
         CancellationToken cancellationToken = default)
@@ -320,6 +326,8 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         };
 
         dbContext.LockerCompartments.Add(compartment);
+        AddAudit(actorUserId, "LockerCompartment.Created", nameof(LockerCompartment), compartment.Id,
+            $"LockerId={lockerId}", now);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return MapCompartmentToResponse(compartment);
@@ -377,6 +385,9 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         compartment.OperationalStatus = request.OperationalStatus;
         compartment.UpdatedAt = now;
         if (previousStatus != compartment.OperationalStatus)
+        {
+            AddAudit(userId, "LockerCompartment.StatusChanged", nameof(LockerCompartment), compartment.Id,
+                $"{previousStatus} -> {compartment.OperationalStatus}", now);
             dbContext.LockerEvents.Add(new LockerEvent
             {
                 Id = Guid.NewGuid(),
@@ -390,11 +401,25 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
                 OccurredAt = now,
                 ReceivedAt = now
             });
+        }
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return MapCompartmentToResponse(compartment);
     }
+
+    private void AddAudit(Guid actorUserId, string action, string entityType, Guid entityId,
+        string? details, DateTimeOffset occurredAt) => dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = actorUserId,
+            Action = action,
+            EntityType = entityType,
+            EntityId = entityId,
+            Result = AuditLogResult.Succeeded,
+            Details = details,
+            OccurredAt = occurredAt
+        });
 
     private static (string Code, string Address, string RecoveryAddress, string DeviceIdentifier) ValidateAndTrimLockerInput(
         string code, string address, string recoveryAddress, string deviceIdentifier)

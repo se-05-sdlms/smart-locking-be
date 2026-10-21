@@ -155,12 +155,12 @@ public sealed class AuthService(
         string? ipAddress,
         CancellationToken cancellationToken)
     {
-        User user = await FindUserByIdentifierAsync(request.LoginIdentifier, cancellationToken)
-            ?? throw new UnauthorizedException(AuthErrorCodes.InvalidCredentials, InvalidCredentialsMessage);
-
-        if (user.Status != UserStatus.Active ||
+        User? user = await FindUserByIdentifierAsync(request.LoginIdentifier, cancellationToken);
+        if (user is null || user.Status != UserStatus.Active ||
             !passwordHashService.VerifyPassword(request.Password, user.PasswordHash))
         {
+            AddAuthAudit("Auth.LoginFailed", user?.Id, AuditLogResult.Failed, ipAddress);
+            await dbContext.SaveChangesAsync(cancellationToken);
             throw new UnauthorizedException(AuthErrorCodes.InvalidCredentials, InvalidCredentialsMessage);
         }
 
@@ -169,6 +169,7 @@ public sealed class AuthService(
         user.UpdatedAt = now;
 
         (AuthTokenResponse response, _) = IssueTokens(user, ipAddress, now);
+        AddAuthAudit("Auth.LoginSucceeded", user.Id, AuditLogResult.Succeeded, ipAddress);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return response;
@@ -181,16 +182,17 @@ public sealed class AuthService(
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         string tokenHash = tokenHashService.HashToken(request.RefreshToken);
-        RefreshToken token = await dbContext.RefreshTokens
+        RefreshToken? token = await dbContext.RefreshTokens
             .Include(refreshToken => refreshToken.User)
             .SingleOrDefaultAsync(refreshToken =>
                 refreshToken.TokenHash == tokenHash &&
                 refreshToken.RevokedAt == null &&
-                refreshToken.ExpiresAt > now, cancellationToken)
-            ?? throw new UnauthorizedException(AuthErrorCodes.InvalidRefreshToken, "Invalid refresh token.");
+                refreshToken.ExpiresAt > now, cancellationToken);
 
-        if (token.User.Status != UserStatus.Active)
+        if (token is null || token.User.Status != UserStatus.Active)
         {
+            AddAuthAudit("Auth.InvalidRefreshToken", token?.UserId, AuditLogResult.Failed, ipAddress);
+            await dbContext.SaveChangesAsync(cancellationToken);
             throw new UnauthorizedException(AuthErrorCodes.InvalidRefreshToken, "Invalid refresh token.");
         }
 
@@ -326,6 +328,19 @@ public sealed class AuthService(
 
     private int GetRefreshTokenDays() =>
         int.TryParse(configuration["Jwt:RefreshTokenDays"], out int days) ? days : 30;
+
+    private void AddAuthAudit(string action, Guid? actorUserId, AuditLogResult result, string? ipAddress) =>
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = actorUserId,
+            Action = action,
+            EntityType = nameof(User),
+            EntityId = actorUserId,
+            Result = result,
+            IpAddress = ipAddress,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
 
     private static UserProfileResponse ToProfile(User user) => new(
         user.Id,

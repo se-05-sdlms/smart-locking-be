@@ -166,12 +166,12 @@ public sealed class UserService(
         {
             Id = Guid.NewGuid(),
             ActorUserId = actorAdminId,
-            Action = "CreateUser",
+            Action = "User.Created",
             EntityType = "User",
             EntityId = user.Id,
             Result = AuditLogResult.Succeeded,
             IpAddress = ipAddress,
-            Details = $"Created {user.Role} account: {email}, full name: {profile.FullName}",
+            Details = $"Created {user.Role} account",
             OccurredAt = now
         };
 
@@ -221,7 +221,7 @@ public sealed class UserService(
         {
             Id = Guid.NewGuid(),
             ActorUserId = actorAdminId,
-            Action = "ReissueTemporaryPassword",
+            Action = "User.TemporaryPasswordReissued",
             EntityType = nameof(User),
             EntityId = user.Id,
             Result = AuditLogResult.Succeeded,
@@ -319,12 +319,12 @@ public sealed class UserService(
         {
             Id = Guid.NewGuid(),
             ActorUserId = actorAdminId,
-            Action = "UpdateUser",
+            Action = "User.Updated",
             EntityType = "User",
             EntityId = user.Id,
             Result = AuditLogResult.Succeeded,
             IpAddress = ipAddress,
-            Details = $"Updated user {id}: full name: {request.FullName}, email: {user.Email}, phone: {user.PhoneNumber}",
+            Details = $"Updated user {id}",
             OccurredAt = now
         };
 
@@ -371,9 +371,9 @@ public sealed class UserService(
 
             string actionName = request.Status switch
             {
-                UserStatus.Locked => "LockUser",
-                UserStatus.Disabled => "DisableUser",
-                _ => "UnlockUser"
+                UserStatus.Locked => "User.Locked",
+                UserStatus.Disabled => "User.Disabled",
+                _ => "User.Unlocked"
             };
 
             var auditLog = new AuditLog
@@ -442,7 +442,7 @@ public sealed class UserService(
         {
             Id = Guid.NewGuid(),
             ActorUserId = actorAdminId,
-            Action = "AssignOperatorScope",
+            Action = "OperatorAssignment.Created",
             EntityType = "OperatorAssignment",
             EntityId = assignment.Id,
             Result = AuditLogResult.Succeeded,
@@ -498,7 +498,7 @@ public sealed class UserService(
         {
             Id = Guid.NewGuid(),
             ActorUserId = actorAdminId,
-            Action = "RevokeOperatorScope",
+            Action = "OperatorAssignment.Revoked",
             EntityType = "OperatorAssignment",
             EntityId = assignment.Id,
             Result = AuditLogResult.Succeeded,
