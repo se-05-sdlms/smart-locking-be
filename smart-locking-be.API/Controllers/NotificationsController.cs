@@ -12,7 +12,6 @@ namespace smart_locking_be.API.Controllers;
 public sealed class NotificationsController(INotificationService notificationService) : ControllerBase
 {
     [HttpGet]
-    [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> GetNotifications(
         [FromQuery] bool unreadOnly = false,
         [FromQuery] int limit = 50,
@@ -21,12 +20,10 @@ public sealed class NotificationsController(INotificationService notificationSer
             User.GetRequiredUserId(), unreadOnly, limit, cancellationToken));
 
     [HttpPatch("{id:guid}/read")]
-    [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> MarkRead(Guid id, CancellationToken cancellationToken) =>
         Ok(await notificationService.MarkReadAsync(User.GetRequiredUserId(), id, cancellationToken));
 
     [HttpPatch("read-all")]
-    [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> MarkAllRead(CancellationToken cancellationToken) =>
         Ok(await notificationService.MarkAllReadAsync(User.GetRequiredUserId(), cancellationToken));
 
