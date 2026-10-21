@@ -41,6 +41,7 @@ public interface IIncidentService
         CancellationToken cancellationToken = default);
     Task<GuestIncidentResponse> CreateGuestIncidentAsync(
         CreateGuestIncidentRequest request,
+        string? guestSessionToken,
         CancellationToken cancellationToken = default);
 
 }
