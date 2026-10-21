@@ -170,9 +170,6 @@ public sealed class MqttLockerListenerService(
         using var scope = serviceScopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-        await scope.ServiceProvider.GetRequiredService<LockerConnectionMonitor>()
-            .RecordSignalAsync(deviceIdentifier, LockerConnectionStatus.Online, cancellationToken);
-
         var locker = await dbContext.Lockers
             .Include(l => l.Compartments)
             .FirstOrDefaultAsync(l => l.DeviceIdentifier == deviceIdentifier, cancellationToken);
@@ -187,37 +184,39 @@ public sealed class MqttLockerListenerService(
         DateTimeOffset occurredAt = deviceTime ?? now;
         if (occurredAt > now.AddMinutes(5)) return;
         var compartment = locker.Compartments.FirstOrDefault(c => c.HardwareChannel == channel);
-        DoorStatus? previousDoorStatus = compartment?.DoorStatus;
-        if (compartment is not null)
+        if (compartment is null) return;
+        if (deviceTime.HasValue && compartment.DoorStatusObservedAt >= occurredAt) return;
+
+        await scope.ServiceProvider.GetRequiredService<LockerConnectionMonitor>()
+            .RecordSignalAsync(deviceIdentifier, LockerConnectionStatus.Online, cancellationToken);
+
+        DoorStatus previousDoorStatus = compartment.DoorStatus;
+        compartment.DoorStatusObservedAt = occurredAt;
+        if (previousDoorStatus != doorStatus)
         {
-            if (deviceTime.HasValue && compartment.DoorStatusObservedAt >= occurredAt) return;
-            compartment.DoorStatusObservedAt = occurredAt;
-            if (previousDoorStatus != doorStatus)
+            compartment.DoorStatus = doorStatus;
+            compartment.UpdatedAt = now;
+            dbContext.LockerEvents.Add(new LockerEvent
             {
-                compartment.DoorStatus = doorStatus;
-                compartment.UpdatedAt = now;
-                dbContext.LockerEvents.Add(new LockerEvent
-                {
-                    Id = Guid.NewGuid(),
-                    LockerId = locker.Id,
-                    LockerCompartmentId = compartment.Id,
-                    EventType = LockerEventType.DoorChanged,
-                    PreviousValue = previousDoorStatus?.ToString(),
-                    NewValue = doorStatus.ToString(),
-                    Severity = LockerEventSeverity.Info,
-                    OccurredAt = occurredAt,
-                    ReceivedAt = now
-                });
-            }
+                Id = Guid.NewGuid(),
+                LockerId = locker.Id,
+                LockerCompartmentId = compartment.Id,
+                EventType = LockerEventType.DoorChanged,
+                PreviousValue = previousDoorStatus.ToString(),
+                NewValue = doorStatus.ToString(),
+                Severity = LockerEventSeverity.Info,
+                OccurredAt = occurredAt,
+                ReceivedAt = now
+            });
         }
 
-        if (compartment is not null && previousDoorStatus == DoorStatus.Open && doorStatus == DoorStatus.Closed)
+        if (previousDoorStatus == DoorStatus.Open && doorStatus == DoorStatus.Closed)
         {
             await FinalizeActiveAccessAsync(scope.ServiceProvider, dbContext, compartment.Id, now, cancellationToken);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        if (compartment is not null && previousDoorStatus != doorStatus)
+        if (previousDoorStatus != doorStatus)
         {
             await scope.ServiceProvider.GetRequiredService<IOperationsRealtimeNotifier>()
                 .PublishToLockerAsync(locker.Id, new RealtimeEvent("LockerDoorChanged", compartment.Id,
