@@ -71,7 +71,11 @@ public sealed class AuthService(
             throw new ConflictException(LockerErrorCodes.NotOperational, "Registered locker is not operational.");
         }
 
-        DeliveryApprovalMode defaultApprovalMode = DeliveryApprovalMode.Manual;
+        // Chỉ lấy mặc định của policy đang active khi tạo resident; không ghi đè lựa chọn của resident đã có.
+        DeliveryApprovalMode defaultApprovalMode = await dbContext.SystemPolicies
+            .Where(policy => policy.IsActive)
+            .Select(policy => (DeliveryApprovalMode?)policy.DefaultApprovalMode)
+            .SingleOrDefaultAsync(cancellationToken) ?? DeliveryApprovalMode.Auto;
 
         await using IDbContextTransaction? transaction = dbContext.Database.IsRelational()
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken)

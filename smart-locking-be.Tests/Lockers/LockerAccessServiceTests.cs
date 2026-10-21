@@ -15,6 +15,79 @@ public sealed class LockerAccessServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 9, 30, 8, 0, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData("Administrator", false, false, true)]
+    [InlineData("LockerOperator", true, false, true)]
+    [InlineData("LockerOperator", false, false, false)]
+    [InlineData("LockerOperator", true, true, false)]
+    [InlineData("Resident", true, false, false)]
+    public async Task UpdateLockerStatus_EnforcesScopeAndRecordsActor(string role, bool assigned, bool revoked, bool allowed)
+    {
+        await using var db = CreateDbContext();
+        var (locker, slot) = await SeedLockerAsync(db);
+        slot.OperationalStatus = LockerCompartmentOperationalStatus.OutOfService;
+        var actor = Guid.NewGuid();
+        if (assigned)
+            db.Add(new OperatorAssignment { Id = Guid.NewGuid(), OperatorUserId = actor, LockerId = locker.Id, RevokedAt = revoked ? Now : null });
+        await db.SaveChangesAsync();
+        var service = new LockerService(db);
+
+        if (!allowed)
+        {
+            await Assert.ThrowsAsync<ForbiddenException>(() => service.UpdateLockerStatusAsync(actor, role,
+                locker.Id, new(LockerOperationalStatus.OutOfService, "Kiểm tra tủ")));
+            Assert.Equal(LockerOperationalStatus.Operational, locker.OperationalStatus);
+            Assert.Empty(db.AuditLogs);
+            Assert.Empty(db.LockerEvents);
+            return;
+        }
+
+        await service.UpdateLockerStatusAsync(actor, role, locker.Id, new(LockerOperationalStatus.OutOfService, "  Kiểm tra tủ  "));
+        var audit = await db.AuditLogs.SingleAsync();
+        var change = await db.LockerEvents.SingleAsync();
+        Assert.Equal(actor, audit.ActorUserId);
+        Assert.Equal(actor, change.ActorUserId);
+        Assert.Equal("Kiểm tra tủ", change.Reason);
+        Assert.Equal(nameof(LockerOperationalStatus.Operational), change.PreviousValue);
+        Assert.Equal(nameof(LockerOperationalStatus.OutOfService), change.NewValue);
+        Assert.Equal(LockerCompartmentOperationalStatus.OutOfService, slot.OperationalStatus);
+        Assert.Equal(DoorStatus.Closed, slot.DoorStatus);
+    }
+
+    [Theory]
+    [InlineData(LockerOperationalStatus.OutOfService, " ")]
+    [InlineData((LockerOperationalStatus)999, "Kiểm tra tủ")]
+    public async Task UpdateLockerStatus_RejectsInvalidInputWithoutChanges(LockerOperationalStatus status, string reason)
+    {
+        await using var db = CreateDbContext();
+        var (locker, _) = await SeedLockerAsync(db);
+
+        await Assert.ThrowsAsync<BadRequestException>(() => new LockerService(db).UpdateLockerStatusAsync(
+            Guid.NewGuid(), "Administrator", locker.Id, new(status, reason)));
+
+        Assert.Equal(LockerOperationalStatus.Operational, locker.OperationalStatus);
+        Assert.Empty(db.AuditLogs);
+        Assert.Empty(db.LockerEvents);
+    }
+
+    [Theory]
+    [InlineData("short")]
+    [InlineData("         ")]
+    public async Task EmergencyUnlock_RejectsShortReasonBeforeDispatch(string reason)
+    {
+        await using var db = CreateDbContext();
+        var (locker, slot) = await SeedLockerAsync(db);
+        var dispatcher = new RecordingDispatcher();
+        var service = new EmergencyUnlockService(db,
+            new LockerAccessService(db, dispatcher, TimeProvider.System), TimeProvider.System);
+
+        await Assert.ThrowsAsync<BadRequestException>(() => service.CreateAsync(Guid.NewGuid(), "Administrator",
+            new(locker.Id, slot.Id, null, reason)));
+
+        Assert.Empty(dispatcher.Commands);
+        Assert.Empty(db.EmergencyUnlocks);
+    }
+
     [Fact]
     public async Task OpenAsync_OperationalLocker_DispatchesAndRecordsSuccess()
     {

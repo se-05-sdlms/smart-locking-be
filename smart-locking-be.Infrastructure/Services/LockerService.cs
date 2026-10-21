@@ -204,6 +204,55 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         return MapToDetailResponse(locker);
     }
 
+    public async Task<LockerDetailResponse> UpdateLockerStatusAsync(
+        Guid userId, string userRole, Guid lockerId, UpdateLockerStatusRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Enum.IsDefined(request.OperationalStatus))
+            throw BadRequestException.For(nameof(request.OperationalStatus), "Locker operational status is invalid.");
+        if (string.IsNullOrWhiteSpace(request.Reason))
+            throw BadRequestException.For(nameof(request.Reason), "A reason is required to change locker status.");
+
+        // Dùng cùng kiểm tra phạm vi với API đọc tủ; Operator chỉ thao tác tủ còn được phân công.
+        await GetLockerByIdAsync(userId, userRole, lockerId, cancellationToken);
+        Locker locker = await dbContext.Lockers.Include(item => item.Compartments)
+            .SingleAsync(item => item.Id == lockerId, cancellationToken);
+        LockerOperationalStatus previous = locker.OperationalStatus;
+        if (previous == request.OperationalStatus) return MapToDetailResponse(locker);
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string reason = request.Reason.Trim();
+        locker.OperationalStatus = request.OperationalStatus;
+        locker.UpdatedAt = now;
+        dbContext.LockerEvents.Add(new LockerEvent
+        {
+            Id = Guid.NewGuid(),
+            LockerId = lockerId,
+            ActorUserId = userId,
+            EventType = LockerEventType.OperationalStatusChanged,
+            PreviousValue = previous.ToString(),
+            NewValue = locker.OperationalStatus.ToString(),
+            Severity = locker.OperationalStatus == LockerOperationalStatus.Operational ? LockerEventSeverity.Info : LockerEventSeverity.Warning,
+            Reason = reason,
+            OccurredAt = now,
+            ReceivedAt = now
+        });
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = userId,
+            Action = "Locker.StatusChanged",
+            EntityType = nameof(Locker),
+            EntityId = lockerId,
+            Result = AuditLogResult.Succeeded,
+            Details = $"{previous} -> {locker.OperationalStatus}: {reason}",
+            OccurredAt = now
+        });
+        // Chỉ thay trạng thái vận hành; không giải phóng ngăn hoặc tự xác nhận reset đang chờ.
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return MapToDetailResponse(locker);
+    }
+
     public async Task<bool> SoftDeleteLockerAsync(Guid lockerId, CancellationToken cancellationToken = default)
     {
         var locker = await dbContext.Lockers

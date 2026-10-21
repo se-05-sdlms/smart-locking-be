@@ -108,17 +108,16 @@ public sealed class CompartmentResetTests
     }
 
     [Fact]
-    public async Task OverdueTransfer_BothPublicServicesUseSamePendingRequest()
+    public async Task OverdueTransfer_CanonicalParcelServiceReusesPendingRequest_AndCannotReenableSlot()
     {
         var x = Setup(); await using var db = x.Db; var parcel = SeedTransfer(db, x.Slot, x.Request); var actor = Guid.NewGuid();
-        var operations = new OperationsService(db, null!, TimeProvider.System, x.Service);
         var parcels = new ParcelService(db, TimeProvider.System, x.Service);
-        var first = await operations.TransferOverdueAsync(actor, "Administrator", parcel.Id);
+        var first = await parcels.TransferOverdueAsync(actor, "Administrator", parcel.Id);
         var second = await parcels.TransferOverdueAsync(actor, "Administrator", parcel.Id);
         Assert.Equal(first.ResetCommandId, second.ResetCommandId);
         Assert.Single(db.AuditLogs); Assert.Equal(ParcelStatus.Overdue, parcel.Status);
-        await Assert.ThrowsAsync<ConflictException>(() => operations.UpdateCompartmentStatusAsync(actor, "Administrator",
-            x.Slot.LockerId, x.Slot.Id, new("Operational", "Không được bỏ qua thu hồi")));
+        await Assert.ThrowsAsync<ConflictException>(() => new LockerService(db).UpdateCompartmentStatusAsync(actor, "Administrator",
+            x.Slot.LockerId, x.Slot.Id, new(LockerCompartmentOperationalStatus.Operational)));
     }
 
     [Fact]

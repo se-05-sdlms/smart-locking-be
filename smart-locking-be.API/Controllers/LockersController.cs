@@ -59,6 +59,17 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     }
 
     /// <summary>
+    /// Đổi riêng trạng thái vận hành: Admin hoặc Operator được phân công, bắt buộc ghi lý do.
+    /// Không thay đổi thông tin tủ, cảm biến cửa hoặc kết quả giao dịch đang chờ ESP.
+    /// </summary>
+    [HttpPatch("{id:guid}/status")]
+    public async Task<IActionResult> UpdateLockerStatus(Guid id, [FromBody] UpdateLockerStatusRequest request, CancellationToken cancellationToken)
+    {
+        var (userId, userRole) = User.GetRequiredIdentity();
+        return Ok(await lockerService.UpdateLockerStatusAsync(userId, userRole, id, request, cancellationToken));
+    }
+
+    /// <summary>
     /// Vô hiệu hóa tủ Locker (Soft delete - chuyển OperationalStatus thành Inactive). Chỉ Admin mới được thực hiện.
     /// </summary>
     [HttpDelete("{id:guid}")]

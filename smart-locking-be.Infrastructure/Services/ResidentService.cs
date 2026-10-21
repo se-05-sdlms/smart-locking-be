@@ -119,6 +119,11 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
     private async Task<ResidentProfile> EnsureProfileCreatedAsync(User user, CancellationToken cancellationToken)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        // Profile được bổ sung sau đăng ký cũng dùng cùng mặc định do Admin cấu hình.
+        DeliveryApprovalMode defaultApprovalMode = await dbContext.SystemPolicies
+            .Where(policy => policy.IsActive)
+            .Select(policy => (DeliveryApprovalMode?)policy.DefaultApprovalMode)
+            .SingleOrDefaultAsync(cancellationToken) ?? DeliveryApprovalMode.Auto;
 
         string defaultFullName = !string.IsNullOrWhiteSpace(user.PhoneNumber)
             ? user.PhoneNumber
@@ -129,7 +134,7 @@ public sealed class ResidentService(ApplicationDbContext dbContext) : IResidentS
             Id = Guid.NewGuid(),
             UserId = user.Id,
             FullName = defaultFullName,
-            DeliveryApprovalMode = DeliveryApprovalMode.Manual,
+            DeliveryApprovalMode = defaultApprovalMode,
             FaceRecognitionEnabled = false,
             CreatedAt = now,
             UpdatedAt = now

@@ -54,7 +54,6 @@ public static class DependencyInjection
         services.AddSingleton<IBluetoothMessageCodec, BluetoothProtocol>();
         services.AddSingleton<ICompartmentResetProtocol, BluetoothProtocol>();
         services.AddScoped<IBluetoothWorkflowStore, BluetoothWorkflowStore>();
-        services.AddScoped<IOperationsService, OperationsService>();
         services.AddScoped<ILockerCommandDispatcher, MqttLockerCommandDispatcher>();
         services.AddScoped<ICompartmentAllocationService, CompartmentAllocationService>();
         services.AddScoped<IDeliveryRequestService, DeliveryRequestService>();
