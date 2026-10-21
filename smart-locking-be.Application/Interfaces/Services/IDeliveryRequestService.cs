@@ -15,6 +15,20 @@ public interface IDeliveryRequestService
         SubmitDeliveryRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<WaybillOcrResponse> ScanWaybillAsync(
+        Guid id,
+        string guestSessionToken,
+        Stream image,
+        string fileName,
+        string contentType,
+        CancellationToken cancellationToken = default);
+
+    Task<ResolveRecipientResponse> ResolveRecipientAsync(
+        Guid id,
+        string guestSessionToken,
+        ResolveRecipientRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<GuestDeliveryStatusResponse> GetAsync(
         Guid id,
         string guestSessionToken,

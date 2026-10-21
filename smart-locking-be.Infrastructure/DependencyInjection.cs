@@ -87,6 +87,20 @@ public static class DependencyInjection
         services.AddHttpClient<SupabaseImageStorageService>(client =>
             client.Timeout = TimeSpan.FromSeconds(60))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        IConfigurationSection deepSeekSection = configuration.GetSection(DeepSeekOptions.SectionName);
+        services.AddOptions<DeepSeekOptions>()
+            .Configure(options =>
+            {
+                options.Enabled = !bool.TryParse(deepSeekSection["Enabled"], out bool enabled) || enabled;
+                options.ApiKey = deepSeekSection["ApiKey"] ?? string.Empty;
+                options.BaseUrl = deepSeekSection["BaseUrl"] ?? options.BaseUrl;
+                options.Model = deepSeekSection["Model"] ?? options.Model;
+                options.TimeoutSeconds = int.TryParse(deepSeekSection["TimeoutSeconds"], out int seconds)
+                    ? seconds
+                    : options.TimeoutSeconds;
+            });
+        services.AddHttpClient<IWaybillOcrService, DeepSeekWaybillOcrService>()
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddScoped<IPushNotificationService, ExpoPushNotificationService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IAdminService, AdminService>();
