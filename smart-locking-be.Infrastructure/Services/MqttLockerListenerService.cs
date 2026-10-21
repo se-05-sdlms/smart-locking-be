@@ -61,7 +61,7 @@ public sealed class MqttLockerListenerService(
             {
                 string topic = e.ApplicationMessage.Topic;
                 string payload = e.ApplicationMessage.ConvertPayloadToString();
-                await HandleMessageAsync(topic, payload, stoppingToken);
+                await HandleMessageAsync(topic, payload, stoppingToken, e.ApplicationMessage.Retain);
             }
             catch (Exception ex)
             {
@@ -81,7 +81,9 @@ public sealed class MqttLockerListenerService(
                     logger.LogInformation("[MQTT LISTENER] Connected. Subscribing to 'lockers/+/doors/+/status'...");
 
                     await _mqttClient.SubscribeAsync("lockers/+/doors/+/status", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
-                    logger.LogInformation("[MQTT LISTENER] Subscribed to door status topic.");
+                    await _mqttClient.SubscribeAsync("lockers/+/heartbeat", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
+                    await _mqttClient.SubscribeAsync("lockers/+/status", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
+                    logger.LogInformation("[MQTT LISTENER] Subscribed to door, heartbeat and connection status topics.");
                 }
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
@@ -100,14 +102,33 @@ public sealed class MqttLockerListenerService(
         }
     }
 
-    internal async Task HandleMessageAsync(string topic, string payload, CancellationToken cancellationToken)
+    internal async Task HandleMessageAsync(string topic, string payload, CancellationToken cancellationToken, bool isRetained = false)
     {
         // Topic pattern: lockers/{deviceId}/doors/{channel}/status
         var parts = topic.Split('/');
+        if (parts.Length == 3 && parts[0] == "lockers" && !string.IsNullOrWhiteSpace(parts[1]))
+        {
+            LockerConnectionStatus? connection = parts[2] switch
+            {
+                "heartbeat" => LockerConnectionStatus.Online,
+                "status" when payload.Trim().Equals("online", StringComparison.OrdinalIgnoreCase) => LockerConnectionStatus.Online,
+                "status" when payload.Trim().Equals("offline", StringComparison.OrdinalIgnoreCase) => LockerConnectionStatus.Offline,
+                _ => null
+            };
+            if (connection.HasValue)
+            {
+                using var signalScope = serviceScopeFactory.CreateScope();
+                await signalScope.ServiceProvider.GetRequiredService<LockerConnectionMonitor>()
+                    .RecordSignalAsync(parts[1], connection.Value, cancellationToken);
+            }
+            return;
+        }
+
         if (parts.Length != 5 || parts[0] != "lockers" || parts[2] != "doors" || parts[4] != "status")
         {
             return;
         }
+        if (isRetained) return;
 
         string deviceIdentifier = parts[1];
         if (!int.TryParse(parts[3], out int channel))
@@ -126,6 +147,9 @@ public sealed class MqttLockerListenerService(
         using var scope = serviceScopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
+        await scope.ServiceProvider.GetRequiredService<LockerConnectionMonitor>()
+            .RecordSignalAsync(deviceIdentifier, LockerConnectionStatus.Online, cancellationToken);
+
         var locker = await dbContext.Lockers
             .Include(l => l.Compartments)
             .FirstOrDefaultAsync(l => l.DeviceIdentifier == deviceIdentifier, cancellationToken);
@@ -137,10 +161,6 @@ public sealed class MqttLockerListenerService(
         }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        locker.ConnectionStatus = LockerConnectionStatus.Online;
-        locker.LastSeenAt = now;
-        locker.UpdatedAt = now;
-
         var compartment = locker.Compartments.FirstOrDefault(c => c.HardwareChannel == channel);
         DoorStatus? previousDoorStatus = compartment?.DoorStatus;
         if (compartment is not null)
