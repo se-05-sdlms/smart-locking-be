@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -10,7 +11,8 @@ namespace smart_locking_be.Infrastructure.Services;
 public sealed class LockerAccessService(
     ApplicationDbContext dbContext,
     ILockerCommandDispatcher commandDispatcher,
-    TimeProvider timeProvider) : ILockerAccessService
+    TimeProvider timeProvider,
+    IConfiguration configuration) : ILockerAccessService
 {
     public async Task<OpenLockerResponse> OpenAsync(
         OpenLockerRequest request,
@@ -28,7 +30,8 @@ public sealed class LockerAccessService(
             throw new BadRequestException(LockerErrorCodes.InvalidCompartment, "Compartment does not belong to the requested locker.");
         }
 
-        if (compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
+        bool monitoringEnabled = configuration.GetValue<bool>("LockerMonitoring:Enabled");
+        if (monitoringEnabled && compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
         {
             throw new ConflictException(LockerErrorCodes.Offline, "Locker is offline or has not reported its connection status.");
         }
@@ -50,7 +53,7 @@ public sealed class LockerAccessService(
             OccurredAt = now,
         };
 
-        string? blockedReason = GetBlockedReason(compartment);
+        string? blockedReason = GetBlockedReason(compartment, monitoringEnabled);
         if (blockedReason is not null)
         {
             accessEvent.Result = LockerAccessResult.Blocked;
@@ -80,13 +83,13 @@ public sealed class LockerAccessService(
         return Map(accessEvent, compartment);
     }
 
-    private static string? GetBlockedReason(LockerCompartment compartment)
+    private static string? GetBlockedReason(LockerCompartment compartment, bool monitoringEnabled)
     {
         if (compartment.Locker.OperationalStatus != LockerOperationalStatus.Operational)
         {
             return "Locker is not operational.";
         }
-        if (compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
+        if (monitoringEnabled && compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
         {
             return "Locker is offline.";
         }
