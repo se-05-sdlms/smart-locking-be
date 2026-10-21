@@ -5,6 +5,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Protocol;
+using System.Text.Json;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -81,6 +83,7 @@ public sealed class MqttLockerListenerService(
                     logger.LogInformation("[MQTT LISTENER] Connected. Subscribing to 'lockers/+/doors/+/status'...");
 
                     await _mqttClient.SubscribeAsync("lockers/+/doors/+/status", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
+                    await _mqttClient.SubscribeAsync("lockers/+/alerts", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
                     logger.LogInformation("[MQTT LISTENER] Subscribed to door status topic.");
                 }
             }
@@ -104,6 +107,11 @@ public sealed class MqttLockerListenerService(
     {
         // Topic pattern: lockers/{deviceId}/doors/{channel}/status
         var parts = topic.Split('/');
+        if (parts.Length == 3 && parts[0] == "lockers" && parts[2] == "alerts")
+        {
+            await RecordDeviceAlertAsync(parts[1], payload, cancellationToken);
+            return;
+        }
         if (parts.Length != 5 || parts[0] != "lockers" || parts[2] != "doors" || parts[4] != "status")
         {
             return;
@@ -116,6 +124,22 @@ public sealed class MqttLockerListenerService(
         }
 
         string statusStr = payload.Trim().ToUpperInvariant();
+        DateTimeOffset? deviceTime = null;
+        if (payload.TrimStart().StartsWith('{'))
+        {
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(payload);
+                statusStr = document.RootElement.GetProperty("status").GetString()?.Trim().ToUpperInvariant() ?? string.Empty;
+                if (document.RootElement.TryGetProperty("occurredAt", out JsonElement timestamp) &&
+                    timestamp.TryGetDateTimeOffset(out DateTimeOffset parsed)) deviceTime = parsed;
+            }
+            catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException)
+            {
+                logger.LogWarning("[MQTT LISTENER] Ignoring invalid door payload on {Topic}.", topic);
+                return;
+            }
+        }
         if (statusStr is not ("OPEN" or "CLOSED"))
         {
             logger.LogWarning("[MQTT LISTENER] Ignoring invalid door status: '{Payload}'.", payload);
@@ -137,6 +161,8 @@ public sealed class MqttLockerListenerService(
         }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset occurredAt = deviceTime ?? now;
+        if (occurredAt > now.AddMinutes(5)) return;
         locker.ConnectionStatus = LockerConnectionStatus.Online;
         locker.LastSeenAt = now;
         locker.UpdatedAt = now;
@@ -145,8 +171,25 @@ public sealed class MqttLockerListenerService(
         DoorStatus? previousDoorStatus = compartment?.DoorStatus;
         if (compartment is not null)
         {
-            compartment.DoorStatus = doorStatus;
-            compartment.UpdatedAt = now;
+            if (deviceTime.HasValue && compartment.DoorStatusObservedAt >= occurredAt) return;
+            compartment.DoorStatusObservedAt = occurredAt;
+            if (previousDoorStatus != doorStatus)
+            {
+                compartment.DoorStatus = doorStatus;
+                compartment.UpdatedAt = now;
+                dbContext.LockerEvents.Add(new LockerEvent
+                {
+                    Id = Guid.NewGuid(),
+                    LockerId = locker.Id,
+                    LockerCompartmentId = compartment.Id,
+                    EventType = LockerEventType.DoorChanged,
+                    PreviousValue = previousDoorStatus?.ToString(),
+                    NewValue = doorStatus.ToString(),
+                    Severity = LockerEventSeverity.Info,
+                    OccurredAt = occurredAt,
+                    ReceivedAt = now
+                });
+            }
         }
 
         if (compartment is not null && previousDoorStatus == DoorStatus.Open && doorStatus == DoorStatus.Closed)
@@ -155,9 +198,44 @@ public sealed class MqttLockerListenerService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (compartment is not null && previousDoorStatus != doorStatus)
+        {
+            await scope.ServiceProvider.GetRequiredService<IOperationsRealtimeNotifier>()
+                .PublishToLockerAsync(locker.Id, new RealtimeEvent("LockerDoorChanged", compartment.Id,
+                    locker.Id, doorStatus.ToString(), compartment.Code, now), cancellationToken);
+        }
 
         logger.LogInformation("[MQTT IN] Locker '{DeviceId}' - compartment {Channel} -> door: {Status} (online)",
             deviceIdentifier, channel, doorStatus);
+    }
+
+    private async Task RecordDeviceAlertAsync(string deviceIdentifier, string payload, CancellationToken cancellationToken)
+    {
+        string alert = payload.Trim();
+        if (alert.Length is < 1 or > 500) return;
+        using var scope = serviceScopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Locker? locker = await dbContext.Lockers.SingleOrDefaultAsync(item => item.DeviceIdentifier == deviceIdentifier, cancellationToken);
+        if (locker is null) return;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        // ponytail: suppress repeated MQTT alerts for 10 seconds; use device event IDs if firmware supplies them.
+        if (await dbContext.LockerEvents.AnyAsync(item => item.LockerId == locker.Id &&
+            item.EventType == LockerEventType.DeviceAlert && item.Reason == alert &&
+            item.ReceivedAt >= now.AddSeconds(-10), cancellationToken)) return;
+        dbContext.LockerEvents.Add(new LockerEvent
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            EventType = LockerEventType.DeviceAlert,
+            Severity = LockerEventSeverity.Warning,
+            Reason = alert,
+            OccurredAt = now,
+            ReceivedAt = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await scope.ServiceProvider.GetRequiredService<IOperationsRealtimeNotifier>()
+            .PublishToLockerAsync(locker.Id, new RealtimeEvent("LockerDeviceAlert", locker.Id,
+                locker.Id, "Warning", alert, now), cancellationToken);
     }
 
     private static async Task FinalizeActiveAccessAsync(
