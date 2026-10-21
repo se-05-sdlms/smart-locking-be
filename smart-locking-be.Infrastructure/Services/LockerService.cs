@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -7,8 +8,74 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class LockerService(ApplicationDbContext dbContext) : ILockerService
+public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRealtimeNotifier? realtimeNotifier = null) : ILockerService
 {
+    public async Task<LockerDetailResponse> UpdateLockerStatusAsync(Guid userId, string userRole, Guid lockerId,
+        UpdateLockerStatusRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.OperationalStatus is not (LockerOperationalStatus.Operational or LockerOperationalStatus.OutOfService))
+            throw BadRequestException.For(nameof(request.OperationalStatus), "Status must be Operational or OutOfService.");
+        string reason = request.Reason?.Trim() ?? string.Empty;
+        if (reason.Length is 0 or > 500)
+            throw BadRequestException.For(nameof(request.Reason), "Reason is required and must not exceed 500 characters.");
+
+        Locker locker = await dbContext.Lockers.Include(item => item.Compartments)
+            .SingleOrDefaultAsync(item => item.Id == lockerId, cancellationToken)
+            ?? throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
+        if (userRole != nameof(UserRole.Administrator) &&
+            (userRole != nameof(UserRole.LockerOperator) || !await dbContext.OperatorAssignments.AnyAsync(item =>
+                item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
+                cancellationToken)))
+            throw new ForbiddenException(LockerErrorCodes.AccessDenied, "You cannot change this locker.");
+        if (locker.OperationalStatus == LockerOperationalStatus.Inactive)
+            throw new ConflictException(LockerErrorCodes.NotOperational, "An inactive locker cannot be restored here.");
+        if (locker.OperationalStatus == request.OperationalStatus)
+            return MapToDetailResponse(locker);
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (request.OperationalStatus == LockerOperationalStatus.OutOfService &&
+            (await dbContext.Parcels.AnyAsync(item => item.DeliveryRequest.LockerId == lockerId &&
+                (item.Status == ParcelStatus.Stored || item.Status == ParcelStatus.Overdue), cancellationToken) ||
+             await dbContext.ReturnRequests.AnyAsync(item => item.LockerId == lockerId &&
+                (item.Status == ReturnRequestStatus.Allocated || item.Status == ReturnRequestStatus.Deposited), cancellationToken) ||
+             await dbContext.CompartmentReservations.AnyAsync(item => item.LockerCompartment.LockerId == lockerId &&
+                item.ReleasedAt == null && item.ExpiresAt > now, cancellationToken)))
+            throw new ConflictException(LockerErrorCodes.NotOperational, "Locker has active parcels, returns, or reservations.");
+
+        LockerOperationalStatus previous = locker.OperationalStatus;
+        locker.OperationalStatus = request.OperationalStatus;
+        locker.UpdatedAt = now;
+        dbContext.LockerEvents.Add(new LockerEvent
+        {
+            Id = Guid.NewGuid(),
+            LockerId = lockerId,
+            ActorUserId = userId,
+            EventType = LockerEventType.OperationalStatusChanged,
+            PreviousValue = previous.ToString(),
+            NewValue = locker.OperationalStatus.ToString(),
+            Severity = LockerEventSeverity.Info,
+            Reason = reason,
+            OccurredAt = now,
+            ReceivedAt = now
+        });
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = userId,
+            Action = "Locker.StatusChanged",
+            EntityType = nameof(Locker),
+            EntityId = lockerId,
+            Result = AuditLogResult.Succeeded,
+            Details = $"{previous} -> {locker.OperationalStatus}; {reason}",
+            OccurredAt = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        if (realtimeNotifier is not null)
+            await realtimeNotifier.PublishToLockerAsync(lockerId, new RealtimeEvent("LockerStatusChanged", lockerId,
+                lockerId, locker.OperationalStatus.ToString(), reason, now), cancellationToken);
+        return MapToDetailResponse(locker);
+    }
+
     public async Task<PublicLockerResponse> GetPublicLockerAsync(string code, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(code))
