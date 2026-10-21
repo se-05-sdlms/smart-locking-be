@@ -35,7 +35,7 @@ The return/cancel URLs are server configuration, never supplied by a caller. Nei
 | `POST /api/webhooks/payos` | Anonymous, verified signature | Activates a matching successful VND payment |
 | `GET /api/parcels?view=ClearancePending` | Operator or Administrator | Stored/Overdue parcels at or beyond `MaxStorageUntil`; operators retain locker assignment scope |
 
-Plan requests use `code`, `name`, `description`, `price`, `durationDays`, and `maxActiveParcels`. Updates omit `code` and include `isActive`. Deactivation preserves purchased history. Prices must be whole VND; paid checkout requires a positive amount (zero-priced plans cannot use this checkout).
+Plan requests use `code`, `name`, `description`, `price`, `durationDays`, and `maxActiveParcels`. Updates omit `code` and include `isActive`. Deactivation preserves purchased history. Prices must be whole VND; paid checkout requires a positive amount. A zero-priced plan skips PayOS: `POST /api/resident-subscriptions/subscribe` activates it immediately and returns `{ activated: true, checkoutUrl: "", orderCode: 0, amount: 0 }`. It queues after the resident's current period, and the same free plan cannot be held twice at once (409 `subscription/already_exists`), so free periods cannot be farmed.
 
 ## Lifecycle
 
