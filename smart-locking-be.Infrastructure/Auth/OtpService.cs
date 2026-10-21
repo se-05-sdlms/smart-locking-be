@@ -14,7 +14,8 @@ public sealed class OtpService(
     ITokenHashService tokenHashService,
     TimeProvider timeProvider,
     IConfiguration configuration,
-    ILogger<OtpService> logger) : IOtpService
+    ILogger<OtpService> logger,
+    IEmailSender? emailSender = null) : IOtpService
 {
     private static readonly Regex PhonePattern = new("^0[0-9]{9}$", RegexOptions.Compiled);
     private const int DefaultMaxAttempts = 5;
@@ -71,7 +72,6 @@ public sealed class OtpService(
         CancellationToken cancellationToken)
     {
         string normalizedPhone = NormalizePhone(phoneNumber);
-        DateTimeOffset now = timeProvider.GetUtcNow();
         OtpChallenge challenge = await dbContext.OtpChallenges
             .Where(otp =>
                 otp.DestinationPhone == normalizedPhone &&
@@ -82,6 +82,57 @@ public sealed class OtpService(
             .OrderByDescending(otp => otp.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw InvalidOtp();
+
+        await VerifyChallengeAsync(challenge, code, cancellationToken);
+    }
+
+    public async Task IssueEmailAsync(string email, OtpPurpose purpose, Guid userId, CancellationToken cancellationToken)
+    {
+        if (emailSender is null)
+            throw new ServiceUnavailableException(UserErrorCodes.EmailUnavailable, "Email delivery is unavailable.");
+        string destination = email.Trim().ToLowerInvariant();
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        List<OtpChallenge> active = await dbContext.OtpChallenges
+            .Where(item => item.DestinationEmail == destination && item.Purpose == purpose &&
+                item.UsedAt == null && item.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+        foreach (OtpChallenge item in active) item.RevokedAt = now;
+
+        string code = tokenHashService.CreateNumericCode();
+        dbContext.OtpChallenges.Add(new OtpChallenge
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            DestinationPhone = string.Empty,
+            DestinationEmail = destination,
+            Purpose = purpose,
+            CodeHash = tokenHashService.HashToken(code),
+            ExpiresAt = now.Add(Lifetime),
+            CreatedAt = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await emailSender.SendAsync(destination, "Smart Locking password reset code",
+            $"Your password reset code is {code}. It expires in 10 minutes.", cancellationToken);
+    }
+
+    public async Task VerifyAndConsumeEmailAsync(string email, string code, OtpPurpose purpose, Guid userId,
+        CancellationToken cancellationToken)
+    {
+        string destination = email.Trim().ToLowerInvariant();
+        OtpChallenge challenge = await dbContext.OtpChallenges
+            .Where(item => item.DestinationEmail == destination &&
+                item.Purpose == purpose && item.UserId == userId &&
+                item.UsedAt == null && item.RevokedAt == null)
+            .OrderByDescending(item => item.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw InvalidOtp();
+
+        await VerifyChallengeAsync(challenge, code, cancellationToken);
+    }
+
+    private async Task VerifyChallengeAsync(OtpChallenge challenge, string code, CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
 
         if (challenge.ExpiresAt <= now || challenge.LockedUntil > now)
         {

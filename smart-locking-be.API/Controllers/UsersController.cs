@@ -37,6 +37,13 @@ public class UsersController(IUserService userService) : ControllerBase
         return Ok(await userService.CreateUserAsync(adminId, request, GetIpAddress(), cancellationToken));
     }
 
+    [HttpPost("{id:guid}/temporary-password")]
+    public async Task<IActionResult> ReissueTemporaryPassword(Guid id, CancellationToken cancellationToken)
+    {
+        await userService.ReissueTemporaryPasswordAsync(User.GetRequiredUserId(), id, GetIpAddress(), cancellationToken);
+        return NoContent();
+    }
+
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> UpdateUser(
         Guid id,

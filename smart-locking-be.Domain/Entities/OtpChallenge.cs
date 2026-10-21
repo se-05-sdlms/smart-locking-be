@@ -23,9 +23,11 @@ public sealed class OtpChallenge
     public Guid? ParcelId { get; set; }
 
     /// <summary>
-    /// Số điện thoại đích nhận mã OTP được snapshot tại thời điểm phát hành.
+    /// Số điện thoại đích nhận mã OTP; rỗng khi mã được gửi qua email.
     /// </summary>
     public string DestinationPhone { get; set; } = string.Empty;
+
+    public string? DestinationEmail { get; set; }
 
     /// <summary>
     /// Mục đích sử dụng của mã OTP để tránh dùng chéo giữa các workflow.
