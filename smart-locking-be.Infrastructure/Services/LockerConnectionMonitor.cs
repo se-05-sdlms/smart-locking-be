@@ -25,13 +25,22 @@ public sealed class LockerConnectionMonitor(
     {
         DateTimeOffset cutoff = timeProvider.GetUtcNow() - timeout;
         List<Locker> stale = await dbContext.Lockers
+            .AsNoTracking()
             .Where(item => item.ConnectionStatus != LockerConnectionStatus.Offline &&
                 (item.LastSeenAt ?? item.CreatedAt) < cutoff)
             .ToListAsync(cancellationToken);
 
         foreach (Locker locker in stale)
         {
-            await ChangeStatusAsync(locker, LockerConnectionStatus.Offline, cancellationToken);
+            DateTimeOffset now = timeProvider.GetUtcNow();
+            int changed = await dbContext.Lockers
+                .Where(item => item.Id == locker.Id && item.ConnectionStatus == locker.ConnectionStatus &&
+                    (item.LastSeenAt ?? item.CreatedAt) < cutoff)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.ConnectionStatus, LockerConnectionStatus.Offline)
+                    .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+            if (changed == 1)
+                await RecordTransitionAsync(locker, locker.ConnectionStatus, LockerConnectionStatus.Offline, now, cancellationToken);
         }
     }
 
@@ -48,6 +57,12 @@ public sealed class LockerConnectionMonitor(
 
         locker.ConnectionStatus = status;
         locker.UpdatedAt = now;
+        await RecordTransitionAsync(locker, previous, status, now, cancellationToken);
+    }
+
+    private async Task RecordTransitionAsync(Locker locker, LockerConnectionStatus previous,
+        LockerConnectionStatus status, DateTimeOffset now, CancellationToken cancellationToken)
+    {
         dbContext.LockerEvents.Add(new LockerEvent
         {
             Id = Guid.NewGuid(),
