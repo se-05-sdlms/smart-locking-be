@@ -10,7 +10,8 @@ namespace smart_locking_be.Infrastructure.Services;
 
 public sealed class IncidentService(
     ApplicationDbContext dbContext,
-    TimeProvider timeProvider, IOperationsRealtimeNotifier? realtimeNotifier = null) : IIncidentService
+    TimeProvider timeProvider, ITokenHashService tokenHashService,
+    IOperationsRealtimeNotifier? realtimeNotifier = null) : IIncidentService
 {
     private static readonly HashSet<string> SupportedTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -393,6 +394,7 @@ public sealed class IncidentService(
             incident.Title,
             incident.Description,
             incident.EvidenceUrl,
+            incident.ReporterPhone,
             incident.LockerId!.Value,
             incident.Locker!.Code,
             incident.Locker.Address,
@@ -510,6 +512,7 @@ public sealed class IncidentService(
     }
     public async Task<GuestIncidentResponse> CreateGuestIncidentAsync(
         CreateGuestIncidentRequest request,
+        string? guestSessionToken,
         CancellationToken cancellationToken = default)
     {
         string type = RequireValue(request.Type, nameof(request.Type), 100);
@@ -518,22 +521,63 @@ public sealed class IncidentService(
         if (request.DeliveryRequestId.HasValue && request.ReturnRequestId.HasValue)
             throw new BadRequestException(IncidentErrorCodes.InvalidLink, "Only one delivery request or return request may be linked.");
 
+        if (string.IsNullOrWhiteSpace(request.LockerCode))
+            throw BadRequestException.For(nameof(request.LockerCode), "Locker code is required.");
         Locker locker = await dbContext.Lockers.SingleOrDefaultAsync(
             item => item.Code == request.LockerCode.Trim(), cancellationToken)
             ?? throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
+        Guid? deliveryId = request.DeliveryRequestId;
+        Guid? returnId = request.ReturnRequestId;
+        if (!string.IsNullOrWhiteSpace(guestSessionToken))
+        {
+            string hash = tokenHashService.HashToken(guestSessionToken.Trim());
+            DateTimeOffset current = timeProvider.GetUtcNow();
+            DeliveryRequest? session = await dbContext.DeliveryRequests.AsNoTracking().SingleOrDefaultAsync(item =>
+                item.GuestSessionTokenHash == hash && item.LockerId == locker.Id && item.SessionExpiresAt > current &&
+                item.Status != DeliveryRequestStatus.Deposited && item.Status != DeliveryRequestStatus.Rejected &&
+                item.Status != DeliveryRequestStatus.Expired && item.Status != DeliveryRequestStatus.Cancelled &&
+                item.Status != DeliveryRequestStatus.Failed, cancellationToken);
+            if (session is not null)
+            {
+                if (returnId.HasValue || (deliveryId.HasValue && deliveryId != session.Id))
+                    throw new BadRequestException(IncidentErrorCodes.InvalidLink, "Incident does not match the guest session.");
+                deliveryId = session.Id;
+            }
+            else
+            {
+                ReturnRequest? pickup = await dbContext.ReturnRequests.AsNoTracking().SingleOrDefaultAsync(item =>
+                    item.ShipperSessionTokenHash == hash && item.LockerId == locker.Id &&
+                    item.Status == ReturnRequestStatus.Deposited, cancellationToken);
+                SystemPolicy? policy = await dbContext.SystemPolicies.AsNoTracking()
+                    .Where(item => item.IsActive && item.EffectiveFrom <= current &&
+                        (!item.EffectiveTo.HasValue || item.EffectiveTo > current))
+                    .OrderByDescending(item => item.EffectiveFrom).FirstOrDefaultAsync(cancellationToken);
+                if (pickup is null || policy is null || pickup.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes) <= current)
+                    throw new UnauthorizedException(AuthErrorCodes.InvalidGuestSession, "Guest session is invalid or expired.");
+                if (deliveryId.HasValue || (returnId.HasValue && returnId != pickup.Id))
+                    throw new BadRequestException(IncidentErrorCodes.InvalidLink, "Incident does not match the guest session.");
+                returnId = pickup.Id;
+            }
+        }
+        else if (deliveryId.HasValue || returnId.HasValue)
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, "X-Guest-Session-Token is required for a related request.");
         Guid? compartmentId = request.LockerCompartmentId;
-        if (request.DeliveryRequestId.HasValue)
+        if (deliveryId.HasValue)
         {
             DeliveryRequest delivery = await dbContext.DeliveryRequests.SingleOrDefaultAsync(
-                item => item.Id == request.DeliveryRequestId && item.LockerId == locker.Id,
+                item => item.Id == deliveryId && item.LockerId == locker.Id,
                 cancellationToken) ?? throw new NotFoundException(DeliveryErrorCodes.NotFound, "Delivery request not found.");
+            if (compartmentId.HasValue && delivery.AllocatedCompartmentId.HasValue && compartmentId != delivery.AllocatedCompartmentId)
+                throw new BadRequestException(IncidentErrorCodes.InvalidLink, "Compartment does not match the guest session.");
             compartmentId ??= delivery.AllocatedCompartmentId;
         }
-        if (request.ReturnRequestId.HasValue)
+        if (returnId.HasValue)
         {
             ReturnRequest returnRequest = await dbContext.ReturnRequests.SingleOrDefaultAsync(
-                item => item.Id == request.ReturnRequestId && item.LockerId == locker.Id,
+                item => item.Id == returnId && item.LockerId == locker.Id,
                 cancellationToken) ?? throw new NotFoundException(ReturnErrorCodes.NotFound, "Return request not found.");
+            if (compartmentId.HasValue && returnRequest.AllocatedCompartmentId.HasValue && compartmentId != returnRequest.AllocatedCompartmentId)
+                throw new BadRequestException(IncidentErrorCodes.InvalidLink, "Compartment does not match the guest session.");
             compartmentId ??= returnRequest.AllocatedCompartmentId;
         }
         if (compartmentId.HasValue && !await dbContext.LockerCompartments.AnyAsync(
@@ -548,8 +592,8 @@ public sealed class IncidentService(
         Incident incident = new()
         {
             Id = Guid.NewGuid(),
-            DeliveryRequestId = request.DeliveryRequestId,
-            ReturnRequestId = request.ReturnRequestId,
+            DeliveryRequestId = deliveryId,
+            ReturnRequestId = returnId,
             LockerId = locker.Id,
             LockerCompartmentId = compartmentId,
             AssignedOperatorUserId = assignedOperatorUserId,
@@ -558,6 +602,8 @@ public sealed class IncidentService(
             Status = IncidentStatus.Open,
             Title = RequireValue(request.Title, nameof(request.Title), 200),
             Description = RequireValue(request.Description, nameof(request.Description), 4000),
+            EvidenceUrl = ValidateOptionalUrl(request.EvidenceUrl),
+            ReporterPhone = NormalizeOptional(request.ContactPhone, nameof(request.ContactPhone), 20),
             CreatedAt = now,
             UpdatedAt = now
         };

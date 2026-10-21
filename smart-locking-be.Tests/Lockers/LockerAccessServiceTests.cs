@@ -30,6 +30,7 @@ public sealed class LockerAccessServiceTests
         if (assigned)
             db.Add(new OperatorAssignment { Id = Guid.NewGuid(), OperatorUserId = actor, LockerId = locker.Id, RevokedAt = revoked ? Now : null });
         await db.SaveChangesAsync();
+        int initialAuditCount = await db.AuditLogs.CountAsync();
         var service = new LockerService(db);
 
         if (!allowed)
@@ -37,13 +38,13 @@ public sealed class LockerAccessServiceTests
             await Assert.ThrowsAsync<ForbiddenException>(() => service.UpdateLockerStatusAsync(actor, role,
                 locker.Id, new(LockerOperationalStatus.OutOfService, "Kiểm tra tủ")));
             Assert.Equal(LockerOperationalStatus.Operational, locker.OperationalStatus);
-            Assert.Empty(db.AuditLogs);
+            Assert.Equal(initialAuditCount, await db.AuditLogs.CountAsync());
             Assert.Empty(db.LockerEvents);
             return;
         }
 
         await service.UpdateLockerStatusAsync(actor, role, locker.Id, new(LockerOperationalStatus.OutOfService, "  Kiểm tra tủ  "));
-        var audit = await db.AuditLogs.SingleAsync();
+        var audit = await db.AuditLogs.SingleAsync(item => item.Action == "Locker.StatusChanged" && item.ActorUserId == actor);
         var change = await db.LockerEvents.SingleAsync();
         Assert.Equal(actor, audit.ActorUserId);
         Assert.Equal(actor, change.ActorUserId);
@@ -57,6 +58,7 @@ public sealed class LockerAccessServiceTests
     [Theory]
     [InlineData(LockerOperationalStatus.OutOfService, " ")]
     [InlineData((LockerOperationalStatus)999, "Kiểm tra tủ")]
+    [InlineData(LockerOperationalStatus.Inactive, "Kiểm tra tủ")]
     public async Task UpdateLockerStatus_RejectsInvalidInputWithoutChanges(LockerOperationalStatus status, string reason)
     {
         await using var db = CreateDbContext();
@@ -68,6 +70,81 @@ public sealed class LockerAccessServiceTests
         Assert.Equal(LockerOperationalStatus.Operational, locker.OperationalStatus);
         Assert.Empty(db.AuditLogs);
         Assert.Empty(db.LockerEvents);
+    }
+
+    [Theory]
+    [InlineData("parcel", "lockerStatus")]
+    [InlineData("return", "lockerStatus")]
+    [InlineData("reservation", "lockerStatus")]
+    [InlineData("parcel", "lockerEdit")]
+    [InlineData("return", "lockerEdit")]
+    [InlineData("reservation", "lockerEdit")]
+    [InlineData("parcel", "lockerDelete")]
+    [InlineData("return", "lockerDelete")]
+    [InlineData("reservation", "lockerDelete")]
+    [InlineData("parcel", "slotStatus")]
+    [InlineData("return", "slotStatus")]
+    [InlineData("reservation", "slotStatus")]
+    [InlineData("parcel", "slotMapping")]
+    [InlineData("return", "slotMapping")]
+    [InlineData("reservation", "slotMapping")]
+    public async Task CanonicalLockerMutations_BlockActiveOperations(string activeKind, string operation)
+    {
+        await using var db = CreateDbContext();
+        var (locker, slot) = await SeedLockerAsync(db);
+        if (activeKind == "parcel")
+        {
+            var delivery = new DeliveryRequest
+            {
+                Id = Guid.NewGuid(),
+                LockerId = locker.Id,
+                Locker = locker,
+                AllocatedCompartmentId = slot.Id,
+                AllocatedCompartment = slot,
+                Status = DeliveryRequestStatus.Deposited
+            };
+            db.Add(new Parcel { Id = Guid.NewGuid(), DeliveryRequestId = delivery.Id, DeliveryRequest = delivery, ParcelCode = "P-1", Status = ParcelStatus.Stored });
+        }
+        else if (activeKind == "return")
+            db.Add(new ReturnRequest { Id = Guid.NewGuid(), LockerId = locker.Id, AllocatedCompartmentId = slot.Id, ReturnCode = "123456", Status = ReturnRequestStatus.Deposited });
+        else
+            db.Add(new CompartmentReservation { Id = Guid.NewGuid(), LockerCompartmentId = slot.Id, LockerCompartment = slot, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5) });
+        await db.SaveChangesAsync();
+        int auditCount = await db.AuditLogs.CountAsync();
+        var service = new LockerService(db);
+        var actor = Guid.NewGuid();
+
+        await Assert.ThrowsAsync<ConflictException>(async () =>
+        {
+            switch (operation)
+            {
+                case "lockerStatus": await service.UpdateLockerStatusAsync(actor, "Administrator", locker.Id, new(LockerOperationalStatus.OutOfService, "Maintenance")); break;
+                case "lockerEdit": await service.UpdateLockerAsync(actor, locker.Id, new(locker.Code, locker.Address, locker.RecoveryAddress, locker.DeviceIdentifier, LockerOperationalStatus.Inactive)); break;
+                case "lockerDelete": await service.SoftDeleteLockerAsync(actor, locker.Id); break;
+                case "slotStatus": await service.UpdateCompartmentStatusAsync(actor, "Administrator", locker.Id, slot.Id, new(LockerCompartmentOperationalStatus.OutOfService)); break;
+                case "slotMapping": await service.UpdateCompartmentAsync(actor, locker.Id, slot.Id, new(slot.Code, slot.HardwareCode, 2)); break;
+            }
+        });
+
+        Assert.Equal(LockerOperationalStatus.Operational, locker.OperationalStatus);
+        Assert.Equal(LockerCompartmentOperationalStatus.Operational, slot.OperationalStatus);
+        Assert.Equal(1, slot.HardwareChannel);
+        Assert.Equal(auditCount, await db.AuditLogs.CountAsync());
+        Assert.Empty(db.LockerEvents);
+    }
+
+    [Fact]
+    public async Task LockerStatus_DoesNotRestoreInactiveLocker()
+    {
+        await using var db = CreateDbContext();
+        var (locker, _) = await SeedLockerAsync(db);
+        locker.OperationalStatus = LockerOperationalStatus.Inactive;
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<ConflictException>(() => new LockerService(db).UpdateLockerStatusAsync(
+            Guid.NewGuid(), "Administrator", locker.Id, new(LockerOperationalStatus.Operational, "Restore")));
+
+        Assert.Equal(LockerOperationalStatus.Inactive, locker.OperationalStatus);
     }
 
     [Theory]

@@ -27,7 +27,8 @@ public sealed record ParcelListItemResponse(
     DateTimeOffset? RemovedAt,
     decimal? OverdueAmount,
     string? Currency,
-    [property: JsonConverter(typeof(JsonStringEnumConverter))] OverdueChargeStatus? OverdueChargeStatus);
+    [property: JsonConverter(typeof(JsonStringEnumConverter))] OverdueChargeStatus? OverdueChargeStatus,
+    Guid? OverdueChargeId);
 
 public sealed record ParcelDetailResponse(
     Guid Id,
@@ -49,7 +50,8 @@ public sealed record ParcelDetailResponse(
     DateTimeOffset? RemovedAt,
     decimal? OverdueAmount,
     string? Currency,
-    [property: JsonConverter(typeof(JsonStringEnumConverter))] OverdueChargeStatus? OverdueChargeStatus);
+    [property: JsonConverter(typeof(JsonStringEnumConverter))] OverdueChargeStatus? OverdueChargeStatus,
+    Guid? OverdueChargeId);
 
 public sealed record ParcelStatusHistoryResponse(
     Guid Id,

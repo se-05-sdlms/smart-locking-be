@@ -56,6 +56,7 @@ public sealed record IncidentDetailResponse(
     string Title,
     string Description,
     string? EvidenceUrl,
+    string? ReporterPhone,
     Guid LockerId,
     string LockerCode,
     string LockerAddress,
@@ -82,7 +83,9 @@ public sealed record CreateGuestIncidentRequest(
     string Description,
     Guid? DeliveryRequestId = null,
     Guid? ReturnRequestId = null,
-    Guid? LockerCompartmentId = null);
+    Guid? LockerCompartmentId = null,
+    string? EvidenceUrl = null,
+    string? ContactPhone = null);
 
 public sealed record GuestIncidentResponse(
     Guid Id,

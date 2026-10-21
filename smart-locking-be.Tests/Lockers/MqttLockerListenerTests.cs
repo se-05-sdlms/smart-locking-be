@@ -8,12 +8,55 @@ using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
 using smart_locking_be.Infrastructure.Services;
+using smart_locking_be.Application.Exceptions;
 
 namespace smart_locking_be.Tests.Lockers;
 
 public sealed class MqttLockerListenerTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public async Task MqttTopic_RejectsProofClaimingAnotherDevice()
+    {
+        using var provider = (ServiceProvider)BuildServiceProvider(Guid.NewGuid().ToString());
+        var db = provider.GetRequiredService<ApplicationDbContext>();
+        var listener = new MqttLockerListenerService(MqttConfiguration(), provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<MqttLockerListenerService>.Instance);
+        var proof = $"o1|{Guid.NewGuid():N}|{Guid.NewGuid():N}|OTHER|1|R|0900000001|123456|0|0|1000|1";
+
+        await Assert.ThrowsAsync<BadRequestException>(() => listener.HandleMessageAsync("lockers/LKR-B/events/offline", proof, default));
+
+        Assert.Empty(db.OfflineLockerEvents); Assert.Empty(db.ReturnRequests); Assert.Empty(db.AuditLogs);
+    }
+
+    [Fact]
+    public async Task MqttJournal_AppliesOrderedReturnCycle_AndIgnoresDuplicate()
+    {
+        using var provider = (ServiceProvider)BuildServiceProvider(Guid.NewGuid().ToString());
+        var db = provider.GetRequiredService<ApplicationDbContext>();
+        var locker = new Locker { Id = Guid.NewGuid(), Code = "B", DeviceIdentifier = "LKR-B", Address = "B", RecoveryAddress = "B", OperationalStatus = LockerOperationalStatus.Operational };
+        var slot = new LockerCompartment { Id = Guid.NewGuid(), LockerId = locker.Id, Locker = locker, Code = "B1", HardwareCode = "CH1", HardwareChannel = 1, OperationalStatus = LockerCompartmentOperationalStatus.Operational };
+        var user = new User { Id = Guid.NewGuid(), Role = UserRole.Resident, Status = UserStatus.Active, PhoneNumber = "0900000001" };
+        db.AddRange(slot, new ResidentProfile { Id = Guid.NewGuid(), UserId = user.Id, User = user, FullName = "Resident" });
+        await db.SaveChangesAsync();
+        var listener = new MqttLockerListenerService(MqttConfiguration(), provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<MqttLockerListenerService>.Instance, new FixedTimeProvider());
+        var subject = Guid.NewGuid();
+        long now = Now.ToUnixTimeSeconds();
+        string deposit = $"o1|{Guid.NewGuid():N}|{subject:N}|LKR-B|1|R|0900000001|123456|{now - 4}|{now - 3}|1000|1";
+        string pickup = $"o1|{Guid.NewGuid():N}|{subject:N}|LKR-B|1|G|0900000001|-|{now - 2}|{now - 1}|1000|2";
+
+        await listener.HandleMessageAsync("lockers/LKR-B/events/offline", deposit, default);
+        Assert.Equal(ReturnRequestStatus.Deposited, (await db.ReturnRequests.AsNoTracking().SingleAsync()).Status);
+        await listener.HandleMessageAsync("lockers/LKR-B/events/offline", pickup, default);
+        await listener.HandleMessageAsync("lockers/LKR-B/events/offline", pickup, default);
+
+        Assert.Equal(ReturnRequestStatus.Completed, (await db.ReturnRequests.AsNoTracking().SingleAsync()).Status);
+        Assert.Equal(2, await db.LockerAccessEvents.CountAsync());
+        Assert.Equal(2, await db.OfflineLockerEvents.CountAsync());
+        Assert.Equal(2, (await db.OfflineLockerCursors.SingleAsync()).LastSequence);
+    }
 
     [Fact]
     public async Task HandleMessageAsync_ClosedPayload_UpdatesOnlineAndDoorClosed()
@@ -53,7 +96,7 @@ public sealed class MqttLockerListenerTests
         dbContext.LockerCompartments.Add(compartment);
         await dbContext.SaveChangesAsync();
 
-        var config = new ConfigurationBuilder().Build();
+        var config = MqttConfiguration();
         var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
         var listener = new MqttLockerListenerService(config, scopeFactory, NullLogger<MqttLockerListenerService>.Instance);
 
@@ -108,7 +151,7 @@ public sealed class MqttLockerListenerTests
         dbContext.LockerCompartments.Add(compartment);
         await dbContext.SaveChangesAsync();
 
-        var config = new ConfigurationBuilder().Build();
+        var config = MqttConfiguration();
         var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
         var listener = new MqttLockerListenerService(config, scopeFactory, NullLogger<MqttLockerListenerService>.Instance);
 
@@ -129,7 +172,7 @@ public sealed class MqttLockerListenerTests
         var dbName = Guid.NewGuid().ToString();
         var serviceProvider = BuildServiceProvider(dbName);
 
-        var config = new ConfigurationBuilder().Build();
+        var config = MqttConfiguration();
         var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
         var listener = new MqttLockerListenerService(config, scopeFactory, NullLogger<MqttLockerListenerService>.Instance);
 
@@ -175,7 +218,7 @@ public sealed class MqttLockerListenerTests
         dbContext.LockerCompartments.Add(compartment);
         await dbContext.SaveChangesAsync();
 
-        var config = new ConfigurationBuilder().Build();
+        var config = MqttConfiguration();
         var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
         var listener = new MqttLockerListenerService(config, scopeFactory, NullLogger<MqttLockerListenerService>.Instance);
 
@@ -239,7 +282,7 @@ public sealed class MqttLockerListenerTests
             OccurredAt = Now
         });
         await db.SaveChangesAsync();
-        var listener = new MqttLockerListenerService(new ConfigurationBuilder().Build(),
+        var listener = new MqttLockerListenerService(MqttConfiguration(),
             provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<MqttLockerListenerService>.Instance);
 
         await listener.HandleMessageAsync("lockers/LKR-1A0844/doors/1/status", "CLOSED", CancellationToken.None);
@@ -280,7 +323,7 @@ public sealed class MqttLockerListenerTests
         };
         db.Add(slot);
         await db.SaveChangesAsync();
-        var listener = new MqttLockerListenerService(new ConfigurationBuilder().Build(),
+        var listener = new MqttLockerListenerService(MqttConfiguration(),
             provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<MqttLockerListenerService>.Instance,
             new FixedTimeProvider());
         string payload = stale
@@ -297,6 +340,8 @@ public sealed class MqttLockerListenerTests
         Assert.Empty(await db.LockerEvents.ToListAsync());
     }
 
+    private static IConfiguration MqttConfiguration() => new ConfigurationBuilder().Build();
+
     private static IServiceProvider BuildServiceProvider(string dbName)
     {
         var services = new ServiceCollection();
@@ -308,6 +353,8 @@ public sealed class MqttLockerListenerTests
 
     private static void RegisterMonitor(IServiceCollection services)
     {
+        services.AddSingleton<IBluetoothMessageCodec, BluetoothProtocol>();
+        services.AddScoped<IOfflinePinService, OfflinePinService>();
         services.AddSingleton<TimeProvider>(new FixedTimeProvider());
         services.AddSingleton<IOperationsRealtimeNotifier, NoopRealtime>();
         services.AddScoped<LockerConnectionMonitor>();

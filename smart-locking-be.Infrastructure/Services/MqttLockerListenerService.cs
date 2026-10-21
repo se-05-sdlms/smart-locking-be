@@ -158,6 +158,8 @@ public sealed class MqttLockerListenerService(
 
     internal async Task HandleMessageAsync(string topic, string payload, CancellationToken cancellationToken, bool isRetained = false)
     {
+        // Giữ luồng MQTT hiện có. DeviceId được đối chiếu với topic, nhưng o1/z2 chưa có
+        // chữ ký; xác thực publisher theo thiết bị vẫn cần ACL broker khi triển khai bảo mật.
         // Topic pattern: lockers/{deviceId}/doors/{channel}/status
         var parts = topic.Split('/');
         if (parts.Length == 3 && parts[0] == "lockers" && parts[2] == "alerts")

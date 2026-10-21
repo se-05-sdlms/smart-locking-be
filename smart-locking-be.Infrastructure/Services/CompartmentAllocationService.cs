@@ -30,6 +30,7 @@ public sealed class CompartmentAllocationService(
         // Vẫn kiểm tra ngăn có hàng, đặt chỗ và yêu cầu đang sử dụng như luồng online.
         LockerCompartment? compartment = await dbContext.LockerCompartments
             .Where(item => item.LockerId == lockerId &&
+                           item.Locker.OperationalStatus == LockerOperationalStatus.Operational &&
                            item.OperationalStatus == LockerCompartmentOperationalStatus.Operational &&
                            (verifyDoorOnDevice || item.DoorStatus == DoorStatus.Closed))
             .Where(item => !dbContext.CompartmentReservations.Any(reservation =>

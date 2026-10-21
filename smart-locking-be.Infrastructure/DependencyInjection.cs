@@ -29,6 +29,7 @@ public static class DependencyInjection
         services.AddScoped<IService, Service>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IOtpService, OtpService>();
+        services.AddScoped<IEmailSender, SmtpEmailSender>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IPasswordHashService, Pbkdf2PasswordHashService>();
         services.AddScoped<ITokenHashService, Sha256TokenHashService>();
@@ -40,9 +41,12 @@ public static class DependencyInjection
             options.ChecksumKey = configuration["PayOS:ChecksumKey"] ?? string.Empty;
             options.ReturnUrl = configuration["PayOS:ReturnUrl"] ?? string.Empty;
             options.CancelUrl = configuration["PayOS:CancelUrl"] ?? string.Empty;
+            options.OverdueReturnUrl = configuration["PayOS:OverdueReturnUrl"] ?? string.Empty;
+            options.OverdueCancelUrl = configuration["PayOS:OverdueCancelUrl"] ?? string.Empty;
         });
         services.AddScoped<ISubscriptionPlanService, SubscriptionPlanService>();
         services.AddScoped<IResidentSubscriptionService, ResidentSubscriptionService>();
+        services.AddScoped<IOverduePaymentService, OverduePaymentService>();
         services.AddScoped<IPaymentGatewayService, PayOSPaymentGatewayService>();
         services.AddScoped<ILockerService, LockerService>();
         services.AddScoped<ILockerAccessService, LockerAccessService>();

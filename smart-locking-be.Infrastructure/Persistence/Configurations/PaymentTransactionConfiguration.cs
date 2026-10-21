@@ -9,6 +9,7 @@ public sealed class PaymentTransactionConfiguration() : BaseConfiguration<Paymen
     protected override void ConfigureEntity(EntityTypeBuilder<PaymentTransaction> builder)
     {
         Varchar(builder.Property(entity => entity.ExternalOrderCode)).HasMaxLength(150);
+        Varchar(builder.Property(entity => entity.CheckoutUrl)).HasMaxLength(2048);
         Varchar(builder.Property(entity => entity.ExternalTransactionId)).HasMaxLength(150);
         builder.Property(entity => entity.Amount).HasPrecision(18, 2);
         Varchar(builder.Property(entity => entity.Currency)).IsRequired().HasMaxLength(3);
@@ -30,6 +31,10 @@ public sealed class PaymentTransactionConfiguration() : BaseConfiguration<Paymen
             .IsUnique();
         builder.HasIndex(entity => new { entity.OverdueChargeId, entity.Status })
             .HasDatabaseName("IX_PaymentTransaction_Charge_Status");
+        builder.HasIndex(entity => entity.OverdueChargeId)
+            .HasDatabaseName("UX_PaymentTransaction_PendingCharge")
+            .HasFilter("\"Status\" = 'Pending'")
+            .IsUnique();
         builder.HasIndex(entity => entity.RequestedAt)
             .HasDatabaseName("IX_PaymentTransaction_RequestedAt");
 

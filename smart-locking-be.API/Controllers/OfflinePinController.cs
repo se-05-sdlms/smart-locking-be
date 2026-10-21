@@ -8,17 +8,16 @@ using smart_locking_be.Application.Interfaces.Services;
 
 namespace smart_locking_be.API.Controllers;
 
-/// <summary>Nhận nhật ký offline do client chuyển tiếp và cung cấp danh sách đối soát cho người vận hành.</summary>
+/// <summary>Cung cấp danh sách đối soát; chưa cho phép client HTTP chuyển tiếp nhật ký ESP chưa có chữ ký.</summary>
 [ApiController, Route("api/bluetooth/offline")]
 [EnableRateLimiting(RateLimitPolicyNames.DeviceCommand)]
 public sealed class OfflinePinController(IOfflinePinService service) : ControllerBase
 {
     /// <summary>
-    /// Nhận lô nhật ký mở/đóng cửa từ ESP khi client có mạng trở lại. Service đối chiếu giao dịch,
-    /// thiết bị, thứ tự event và chống áp dụng trùng; không suy ra hoàn tất chỉ từ lệnh mở chốt.
-    /// Anonymous phục vụ chuyển tiếp offline; request được giới hạn kích thước và tần suất.
+    /// Route tương thích hiện từ chối toàn bộ proof unsigned, không lưu event hoặc trả ACK.
+    /// Đăng nhập không chứng minh nguồn ESP. Chỉ mở lại HTTP relay khi có MAC/chữ ký thiết bị.
     /// </summary>
-    [HttpPost("sync"), AllowAnonymous, RequestSizeLimit(65_000)]
+    [HttpPost("sync"), Authorize, RequestSizeLimit(65_000)]
     public async Task<OfflinePinSyncResponse> Sync(OfflinePinSyncRequest request, CancellationToken ct) =>
         await service.SyncAsync(request, ct);
     /// <summary>

@@ -139,15 +139,16 @@ public sealed class CompartmentResetService(ICompartmentResetStore store, ICompa
     }
     public async Task<CompartmentResetResponse> ConfirmAsync(Guid userId, string role, Guid commandId, string proof, CancellationToken ct = default)
     {
-        var (_, data, slot) = await ReadAsync(commandId, ct);
+        var (_, _, slot) = await ReadAsync(commandId, ct);
         await AuthorizeAsync(userId, role, slot.LockerId, ct);
         if (protocol.ParseResetReceipt(proof).CommandId != commandId) throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Phản hồi không khớp yêu cầu.");
-        await ReceiveAsync(data.Device, proof, ct);
+        // z2 do HTTP client chuyển tiếp cũng chưa có chữ ký thiết bị. Không dùng nó để
+        // giải phóng ngăn hoặc thu hồi PIN; chỉ trả kết quả đã nhận qua adapter MQTT.
         return await ResponseAsync(commandId, ct);
     }
     public async Task ReceiveAsync(string device, string proof, CancellationToken ct = default)
     {
-        // MQTT và web BLE có thể chuyển cùng phản hồi đồng thời trong một BE.
+        // Chỉ adapter MQTT được gọi; ACK trùng vẫn chỉ áp dụng một lần.
         await CompletionLock.WaitAsync(ct);
         try { await ApplyReceiptAsync(device, proof, ct); }
         finally { CompletionLock.Release(); }

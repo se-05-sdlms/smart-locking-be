@@ -14,9 +14,9 @@ public interface ICompartmentResetService
     Task<CompartmentResetResponse> RequestAsync(Guid userId, string role, Guid lockerId, Guid compartmentId, CompartmentResetRequest request, CancellationToken ct = default);
     // Đọc kết quả đã lưu; không tự phát lại lệnh MQTT.
     Task<CompartmentResetResponse> GetAsync(Guid userId, string role, Guid commandId, CancellationToken ct = default);
-    // Người vận hành chuyển phản hồi BLE về; phải có quyền trên tủ của chính yêu cầu này.
+    // HTTP/BLE unsigned không áp dụng nghiệp vụ; chỉ đọc kết quả đã lưu, sau kiểm tra quyền trên tủ.
     Task<CompartmentResetResponse> ConfirmAsync(Guid userId, string role, Guid commandId, string proof, CancellationToken ct = default);
-    // Đối chiếu phản hồi và áp dụng một lần; ACK trùng qua MQTT/BLE không cập nhật lần hai.
+    // Chỉ adapter MQTT: đối chiếu phản hồi và áp dụng một lần; ACK trùng không cập nhật lần hai.
     Task ReceiveAsync(string device, string proof, CancellationToken ct = default);
     // Chuyển hàng chỉ hoàn tất sau khi ESP đã xóa trạng thái/PIN của đúng kiện, không mở chốt.
     Task<DTOs.Parcels.OverdueTransferResponse> RequestTransferAsync(Guid userId, string role, Guid parcelId, CancellationToken ct = default);

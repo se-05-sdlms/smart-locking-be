@@ -52,10 +52,9 @@ public sealed class CompartmentResetsController(ICompartmentResetService service
         => Ok(await service.GetAsync(Actor, Role, commandId, ct));
 
     /// <summary>
-    /// Tiếp nhận chuỗi phản hồi đặt lại do client đọc từ ESP qua Bluetooth.
-    /// Service đối chiếu mã lệnh, thiết bị, kênh và giao dịch trước khi cập nhật nghiệp vụ.
-    /// Phản hồi lỗi không giải phóng ngăn; phản hồi đã áp dụng được xử lý lặp mà không cập nhật lần hai.
-    /// Trạng thái cửa lấy từ phản hồi ESP, không mặc định cửa đã đóng sau khi đặt lại.
+    /// Chỉ trả kết quả đã được BE tiếp nhận qua adapter MQTT.
+    /// z2 unsigned do HTTP client chuyển tiếp không chứng minh nguồn ESP nên không cập nhật nghiệp vụ.
+    /// Ngăn vẫn Pending đến khi ESP gửi lại qua MQTT; xác thực nguồn theo thiết bị cần triển khai riêng.
     /// </summary>
     [HttpPost("{commandId:guid}/confirm")]
     public async Task<IActionResult> Confirm(Guid commandId, CompartmentResetConfirmation request, CancellationToken ct)

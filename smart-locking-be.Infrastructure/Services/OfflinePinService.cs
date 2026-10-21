@@ -13,19 +13,11 @@ namespace smart_locking_be.Infrastructure.Services;
 
 public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoothMessageCodec protocol, TimeProvider clock, IDeliveryRequestService? deliveries = null) : IOfflinePinService
 {
-    public async Task<OfflinePinSyncResponse> SyncAsync(OfflinePinSyncRequest request, CancellationToken ct = default)
-    {
-        if (request.Events is null || request.Events.Count is < 1 or > 100) throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Supply 1..100 device events.");
-        List<OfflinePinSyncResult> results = [];
-        foreach (string proof in request.Events)
-        {
-            if (string.IsNullOrEmpty(proof) || proof.Length > 512) throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Invalid device event.");
-            string[] parts = proof.Split('|');
-            if (parts.Length != 12) throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Invalid device event.");
-            results.Add(await ReceiveAsync(parts[3], proof, ct));
-        }
-        return new(results);
-    }
+    // JWT xác thực người dùng, không xác thực nguồn ESP. o1 chưa có MAC/chữ ký nên HTTP
+    // không được lưu/áp dụng hoặc ACK, kể cả khi người chuyển tiếp đã đăng nhập.
+    public Task<OfflinePinSyncResponse> SyncAsync(OfflinePinSyncRequest request, CancellationToken ct = default) =>
+        throw new ForbiddenException(BluetoothErrorCodes.UnverifiedEvidence,
+            "Unsigned device events cannot be synchronized over HTTP. Let the ESP replay its journal through an authenticated device channel.");
 
     // Nhật ký chờ/đối soát cũng hiển thị cho quản trị; tuyệt đối không trả PIN hoặc proof chứa PIN.
     public async Task<IReadOnlyList<OfflinePinEventResponse>> GetEventsAsync(Guid userId, string role, string? device, string? status,

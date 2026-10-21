@@ -7,4 +7,6 @@ public sealed class PayOSOptions
     public string ChecksumKey { get; set; } = string.Empty;
     public string ReturnUrl { get; set; } = string.Empty;
     public string CancelUrl { get; set; } = string.Empty;
+    public string OverdueReturnUrl { get; set; } = string.Empty;
+    public string OverdueCancelUrl { get; set; } = string.Empty;
 }

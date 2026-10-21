@@ -11,6 +11,37 @@ namespace smart_locking_be.Tests.Lockers;
 
 public sealed class CompartmentResetTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HttpSync_RejectsFabricatedReturnCycle_WithoutAnyBusinessChanges(bool authenticated)
+    {
+        var x = Setup(); await using var db = x.Db;
+        int auditCount = await db.AuditLogs.CountAsync();
+        var subject = Guid.NewGuid();
+        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var request = new OfflinePinSyncRequest([
+            $"o1|{Guid.NewGuid():N}|{subject:N}|LKR-B|1|R|0900000001|123456|{now - 4}|{now - 3}|1000|1",
+            $"o1|{Guid.NewGuid():N}|{subject:N}|LKR-B|1|G|0900000001|-|{now - 2}|{now - 1}|1000|2"
+        ]);
+        var controller = new smart_locking_be.API.Controllers.OfflinePinController(
+            new OfflinePinService(db, new BluetoothProtocol(), TimeProvider.System));
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        if (authenticated)
+            context.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())], "test"));
+        controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = context };
+
+        var error = await Assert.ThrowsAsync<ForbiddenException>(() => controller.Sync(request, default));
+
+        Assert.Equal(smart_locking_be.Application.Errors.BluetoothErrorCodes.UnverifiedEvidence, error.ErrorCode);
+        Assert.Equal(ReturnRequestStatus.Deposited, x.Request.Status);
+        Assert.Single(db.ReturnRequests);
+        Assert.Empty(db.OfflineLockerEvents); Assert.Empty(db.OfflineLockerCursors);
+        Assert.Empty(db.LockerAccessEvents); Assert.Empty(db.LockerEvents);
+        Assert.Equal(auditCount, await db.AuditLogs.CountAsync());
+    }
+
     private sealed class Dispatcher : ICompartmentResetDispatcher
     {
         public string? Command; public bool Fail;
@@ -115,7 +146,7 @@ public sealed class CompartmentResetTests
         var first = await parcels.TransferOverdueAsync(actor, "Administrator", parcel.Id);
         var second = await parcels.TransferOverdueAsync(actor, "Administrator", parcel.Id);
         Assert.Equal(first.ResetCommandId, second.ResetCommandId);
-        Assert.Single(db.AuditLogs); Assert.Equal(ParcelStatus.Overdue, parcel.Status);
+        Assert.Single(db.AuditLogs.Where(a => a.Action == "LockerCompartment.ResetRequested")); Assert.Equal(ParcelStatus.Overdue, parcel.Status);
         await Assert.ThrowsAsync<ConflictException>(() => new LockerService(db).UpdateCompartmentStatusAsync(actor, "Administrator",
             x.Slot.LockerId, x.Slot.Id, new(LockerCompartmentOperationalStatus.Operational)));
     }
@@ -124,10 +155,11 @@ public sealed class CompartmentResetTests
     public async Task OverdueTransfer_RejectsTooEarly_AndUnassignedOperator()
     {
         var x = Setup(); await using var db = x.Db; var parcel = SeedTransfer(db, x.Slot, x.Request);
+        int initialAudits = await db.AuditLogs.CountAsync();
         await Assert.ThrowsAsync<ForbiddenException>(() => x.Service.RequestTransferAsync(Guid.NewGuid(), "LockerOperator", parcel.Id));
         parcel.MaxStorageUntil = DateTimeOffset.UtcNow.AddDays(1); await db.SaveChangesAsync();
         await Assert.ThrowsAsync<ConflictException>(() => x.Service.RequestTransferAsync(Guid.NewGuid(), "Administrator", parcel.Id));
-        Assert.Empty(db.AuditLogs); Assert.Null(x.Transport.Command);
+        Assert.Equal(initialAudits, await db.AuditLogs.CountAsync()); Assert.Null(x.Transport.Command);
     }
 
     [Fact]
@@ -187,11 +219,12 @@ public sealed class CompartmentResetTests
         var service = new OfflinePinService(db, new BluetoothProtocol(), TimeProvider.System);
         var first = await service.ReceiveAsync(device, proof);
         Assert.Equal("NeedsReview", first.Status);
-        Assert.Equal(2, await db.AuditLogs.CountAsync()); // Received + NeedsReview.
+        Assert.Equal(2, await db.AuditLogs.CountAsync(a => a.Action.StartsWith("OfflinePin."))); // Received + NeedsReview.
+        int initialAudits = await db.AuditLogs.CountAsync();
         Assert.Equal(accessCount, await db.LockerAccessEvents.CountAsync());
         Assert.DoesNotContain(db.LockerAccessEvents, a => a.Result == LockerAccessResult.Succeeded);
         await service.ReceiveAsync(device, proof);
-        Assert.Equal(2, await db.AuditLogs.CountAsync()); Assert.Single(db.Incidents);
+        Assert.Equal(initialAudits, await db.AuditLogs.CountAsync()); Assert.Single(db.Incidents);
     }
     private static (ApplicationDbContext Db, Dispatcher Transport, CompartmentResetService Service, LockerCompartment Slot, ReturnRequest Request) Setup()
     {
@@ -233,7 +266,13 @@ public sealed class CompartmentResetTests
         Assert.Equal(LockerCompartmentOperationalStatus.OutOfService, x.Slot.OperationalStatus);
         Assert.Empty(db.LockerEvents);
         var proof = $"z2|{response.CommandId:N}|LKR-B|1|{x.Request.Id:N}|OPEN|OK";
-        await x.Service.ConfirmAsync(actor, "LockerOperator", response.CommandId, proof);
+        var unverified = await x.Service.ConfirmAsync(actor, "LockerOperator", response.CommandId, proof);
+        Assert.Equal("Pending", unverified.Status);
+        Assert.Equal(ReturnRequestStatus.Deposited, x.Request.Status);
+        Assert.Equal(LockerCompartmentOperationalStatus.OutOfService, x.Slot.OperationalStatus);
+        Assert.Empty(db.LockerEvents);
+        // Chỉ adapter MQTT tin cậy mới được áp dụng ACK. Chuỗi z2 từ HTTP không phải bằng chứng ESP.
+        await x.Service.ReceiveAsync("LKR-B", proof);
         Assert.Equal(ReturnRequestStatus.Cancelled, x.Request.Status);
         Assert.Equal(DoorStatus.Open, x.Slot.DoorStatus);
         Assert.Equal(LockerCompartmentOperationalStatus.Operational, x.Slot.OperationalStatus);
@@ -266,7 +305,8 @@ public sealed class CompartmentResetTests
         var x = Setup(); await using var db = x.Db; var actor = Guid.NewGuid(); x.Transport.Fail = true;
         var first = await x.Service.RequestAsync(actor, "Administrator", x.Slot.LockerId, x.Slot.Id, new(x.Request.Id, true, "Đã lấy hết đồ"));
         var retry = await x.Service.RequestAsync(actor, "Administrator", x.Slot.LockerId, x.Slot.Id, new(x.Request.Id, true, "Thử lại", true));
-        Assert.Equal(first.CommandId, retry.CommandId); Assert.NotNull(retry.Command); Assert.Single(db.AuditLogs);
+        Assert.Equal(first.CommandId, retry.CommandId); Assert.NotNull(retry.Command);
+        Assert.Single(db.AuditLogs.Where(a => a.Action == "LockerCompartment.ResetRequested"));
         await Assert.ThrowsAsync<ConflictException>(() => new LockerService(db).UpdateCompartmentStatusAsync(actor, "Administrator", x.Slot.LockerId, x.Slot.Id, new(LockerCompartmentOperationalStatus.Operational)));
     }
     [Fact]

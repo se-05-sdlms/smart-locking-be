@@ -1108,6 +1108,10 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("DestinationEmail")
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying");
+
                     b.Property<string>("DestinationPhone")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -1139,6 +1143,10 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ParcelId")
                         .HasDatabaseName("IX_OtpChallenge_ParcelId");
+
+                    b.HasIndex("DestinationEmail", "Purpose", "CreatedAt")
+                        .HasDatabaseName("IX_OtpChallenge_Email_Purpose_CreatedAt")
+                        .HasFilter("\"DestinationEmail\" IS NOT NULL");
 
                     b.HasIndex("DestinationPhone", "Purpose", "CreatedAt")
                         .HasDatabaseName("IX_OtpChallenge_Destination_Purpose_CreatedAt");
@@ -1320,6 +1328,10 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<string>("CheckoutUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying");
+
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1360,6 +1372,11 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("UX_PaymentTransaction_ExternalTransactionId")
                         .HasFilter("\"ExternalTransactionId\" IS NOT NULL");
+
+                    b.HasIndex("OverdueChargeId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PaymentTransaction_PendingCharge")
+                        .HasFilter("\"Status\" = 'Pending'");
 
                     b.HasIndex("RequestedAt")
                         .HasDatabaseName("IX_PaymentTransaction_RequestedAt");
