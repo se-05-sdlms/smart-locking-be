@@ -4,6 +4,8 @@ namespace smart_locking_be.Application.Interfaces.Services;
 
 public interface ILockerService
 {
+    Task<PublicLockerResponse> GetPublicLockerAsync(string code, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyCollection<LockerSummaryResponse>> GetLockersAsync(Guid userId, string userRole, string? search = null, CancellationToken cancellationToken = default);
 
     Task<LockerDetailResponse> GetLockerByIdAsync(Guid userId, string userRole, Guid lockerId, CancellationToken cancellationToken = default);

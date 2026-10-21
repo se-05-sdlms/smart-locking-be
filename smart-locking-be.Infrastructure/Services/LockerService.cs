@@ -9,6 +9,22 @@ namespace smart_locking_be.Infrastructure.Services;
 
 public sealed class LockerService(ApplicationDbContext dbContext) : ILockerService
 {
+    public async Task<PublicLockerResponse> GetPublicLockerAsync(string code, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+            throw BadRequestException.For(nameof(code), "Locker code is required.");
+
+        var locker = await dbContext.Lockers.AsNoTracking()
+            .Where(item => item.Code == code.Trim())
+            .Select(item => new { item.Code, item.Address, item.OperationalStatus })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
+        if (locker.OperationalStatus != LockerOperationalStatus.Operational)
+            throw new ConflictException(LockerErrorCodes.NotOperational, "Locker is not operational.");
+
+        return new PublicLockerResponse(locker.Code, locker.Address, true);
+    }
+
     public async Task<IReadOnlyCollection<LockerSummaryResponse>> GetLockersAsync(
         Guid userId,
         string userRole,
