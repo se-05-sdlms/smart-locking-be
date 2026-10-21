@@ -1616,7 +1616,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("EffectiveTo")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<bool>("EnableFaceRecognition")
+                    b.Property<bool>("EnableBluetoothUnlock")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("EnableOtp")

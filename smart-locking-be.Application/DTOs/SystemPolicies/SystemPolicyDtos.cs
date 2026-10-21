@@ -18,7 +18,7 @@ public sealed record SaveSystemPolicyRequest(
     int OtpLockoutMinutes,
     bool EnableOtp,
     bool EnableRemoteUnlock,
-    bool EnableFaceRecognition,
+    bool EnableBluetoothUnlock,
     DateTimeOffset EffectiveFrom);
 
 public sealed record SystemPolicyResponse(
@@ -39,7 +39,7 @@ public sealed record SystemPolicyResponse(
     int OtpLockoutMinutes,
     bool EnableOtp,
     bool EnableRemoteUnlock,
-    bool EnableFaceRecognition,
+    bool EnableBluetoothUnlock,
     DateTimeOffset EffectiveFrom,
     DateTimeOffset? EffectiveTo,
     bool IsActive,

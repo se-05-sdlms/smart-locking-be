@@ -109,7 +109,7 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
         policy.OtpLockoutMinutes = request.OtpLockoutMinutes;
         policy.EnableOtp = request.EnableOtp;
         policy.EnableRemoteUnlock = request.EnableRemoteUnlock;
-        policy.EnableFaceRecognition = request.EnableFaceRecognition;
+        policy.EnableBluetoothUnlock = request.EnableBluetoothUnlock;
         policy.EffectiveFrom = request.EffectiveFrom;
     }
 
@@ -132,5 +132,5 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
         item.OverdueStartAfterHours, item.OverdueFeePerHour, item.Currency, item.MaxStorageHours,
         item.ClearanceEligibilityAfterHours, item.ClearanceNoticeBeforeHours, item.PickupReminderStartDay,
         item.OtpMaxAttempts, item.OtpLockoutMinutes, item.EnableOtp, item.EnableRemoteUnlock,
-        item.EnableFaceRecognition, item.EffectiveFrom, item.EffectiveTo, item.IsActive, item.CreatedAt);
+        item.EnableBluetoothUnlock, item.EffectiveFrom, item.EffectiveTo, item.IsActive, item.CreatedAt);
 }
