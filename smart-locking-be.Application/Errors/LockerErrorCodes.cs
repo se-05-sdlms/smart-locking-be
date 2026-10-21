@@ -8,6 +8,7 @@ public static class LockerErrorCodes
     public const string AccessDenied = "locker/access_denied";
     public const string InvalidCompartment = "locker/invalid_compartment";
     public const string OpenFailed = "locker/open_failed";
+    public const string Offline = "locker/offline";
     public const string CodeAlreadyExists = "locker/code_already_exists";
     public const string DeviceAlreadyExists = "locker/device_already_exists";
     public const string CompartmentAlreadyExists = "locker/compartment_already_exists";
