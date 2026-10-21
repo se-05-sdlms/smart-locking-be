@@ -18,9 +18,9 @@ public sealed class IncidentAction
     public Guid IncidentId { get; set; }
 
     /// <summary>
-    /// Mã định danh người dùng / Nhân viên thực hiện hành động.
+    /// Mã định danh người dùng / Nhân viên thực hiện hành động; null khi hệ thống tự thực hiện (ví dụ tự escalate quá hạn SLA).
     /// </summary>
-    public Guid ActionByUserId { get; set; }
+    public Guid? ActionByUserId { get; set; }
 
     /// <summary>
     /// Mã loại hành động đã thực hiện.
@@ -53,7 +53,7 @@ public sealed class IncidentAction
     public Incident Incident { get; set; } = null!;
 
     /// <summary>
-    /// Người dùng thực hiện hành động.
+    /// Người dùng thực hiện hành động; null khi là hệ thống.
     /// </summary>
-    public User ActionByUser { get; set; } = null!;
+    public User? ActionByUser { get; set; }
 }
