@@ -55,7 +55,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         [FromBody] UpdateLockerRequest request,
         CancellationToken cancellationToken)
     {
-        return Ok(await lockerService.UpdateLockerAsync(id, request, cancellationToken));
+        return Ok(await lockerService.UpdateLockerAsync(User.GetRequiredUserId(), id, request, cancellationToken));
     }
 
     /// <summary>
@@ -65,7 +65,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     [Authorize(Roles = "Administrator")]
     public async Task<IActionResult> SoftDeleteLocker(Guid id, CancellationToken cancellationToken)
     {
-        await lockerService.SoftDeleteLockerAsync(id, cancellationToken);
+        await lockerService.SoftDeleteLockerAsync(User.GetRequiredUserId(), id, cancellationToken);
         return NoContent();
     }
 
@@ -92,6 +92,21 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     {
         var result = await lockerService.CreateCompartmentAsync(id, request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    [HttpPut("{id:guid}/compartments/{compartmentId:guid}")]
+    [Authorize(Roles = "Administrator")]
+    public async Task<IActionResult> UpdateCompartment(Guid id, Guid compartmentId,
+        [FromBody] UpdateCompartmentRequest request, CancellationToken cancellationToken) =>
+        Ok(await lockerService.UpdateCompartmentAsync(User.GetRequiredUserId(), id, compartmentId, request, cancellationToken));
+
+    [HttpDelete("{id:guid}/compartments/{compartmentId:guid}")]
+    [Authorize(Roles = "Administrator")]
+    public async Task<IActionResult> DeactivateCompartment(Guid id, Guid compartmentId, CancellationToken cancellationToken)
+    {
+        await lockerService.UpdateCompartmentStatusAsync(User.GetRequiredUserId(), "Administrator", id, compartmentId,
+            new UpdateCompartmentStatusRequest(smart_locking_be.Domain.Enums.LockerCompartmentOperationalStatus.Inactive), cancellationToken);
+        return NoContent();
     }
 
     /// <summary>

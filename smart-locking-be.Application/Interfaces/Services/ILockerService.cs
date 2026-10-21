@@ -10,13 +10,16 @@ public interface ILockerService
 
     Task<LockerDetailResponse> CreateLockerAsync(CreateLockerRequest request, CancellationToken cancellationToken = default);
 
-    Task<LockerDetailResponse> UpdateLockerAsync(Guid lockerId, UpdateLockerRequest request, CancellationToken cancellationToken = default);
+    Task<LockerDetailResponse> UpdateLockerAsync(Guid actorUserId, Guid lockerId, UpdateLockerRequest request, CancellationToken cancellationToken = default);
 
-    Task<bool> SoftDeleteLockerAsync(Guid lockerId, CancellationToken cancellationToken = default);
+    Task<bool> SoftDeleteLockerAsync(Guid actorUserId, Guid lockerId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyCollection<LockerCompartmentResponse>> GetCompartmentsAsync(Guid userId, string userRole, Guid lockerId, CancellationToken cancellationToken = default);
 
     Task<LockerCompartmentResponse> CreateCompartmentAsync(Guid lockerId, CreateCompartmentRequest request, CancellationToken cancellationToken = default);
+
+    Task<LockerCompartmentResponse> UpdateCompartmentAsync(Guid actorUserId, Guid lockerId, Guid compartmentId,
+        UpdateCompartmentRequest request, CancellationToken cancellationToken = default);
 
     Task<LockerCompartmentResponse> UpdateCompartmentStatusAsync(Guid userId, string userRole, Guid lockerId, Guid compartmentId, UpdateCompartmentStatusRequest request, CancellationToken cancellationToken = default);
 }
