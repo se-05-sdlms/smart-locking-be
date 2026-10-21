@@ -57,6 +57,9 @@ public static class DependencyInjection
         services.AddScoped<IParcelPickupService, ParcelPickupService>();
         services.AddScoped<IOverdueChargeService, OverdueChargeService>();
         services.AddScoped<IIncidentService, IncidentService>();
+        services.AddOptions<IncidentSlaOptions>().Bind(configuration.GetSection(IncidentSlaOptions.SectionName));
+        services.AddScoped<IncidentSlaService>();
+        services.AddHostedService<IncidentSlaWorker>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();
         services.AddSingleton(TimeProvider.System);

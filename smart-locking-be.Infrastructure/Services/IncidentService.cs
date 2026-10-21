@@ -13,6 +13,9 @@ public sealed class IncidentService(
     TimeProvider timeProvider, ITokenHashService tokenHashService,
     IOperationsRealtimeNotifier? realtimeNotifier = null) : IIncidentService
 {
+    // Actions without a user (for example automatic SLA escalation) are shown as the system.
+    private const string SystemActorName = "Hệ thống";
+
     private static readonly HashSet<string> SupportedTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "Locker",
@@ -416,8 +419,8 @@ public sealed class IncidentService(
                 .OrderBy(action => action.CreatedAt)
                 .Select(action => new IncidentActionResponse(
                     action.Id,
-                    action.ActionByUserId,
-                    GetUserName(action.ActionByUser),
+                    action.ActionByUserId ?? Guid.Empty,
+                    action.ActionByUser is null ? SystemActorName : GetUserName(action.ActionByUser),
                     action.ActionType,
                     action.FromStatus,
                     action.ToStatus,
