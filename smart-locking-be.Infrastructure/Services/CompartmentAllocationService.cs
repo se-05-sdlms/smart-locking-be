@@ -17,7 +17,8 @@ public sealed class CompartmentAllocationService(
         Guid? deliveryRequestId,
         Guid? returnRequestId,
         DateTimeOffset expiresAt,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool verifyDoorOnDevice = false)
     {
         ValidateOperation(deliveryRequestId, returnRequestId);
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -25,11 +26,13 @@ public sealed class CompartmentAllocationService(
             ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
             : null;
 
+        // BLE kiểm tra cửa trực tiếp tại ESP; trạng thái cửa trên BE có thể cũ khi tủ mất mạng.
+        // Vẫn kiểm tra ngăn có hàng, đặt chỗ và yêu cầu đang sử dụng như luồng online.
         LockerCompartment? compartment = await dbContext.LockerCompartments
             .Where(item => item.LockerId == lockerId &&
                            item.Locker.OperationalStatus == LockerOperationalStatus.Operational &&
                            item.OperationalStatus == LockerCompartmentOperationalStatus.Operational &&
-                           item.DoorStatus == DoorStatus.Closed)
+                           (verifyDoorOnDevice || item.DoorStatus == DoorStatus.Closed))
             .Where(item => !dbContext.CompartmentReservations.Any(reservation =>
                 reservation.LockerCompartmentId == item.Id &&
                 reservation.ReleasedAt == null &&

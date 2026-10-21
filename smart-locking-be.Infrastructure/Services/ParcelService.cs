@@ -8,7 +8,7 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificationService pushNotificationService, TimeProvider timeProvider, IOperationsRealtimeNotifier? realtimeNotifier = null) : IParcelService
+public sealed class ParcelService(ApplicationDbContext dbContext, TimeProvider timeProvider, ICompartmentResetService compartmentResets, IOperationsRealtimeNotifier? realtimeNotifier = null) : IParcelService
 {
     public async Task<IReadOnlyCollection<ParcelListItemResponse>> GetParcelsAsync(
         Guid userId,
@@ -162,54 +162,9 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
 
         throw new ForbiddenException(ParcelErrorCodes.AccessDenied, "Role cannot access parcels.");
     }
-    public async Task<OverdueTransferResponse> TransferOverdueAsync(
-        Guid userId,
-        string role,
-        Guid parcelId,
-        CancellationToken cancellationToken = default)
-    {
-        Parcel parcel = await dbContext.Parcels
-            .Include(item => item.DeliveryRequest).ThenInclude(request => request.Locker)
-            .Include(item => item.DeliveryRequest).ThenInclude(request => request.ResidentProfile)
-            .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
-            ?? throw new NotFoundException(ParcelErrorCodes.NotFound, "Parcel not found.");
-        await EnsureOperationalAccessAsync(userId, role, parcel.DeliveryRequest.LockerId, cancellationToken);
-        DateTimeOffset now = timeProvider.GetUtcNow();
-        if (parcel.MaxStorageUntil > now || parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
-            throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel is not eligible for transfer to the collection point.");
-
-        ResidentProfile resident = parcel.DeliveryRequest.ResidentProfile
-            ?? throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel has no recipient resident.");
-        parcel.Status = ParcelStatus.Removed;
-        parcel.RemovedAt = now;
-        parcel.RemovedByUserId = userId;
-        parcel.RemovalReason = "Transferred to overdue collection point";
-        parcel.UpdatedAt = now;
-        Guid pushId = pushNotificationService.EnqueueParcelTransferred(
-            resident.UserId,
-            parcel.DeliveryRequestId,
-            parcel.Id,
-            parcel.DeliveryRequest.Locker.RecoveryAddress);
-        dbContext.AuditLogs.Add(new AuditLog
-        {
-            Id = Guid.NewGuid(),
-            ActorUserId = userId,
-            Action = "Parcel.Transferred",
-            EntityType = nameof(Parcel),
-            EntityId = parcel.Id,
-            Result = AuditLogResult.Succeeded,
-            Details = parcel.DeliveryRequest.Locker.RecoveryAddress,
-            OccurredAt = now
-        });
-        await dbContext.SaveChangesAsync(cancellationToken);
-        await pushNotificationService.TrySendAsync(pushId, cancellationToken);
-        await PublishAsync(parcel, now, cancellationToken);
-        return new OverdueTransferResponse(
-            parcel.Id,
-            parcel.ParcelCode,
-            parcel.DeliveryRequest.Locker.RecoveryAddress,
-            parcel.Status.ToString());
-    }
+    // Dùng chung use case với đường /operations để không có đường bỏ qua bước thu hồi PIN trên ESP.
+    public Task<OverdueTransferResponse> TransferOverdueAsync(Guid userId, string role, Guid parcelId, CancellationToken cancellationToken = default)
+        => compartmentResets.RequestTransferAsync(userId, role, parcelId, cancellationToken);
 
     private async Task EnsureOperationalAccessAsync(Guid userId, string role, Guid lockerId, CancellationToken cancellationToken)
     {

@@ -69,6 +69,7 @@ public class LockersController(ILockerService lockerService) : ControllerBase
 
     /// <summary>Operator được phân công tạm ngừng hoặc khôi phục locker, kèm lý do.</summary>
     [HttpPut("{id:guid}/status")]
+    [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateLockerStatus(Guid id, [FromBody] UpdateLockerStatusRequest request,
         CancellationToken cancellationToken)
     {

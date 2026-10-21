@@ -1,3 +1,4 @@
+using smart_locking_be.Application.Constants;
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.DTOs.Notifications;
@@ -495,6 +496,11 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         var compartment = await dbContext.LockerCompartments
             .FirstOrDefaultAsync(c => c.Id == compartmentId && c.LockerId == lockerId, cancellationToken)
             ?? throw new NotFoundException(LockerErrorCodes.InvalidCompartment, $"Compartment '{compartmentId}' was not found in this locker.");
+
+        if (request.OperationalStatus != LockerCompartmentOperationalStatus.OutOfService &&
+            await dbContext.AuditLogs.AnyAsync(x => x.EntityId == compartmentId && x.Action == CompartmentResetActions.Requested &&
+                !dbContext.LockerEvents.Any(e => e.Id == x.Id), cancellationToken))
+            throw new ConflictException(BluetoothErrorCodes.InvalidState, "Ngăn đang chờ ESP xác nhận đặt lại; chưa thể bật cấp ngăn.");
 
         LockerCompartmentOperationalStatus previousStatus = compartment.OperationalStatus;
         DateTimeOffset now = DateTimeOffset.UtcNow;
