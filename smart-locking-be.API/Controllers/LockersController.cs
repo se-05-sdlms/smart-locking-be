@@ -58,6 +58,15 @@ public class LockersController(ILockerService lockerService) : ControllerBase
         return Ok(await lockerService.UpdateLockerAsync(id, request, cancellationToken));
     }
 
+    /// <summary>Operator được phân công tạm ngừng hoặc khôi phục locker, kèm lý do.</summary>
+    [HttpPut("{id:guid}/status")]
+    public async Task<IActionResult> UpdateLockerStatus(Guid id, [FromBody] UpdateLockerStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        var (userId, userRole) = User.GetRequiredIdentity();
+        return Ok(await lockerService.UpdateLockerStatusAsync(userId, userRole, id, request, cancellationToken));
+    }
+
     /// <summary>
     /// Vô hiệu hóa tủ Locker (Soft delete - chuyển OperationalStatus thành Inactive). Chỉ Admin mới được thực hiện.
     /// </summary>
