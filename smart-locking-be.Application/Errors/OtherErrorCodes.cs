@@ -26,6 +26,7 @@ public static class UserErrorCodes
     public const string Inactive = "user/inactive";
     public const string AssignmentConflict = "user/assignment_conflict";
     public const string ResidentProfileReadOnly = "user/resident_profile_read_only";
+    public const string EmailUnavailable = "user/email_unavailable";
 }
 
 public static class SubscriptionErrorCodes

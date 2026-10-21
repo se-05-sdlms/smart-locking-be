@@ -9,6 +9,5 @@ public sealed record CreateUserResponse(
     string? PhoneNumber,
     UserRole Role,
     UserStatus Status,
-    string TemporaryPassword,
     DateTimeOffset CreatedAt
 );
