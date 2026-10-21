@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using smart_locking_be.Application.DTOs.Notifications;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
@@ -114,6 +116,11 @@ public sealed class MqttLockerListenerTests
 
         var updatedComp = await dbContext.LockerCompartments.AsNoTracking().SingleAsync(c => c.Id == compartment.Id);
         Assert.Equal(DoorStatus.Open, updatedComp.DoorStatus);
+        Assert.NotNull(updatedComp.DoorStatusObservedAt);
+        var doorEvent = await dbContext.LockerEvents.SingleAsync(e => e.EventType == LockerEventType.DoorChanged);
+        Assert.Equal(compartment.Id, doorEvent.LockerCompartmentId);
+        Assert.Equal(nameof(DoorStatus.Closed), doorEvent.PreviousValue);
+        Assert.Equal(nameof(DoorStatus.Open), doorEvent.NewValue);
     }
 
     [Fact]
@@ -198,6 +205,7 @@ public sealed class MqttLockerListenerTests
         string database = Guid.NewGuid().ToString();
         services.AddDbContext<ApplicationDbContext>(options => options.UseInMemoryDatabase(database));
         services.AddSingleton<smart_locking_be.Application.Interfaces.Services.IBluetoothMessageCodec, BluetoothProtocol>();
+        RegisterMonitor(services);
         using var provider = services.BuildServiceProvider();
         var db = provider.GetRequiredService<ApplicationDbContext>();
         var locker = new Locker { Id = Guid.NewGuid(), Code = "LKR-B", DeviceIdentifier = "LKR-1A0844", Address = "B", RecoveryAddress = "B" };
@@ -243,11 +251,76 @@ public sealed class MqttLockerListenerTests
         Assert.Null(request.ShipperPickedUpAt);
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task HandleMessageAsync_RetainedOrOldDoorSignal_DoesNotRestoreOnline(bool retained, bool stale)
+    {
+        using var provider = (ServiceProvider)BuildServiceProvider(Guid.NewGuid().ToString());
+        var db = provider.GetRequiredService<ApplicationDbContext>();
+        var locker = new Locker
+        {
+            Id = Guid.NewGuid(),
+            Code = "LKR-B",
+            DeviceIdentifier = "LKR-1A0844",
+            Address = "B",
+            RecoveryAddress = "B",
+            ConnectionStatus = LockerConnectionStatus.Offline
+        };
+        var slot = new LockerCompartment
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            Locker = locker,
+            Code = "B-01",
+            HardwareCode = "CH1",
+            HardwareChannel = 1,
+            DoorStatus = DoorStatus.Closed,
+            DoorStatusObservedAt = Now
+        };
+        db.Add(slot);
+        await db.SaveChangesAsync();
+        var listener = new MqttLockerListenerService(new ConfigurationBuilder().Build(),
+            provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<MqttLockerListenerService>.Instance,
+            new FixedTimeProvider());
+        string payload = stale
+            ? System.Text.Json.JsonSerializer.Serialize(new { status = "OPEN", occurredAt = Now.AddSeconds(-1) })
+            : "OPEN";
+
+        await listener.HandleMessageAsync("lockers/LKR-1A0844/doors/1/status", payload, CancellationToken.None, retained);
+
+        await db.Entry(slot).ReloadAsync();
+        await db.Entry(locker).ReloadAsync();
+        Assert.Equal(DoorStatus.Closed, slot.DoorStatus);
+        Assert.Equal(Now, slot.DoorStatusObservedAt);
+        Assert.Equal(LockerConnectionStatus.Offline, locker.ConnectionStatus);
+        Assert.Empty(await db.LockerEvents.ToListAsync());
+    }
+
     private static IServiceProvider BuildServiceProvider(string dbName)
     {
         var services = new ServiceCollection();
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseInMemoryDatabase(dbName));
+        RegisterMonitor(services);
         return services.BuildServiceProvider();
+    }
+
+    private static void RegisterMonitor(IServiceCollection services)
+    {
+        services.AddSingleton<TimeProvider>(new FixedTimeProvider());
+        services.AddSingleton<IOperationsRealtimeNotifier, NoopRealtime>();
+        services.AddScoped<LockerConnectionMonitor>();
+    }
+
+    private sealed class FixedTimeProvider : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private sealed class NoopRealtime : IOperationsRealtimeNotifier
+    {
+        public Task PublishToUserAsync(Guid userId, RealtimeEvent message, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task PublishToLockerAsync(Guid lockerId, RealtimeEvent message, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

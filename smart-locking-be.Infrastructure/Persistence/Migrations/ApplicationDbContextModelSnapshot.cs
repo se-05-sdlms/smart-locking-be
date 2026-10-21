@@ -612,6 +612,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("character varying");
 
+                    b.Property<DateTimeOffset?>("DoorStatusObservedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("HardwareChannel")
                         .HasColumnType("integer");
 
@@ -1739,9 +1742,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("EnableBluetoothUnlock")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("EnableFaceRecognition")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("EnableOtp")

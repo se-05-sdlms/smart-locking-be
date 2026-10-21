@@ -1,4 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using smart_locking_be.Application.Errors;
+using smart_locking_be.Application.Exceptions;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -52,14 +55,70 @@ public sealed class LockerAccessServiceTests
             dbContext,
             LockerConnectionStatus.Offline);
         var dispatcher = new RecordingDispatcher();
-        var service = new LockerAccessService(dbContext, dispatcher, TimeProvider.System);
+        var service = new LockerAccessService(dbContext, dispatcher, TimeProvider.System,
+            configuration: MonitoringConfiguration());
 
-        OpenLockerResponse response = await service.OpenAsync(MaintenanceRequest(locker, compartment));
+        var exception = await Assert.ThrowsAsync<ConflictException>(() =>
+            service.OpenAsync(MaintenanceRequest(locker, compartment)));
 
-        Assert.Equal(LockerAccessResult.Blocked, response.Result);
-        Assert.Contains("offline", response.FailureReason);
+        Assert.Equal(LockerErrorCodes.Offline, exception.ErrorCode);
         Assert.Empty(dispatcher.Commands);
     }
+
+    [Fact]
+    public async Task OpenAsync_MonitoringDisabled_DoesNotBlockLegacyLocker()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        var (locker, slot) = await SeedLockerAsync(db, LockerConnectionStatus.Offline);
+        var dispatcher = new RecordingDispatcher();
+        var service = new LockerAccessService(db, dispatcher, TimeProvider.System);
+
+        var response = await service.OpenAsync(MaintenanceRequest(locker, slot));
+
+        Assert.Equal(LockerAccessResult.Succeeded, response.Result);
+        Assert.Single(dispatcher.Commands);
+    }
+
+    [Fact]
+    public async Task OpenAsync_OfflineLockerWithMonitoring_AllowsBluetoothWithoutMqttDispatch()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        var (locker, slot) = await SeedLockerAsync(db, LockerConnectionStatus.Offline);
+        var resident = new ResidentProfile
+        {
+            Id = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            FullName = "Resident",
+            User = new User { Id = Guid.NewGuid(), PhoneNumber = "0900000001" }
+        };
+        resident.UserId = resident.User.Id;
+        var request = new ReturnRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            ResidentProfile = resident,
+            ResidentProfileId = resident.Id,
+            ReturnCode = "123456"
+        };
+        db.Add(request);
+        await db.SaveChangesAsync();
+        var dispatcher = new RecordingDispatcher();
+        var service = new LockerAccessService(db, dispatcher, new FixedTimeProvider(Now),
+            new BluetoothProtocol(), MonitoringConfiguration());
+
+        var response = await service.OpenAsync(new OpenLockerRequest(locker.Id, slot.Id,
+            resident.UserId, null, null, request.Id, LockerAccessType.ResidentReturnDropOff,
+            LockerAccessMethod.Bluetooth, null, null));
+
+        Assert.Equal(LockerAccessResult.Succeeded, response.Result);
+        Assert.NotNull(response.Bluetooth);
+        Assert.StartsWith("c1|", response.Bluetooth.Command);
+        Assert.Empty(dispatcher.Commands);
+    }
+
+    private static IConfiguration MonitoringConfiguration() => new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?> { ["LockerMonitoring:Enabled"] = "true" })
+        .Build();
 
     [Fact]
     public async Task OpenAsync_DispatchFailure_RecordsFailure()

@@ -43,6 +43,11 @@ public sealed class LockerCompartment
     public DoorStatus DoorStatus { get; set; }
 
     /// <summary>
+    /// Thời điểm trạng thái cửa mới nhất được thiết bị ghi nhận, dùng để bỏ qua bản tin đến trễ.
+    /// </summary>
+    public DateTimeOffset? DoorStatusObservedAt { get; set; }
+
+    /// <summary>
     /// Thời điểm thông tin ngăn được cập nhật gần nhất.
     /// </summary>
     public DateTimeOffset UpdatedAt { get; set; }

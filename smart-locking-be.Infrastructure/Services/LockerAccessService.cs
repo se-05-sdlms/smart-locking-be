@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -11,7 +12,8 @@ public sealed class LockerAccessService(
     ApplicationDbContext dbContext,
     ILockerCommandDispatcher commandDispatcher,
     TimeProvider timeProvider,
-    IBluetoothMessageCodec? protocol = null) : ILockerAccessService
+    IBluetoothMessageCodec? protocol = null,
+    IConfiguration? configuration = null) : ILockerAccessService
 {
     public async Task<OpenLockerResponse> OpenAsync(
         OpenLockerRequest request,
@@ -35,6 +37,13 @@ public sealed class LockerAccessService(
         if (request.ParcelId.HasValue)
             deliveryId = await dbContext.Parcels.Where(x => x.Id == request.ParcelId.Value)
                 .Select(x => (Guid?)x.DeliveryRequestId).SingleOrDefaultAsync(cancellationToken);
+        bool monitoringEnabled = configuration?.GetValue<bool>("LockerMonitoring:Enabled") ?? false;
+        // Mất kết nối máy chủ chỉ chặn đường MQTT; điện thoại vẫn được nhận lệnh để chuyển qua BLE.
+        if (!useBluetooth && monitoringEnabled && compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
+        {
+            throw new ConflictException(LockerErrorCodes.Offline, "Locker is offline or has not reported its connection status.");
+        }
+
         DateTimeOffset now = timeProvider.GetUtcNow();
         LockerAccessEvent accessEvent = new()
         {
@@ -52,7 +61,7 @@ public sealed class LockerAccessService(
             OccurredAt = now,
         };
 
-        string? blockedReason = GetBlockedReason(compartment, useBluetooth);
+        string? blockedReason = GetBlockedReason(compartment, useBluetooth, monitoringEnabled);
         if (blockedReason is not null)
         {
             accessEvent.Result = LockerAccessResult.Blocked;
@@ -116,13 +125,13 @@ public sealed class LockerAccessService(
             timeProvider.GetUtcNow().AddMinutes(2), commandId);
     }
 
-    private static string? GetBlockedReason(LockerCompartment compartment, bool allowBluetooth)
+    private static string? GetBlockedReason(LockerCompartment compartment, bool allowBluetooth, bool monitoringEnabled)
     {
         if (compartment.Locker.OperationalStatus != LockerOperationalStatus.Operational)
         {
             return "Locker is not operational.";
         }
-        if (!allowBluetooth && compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
+        if (!allowBluetooth && monitoringEnabled && compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
         {
             return "Locker is offline.";
         }

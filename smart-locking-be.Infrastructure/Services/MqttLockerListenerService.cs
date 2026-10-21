@@ -5,6 +5,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Protocol;
+using System.Text.Json;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Domain.Entities;
@@ -63,7 +65,7 @@ public sealed class MqttLockerListenerService(
             {
                 string topic = e.ApplicationMessage.Topic;
                 string payload = e.ApplicationMessage.ConvertPayloadToString();
-                await HandleMessageAsync(topic, payload, stoppingToken);
+                await HandleMessageAsync(topic, payload, stoppingToken, e.ApplicationMessage.Retain);
             }
             catch (Exception ex)
             {
@@ -87,7 +89,10 @@ public sealed class MqttLockerListenerService(
                     await _mqttClient.SubscribeAsync("lockers/+/workflow/request", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
                     await _mqttClient.SubscribeAsync("lockers/+/events/offline", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
                     await _mqttClient.SubscribeAsync("lockers/+/events/state-reset", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
-                    logger.LogInformation("[MQTT LISTENER] Đã subscribe thành công topic trạng thái cửa.");
+                    await _mqttClient.SubscribeAsync("lockers/+/alerts", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
+                    await _mqttClient.SubscribeAsync("lockers/+/heartbeat", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
+                    await _mqttClient.SubscribeAsync("lockers/+/status", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
+                    logger.LogInformation("[MQTT LISTENER] Subscribed to door, alert, heartbeat and connection status topics.");
                 }
                 await PublishInventoryAsync(stoppingToken);
             }
@@ -151,10 +156,33 @@ public sealed class MqttLockerListenerService(
                 .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build(), ct);
     }
 
-    internal async Task HandleMessageAsync(string topic, string payload, CancellationToken cancellationToken)
+    internal async Task HandleMessageAsync(string topic, string payload, CancellationToken cancellationToken, bool isRetained = false)
     {
         // Topic pattern: lockers/{deviceId}/doors/{channel}/status
         var parts = topic.Split('/');
+        if (parts.Length == 3 && parts[0] == "lockers" && parts[2] == "alerts")
+        {
+            await RecordDeviceAlertAsync(parts[1], payload, cancellationToken);
+            return;
+        }
+        if (parts.Length == 3 && parts[0] == "lockers" && !string.IsNullOrWhiteSpace(parts[1]))
+        {
+            LockerConnectionStatus? connection = parts[2] switch
+            {
+                "heartbeat" => LockerConnectionStatus.Online,
+                "status" when payload.Trim().Equals("online", StringComparison.OrdinalIgnoreCase) => LockerConnectionStatus.Online,
+                "status" when payload.Trim().Equals("offline", StringComparison.OrdinalIgnoreCase) => LockerConnectionStatus.Offline,
+                _ => null
+            };
+            if (connection.HasValue)
+            {
+                using var signalScope = serviceScopeFactory.CreateScope();
+                await signalScope.ServiceProvider.GetRequiredService<LockerConnectionMonitor>()
+                    .RecordSignalAsync(parts[1], connection.Value, cancellationToken);
+            }
+            return;
+        }
+
         if (parts.Length == 4 && parts[0] == "lockers" && parts[2] == "workflow" && parts[3] == "request")
         {
             // Điện thoại mất mạng: ESP chuyển quyền resident lên BE bằng Wi-Fi của tủ.
@@ -217,6 +245,7 @@ public sealed class MqttLockerListenerService(
         {
             return;
         }
+        if (isRetained) return;
 
         string deviceIdentifier = parts[1];
         if (!int.TryParse(parts[3], out int channel))
@@ -225,6 +254,22 @@ public sealed class MqttLockerListenerService(
         }
 
         string statusStr = payload.Trim().ToUpperInvariant();
+        DateTimeOffset? deviceTime = null;
+        if (payload.TrimStart().StartsWith('{'))
+        {
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(payload);
+                statusStr = document.RootElement.GetProperty("status").GetString()?.Trim().ToUpperInvariant() ?? string.Empty;
+                if (document.RootElement.TryGetProperty("occurredAt", out JsonElement timestamp) &&
+                    timestamp.TryGetDateTimeOffset(out DateTimeOffset parsed)) deviceTime = parsed;
+            }
+            catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException)
+            {
+                logger.LogWarning("[MQTT LISTENER] Ignoring invalid door payload on {Topic}.", topic);
+                return;
+            }
+        }
         if (statusStr is not ("OPEN" or "CLOSED"))
         {
             logger.LogWarning("[MQTT LISTENER] Ignoring invalid door status: '{Payload}'.", payload);
@@ -246,27 +291,79 @@ public sealed class MqttLockerListenerService(
         }
 
         DateTimeOffset now = (timeProvider ?? TimeProvider.System).GetUtcNow();
-        locker.ConnectionStatus = LockerConnectionStatus.Online;
-        locker.LastSeenAt = now;
-        locker.UpdatedAt = now;
-
+        DateTimeOffset occurredAt = deviceTime ?? now;
+        if (occurredAt > now.AddMinutes(5)) return;
         var compartment = locker.Compartments.FirstOrDefault(c => c.HardwareChannel == channel);
-        DoorStatus? previousDoorStatus = compartment?.DoorStatus;
-        if (compartment is not null)
+        if (compartment is null) return;
+        if (deviceTime.HasValue && compartment.DoorStatusObservedAt >= occurredAt) return;
+
+        await scope.ServiceProvider.GetRequiredService<LockerConnectionMonitor>()
+            .RecordSignalAsync(deviceIdentifier, LockerConnectionStatus.Online, cancellationToken);
+
+        DoorStatus previousDoorStatus = compartment.DoorStatus;
+        compartment.DoorStatusObservedAt = occurredAt;
+        if (previousDoorStatus != doorStatus)
         {
             compartment.DoorStatus = doorStatus;
             compartment.UpdatedAt = now;
+            dbContext.LockerEvents.Add(new LockerEvent
+            {
+                Id = Guid.NewGuid(),
+                LockerId = locker.Id,
+                LockerCompartmentId = compartment.Id,
+                EventType = LockerEventType.DoorChanged,
+                PreviousValue = previousDoorStatus.ToString(),
+                NewValue = doorStatus.ToString(),
+                Severity = LockerEventSeverity.Info,
+                OccurredAt = occurredAt,
+                ReceivedAt = now
+            });
         }
 
-        if (compartment is not null && previousDoorStatus == DoorStatus.Open && doorStatus == DoorStatus.Closed)
+        if (previousDoorStatus == DoorStatus.Open && doorStatus == DoorStatus.Closed)
         {
             await FinalizeActiveAccessAsync(scope.ServiceProvider, dbContext, compartment.Id, now, cancellationToken);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (previousDoorStatus != doorStatus)
+        {
+            await scope.ServiceProvider.GetRequiredService<IOperationsRealtimeNotifier>()
+                .PublishToLockerAsync(locker.Id, new RealtimeEvent("LockerDoorChanged", compartment.Id,
+                    locker.Id, doorStatus.ToString(), compartment.Code, now), cancellationToken);
+        }
 
         logger.LogInformation("[MQTT IN] Locker '{DeviceId}' - compartment {Channel} -> door: {Status} (online)",
             deviceIdentifier, channel, doorStatus);
+    }
+
+    private async Task RecordDeviceAlertAsync(string deviceIdentifier, string payload, CancellationToken cancellationToken)
+    {
+        string alert = payload.Trim();
+        if (alert.Length is < 1 or > 500) return;
+        using var scope = serviceScopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Locker? locker = await dbContext.Lockers.SingleOrDefaultAsync(item => item.DeviceIdentifier == deviceIdentifier, cancellationToken);
+        if (locker is null) return;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        // ponytail: suppress repeated MQTT alerts for 10 seconds; use device event IDs if firmware supplies them.
+        if (await dbContext.LockerEvents.AnyAsync(item => item.LockerId == locker.Id &&
+            item.EventType == LockerEventType.DeviceAlert && item.Reason == alert &&
+            item.ReceivedAt >= now.AddSeconds(-10), cancellationToken)) return;
+        dbContext.LockerEvents.Add(new LockerEvent
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            EventType = LockerEventType.DeviceAlert,
+            Severity = LockerEventSeverity.Warning,
+            Reason = alert,
+            OccurredAt = now,
+            ReceivedAt = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await scope.ServiceProvider.GetRequiredService<IOperationsRealtimeNotifier>()
+            .PublishToLockerAsync(locker.Id, new RealtimeEvent("LockerDeviceAlert", locker.Id,
+                locker.Id, "Warning", alert, now), cancellationToken);
     }
 
     private static async Task FinalizeActiveAccessAsync(

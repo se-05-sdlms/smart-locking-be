@@ -11,12 +11,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<bool>(
-                name: "EnableBluetoothUnlock",
-                table: "SystemPolicy",
-                type: "boolean",
-                nullable: false,
-                defaultValue: false);
+            // Cột này có thể đã được nhánh policy (#149) tạo trên DB đích.
+            // Không drop/add lại vì sẽ làm mất cấu hình Bluetooth hiện có.
+            migrationBuilder.Sql("ALTER TABLE \"SystemPolicy\" ADD COLUMN IF NOT EXISTS \"EnableBluetoothUnlock\" boolean NOT NULL DEFAULT FALSE;");
 
             migrationBuilder.CreateTable(
                 name: "OfflineLockerCursor",
@@ -120,9 +117,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
             migrationBuilder.DropTable(
                 name: "OfflineLockerPin");
 
-            migrationBuilder.DropColumn(
-                name: "EnableBluetoothUnlock",
-                table: "SystemPolicy");
+            migrationBuilder.Sql("ALTER TABLE \"SystemPolicy\" DROP COLUMN IF EXISTS \"EnableBluetoothUnlock\";");
         }
     }
 }

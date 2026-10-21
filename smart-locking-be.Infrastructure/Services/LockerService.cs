@@ -178,12 +178,26 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
         }
 
         var now = DateTimeOffset.UtcNow;
+        LockerOperationalStatus previousStatus = locker.OperationalStatus;
         locker.Code = code;
         locker.Address = address;
         locker.RecoveryAddress = recoveryAddress;
         locker.DeviceIdentifier = deviceIdentifier;
         locker.OperationalStatus = request.OperationalStatus;
         locker.UpdatedAt = now;
+
+        if (previousStatus != locker.OperationalStatus)
+            dbContext.LockerEvents.Add(new LockerEvent
+            {
+                Id = Guid.NewGuid(),
+                LockerId = locker.Id,
+                EventType = LockerEventType.OperationalStatusChanged,
+                PreviousValue = previousStatus.ToString(),
+                NewValue = locker.OperationalStatus.ToString(),
+                Severity = LockerEventSeverity.Info,
+                OccurredAt = now,
+                ReceivedAt = now
+            });
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -196,8 +210,22 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
             .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
             ?? throw new NotFoundException(LockerErrorCodes.NotFound, $"Locker '{lockerId}' not found.");
 
+        LockerOperationalStatus previousStatus = locker.OperationalStatus;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         locker.OperationalStatus = LockerOperationalStatus.Inactive;
-        locker.UpdatedAt = DateTimeOffset.UtcNow;
+        locker.UpdatedAt = now;
+        if (previousStatus != locker.OperationalStatus)
+            dbContext.LockerEvents.Add(new LockerEvent
+            {
+                Id = Guid.NewGuid(),
+                LockerId = locker.Id,
+                EventType = LockerEventType.OperationalStatusChanged,
+                PreviousValue = previousStatus.ToString(),
+                NewValue = locker.OperationalStatus.ToString(),
+                Severity = LockerEventSeverity.Info,
+                OccurredAt = now,
+                ReceivedAt = now
+            });
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;
@@ -350,8 +378,24 @@ public sealed class LockerService(ApplicationDbContext dbContext) : ILockerServi
                 !dbContext.LockerEvents.Any(e => e.Id == x.Id), cancellationToken))
             throw new ConflictException(BluetoothErrorCodes.InvalidState, "Ngăn đang chờ ESP xác nhận đặt lại; chưa thể bật cấp ngăn.");
 
+        LockerCompartmentOperationalStatus previousStatus = compartment.OperationalStatus;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         compartment.OperationalStatus = request.OperationalStatus;
-        compartment.UpdatedAt = DateTimeOffset.UtcNow;
+        compartment.UpdatedAt = now;
+        if (previousStatus != compartment.OperationalStatus)
+            dbContext.LockerEvents.Add(new LockerEvent
+            {
+                Id = Guid.NewGuid(),
+                LockerId = lockerId,
+                LockerCompartmentId = compartment.Id,
+                ActorUserId = userId,
+                EventType = LockerEventType.OperationalStatusChanged,
+                PreviousValue = previousStatus.ToString(),
+                NewValue = compartment.OperationalStatus.ToString(),
+                Severity = LockerEventSeverity.Info,
+                OccurredAt = now,
+                ReceivedAt = now
+            });
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

@@ -113,6 +113,10 @@ public static class DependencyInjection
         services.AddScoped<ISystemPolicyService, SystemPolicyService>();
 
         services.AddHostedService<MqttLockerListenerService>();
+        services.AddHostedService<DoorOpenAlertWorker>();
+        services.AddScoped<LockerConnectionMonitor>();
+        if (configuration.GetValue<bool>("LockerMonitoring:Enabled"))
+            services.AddHostedService<LockerConnectionWorker>();
 
         services.AddScoped<INotificationRuleService, NotificationRuleService>();
 

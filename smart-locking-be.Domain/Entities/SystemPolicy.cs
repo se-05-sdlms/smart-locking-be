@@ -92,12 +92,10 @@ public sealed class SystemPolicy
     /// </summary>
     public bool EnableRemoteUnlock { get; set; }
 
-    public bool EnableBluetoothUnlock { get; set; }
-
     /// <summary>
-    /// Cho phép lấy hàng bằng nhận diện khuôn mặt nếu Cư dân đã đăng ký.
+    /// Cho phép mở ngăn qua Bluetooth từ ứng dụng di động.
     /// </summary>
-    public bool EnableFaceRecognition { get; set; }
+    public bool EnableBluetoothUnlock { get; set; }
 
     /// <summary>
     /// Thời điểm chính sách bắt đầu có hiệu lực.
