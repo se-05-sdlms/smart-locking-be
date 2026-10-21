@@ -40,9 +40,12 @@ public static class DependencyInjection
             options.ChecksumKey = configuration["PayOS:ChecksumKey"] ?? string.Empty;
             options.ReturnUrl = configuration["PayOS:ReturnUrl"] ?? string.Empty;
             options.CancelUrl = configuration["PayOS:CancelUrl"] ?? string.Empty;
+            options.OverdueReturnUrl = configuration["PayOS:OverdueReturnUrl"] ?? string.Empty;
+            options.OverdueCancelUrl = configuration["PayOS:OverdueCancelUrl"] ?? string.Empty;
         });
         services.AddScoped<ISubscriptionPlanService, SubscriptionPlanService>();
         services.AddScoped<IResidentSubscriptionService, ResidentSubscriptionService>();
+        services.AddScoped<IOverduePaymentService, OverduePaymentService>();
         services.AddScoped<IPaymentGatewayService, PayOSPaymentGatewayService>();
         services.AddScoped<ILockerService, LockerService>();
         services.AddScoped<ILockerAccessService, LockerAccessService>();

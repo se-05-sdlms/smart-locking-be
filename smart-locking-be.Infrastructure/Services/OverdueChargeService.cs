@@ -46,7 +46,10 @@ public sealed class OverdueChargeService(
                 });
             }
 
-            if (policy.OverdueFeePerHour > 0 && parcel.OverdueCharge?.Status != OverdueChargeStatus.Paid)
+            if (policy.OverdueFeePerHour > 0 && parcel.OverdueCharge?.Status != OverdueChargeStatus.Paid &&
+                (parcel.OverdueCharge is null || !await dbContext.PaymentTransactions.AnyAsync(payment =>
+                    payment.OverdueChargeId == parcel.OverdueCharge.Id &&
+                    payment.Status == PaymentTransactionStatus.Pending, cancellationToken)))
             {
                 DateTimeOffset calculationCutoff = now > parcel.MaxStorageUntil ? parcel.MaxStorageUntil : now;
                 int billableHours = (int)Math.Ceiling((calculationCutoff - parcel.PickupDueAt).TotalHours);

@@ -6,7 +6,8 @@ using smart_locking_be.Application.Interfaces.Services;
 namespace smart_locking_be.API.Controllers;
 
 [ApiController, Route("api/webhooks/payos"), AllowAnonymous]
-public sealed class PaymentWebhooksController(IPaymentGatewayService gateway, IResidentSubscriptionService subscriptions) : ControllerBase
+public sealed class PaymentWebhooksController(IPaymentGatewayService gateway, IResidentSubscriptionService subscriptions,
+    IOverduePaymentService overduePayments) : ControllerBase
 {
     [HttpPost]
     public async Task<IActionResult> PayOS(PayOSWebhookPayload payload, CancellationToken cancellationToken)
@@ -14,6 +15,7 @@ public sealed class PaymentWebhooksController(IPaymentGatewayService gateway, IR
         try
         {
             var payment = gateway.VerifyWebhook(payload);
+            if (await overduePayments.TryCompleteAsync(payment, cancellationToken)) return Ok();
             await subscriptions.ActivateSubscriptionAsync(payment, cancellationToken);
             return Ok();
         }

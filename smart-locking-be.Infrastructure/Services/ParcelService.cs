@@ -81,7 +81,8 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
                 parcel.RemovedAt,
                 parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Amount,
                 parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Currency,
-                parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Status))
+                parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Status,
+                parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Id))
             .ToListAsync(cancellationToken);
     }
 
@@ -112,7 +113,8 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
                 parcel.RemovedAt,
                 parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Amount,
                 parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Currency,
-                parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Status))
+                parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Status,
+                parcel.OverdueCharge == null ? null : parcel.OverdueCharge.Id))
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException(ParcelErrorCodes.NotFound, "Parcel not found.");
 

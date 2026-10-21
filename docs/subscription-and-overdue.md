@@ -2,7 +2,7 @@
 
 ## Configuration
 
-Apply the existing `AddSubscriptionSystem` EF migration through the normal deployment process. This change does not automatically migrate a database.
+Apply the EF migrations, including `AddOverduePaymentCheckout`, through the normal deployment process. The API does not automatically migrate a database.
 
 Provide secrets through the environment or .NET user secrets:
 
@@ -12,9 +12,11 @@ PayOS__ApiKey
 PayOS__ChecksumKey
 PayOS__ReturnUrl=https://your-app.example/subscriptions/success
 PayOS__CancelUrl=https://your-app.example/subscriptions/cancel
+PayOS__OverdueReturnUrl=https://your-app.example/overdue-payments/return
+PayOS__OverdueCancelUrl=https://your-app.example/overdue-payments/cancel
 ```
 
-The return/cancel URLs are server configuration, never supplied by a caller. Neither redirect activates a subscription. Configure the PayOS channel webhook to `POST /api/webhooks/payos`.
+The return/cancel URLs are server configuration, never supplied by a caller. Neither redirect confirms payment. Configure the PayOS channel webhook to `POST /api/webhooks/payos`.
 
 ## Endpoints
 
@@ -27,6 +29,9 @@ The return/cancel URLs are server configuration, never supplied by a caller. Nei
 | `POST /api/resident-subscriptions/subscribe` | Resident | Body `{ "planId": "UUID" }`; returns subscription ID, order code, amount, checkout URL |
 | `GET /api/resident-subscriptions/current` | Resident | Currently effective subscription, excluding future stacked periods |
 | `GET /api/resident-subscriptions/history` | Resident | Own subscriptions only |
+| `POST /api/overdue-payments/charges/{chargeId}/checkout` | Resident | Create or reuse a pending checkout for an owned charge |
+| `GET /api/overdue-payments/{transactionId}` | Resident | Own transaction status |
+| `GET /api/overdue-payments` | Resident | Own transaction history |
 | `POST /api/webhooks/payos` | Anonymous, verified signature | Activates a matching successful VND payment |
 | `GET /api/parcels?view=ClearancePending` | Operator or Administrator | Stored/Overdue parcels at or beyond `MaxStorageUntil`; operators retain locker assignment scope |
 
@@ -38,7 +43,7 @@ A pending subscription is saved before PayOS is called. Its price and duration a
 
 The webhook verifies the full SDK payload including bank fields, then checks the signed result code, amount, currency, and reference. Authenticated unknown orders are acknowledged without mutation, including the PayOS registration sample. Activation locks the resident row in PostgreSQL so concurrent successful purchases stack after the latest active end date. Replayed payments never extend the interval, including after expiration. An hourly worker expires elapsed Active rows with a conditional database update.
 
-Provider failures leave a pending record because a timeout cannot prove that PayOS did not create the link. A valid later webhook can still settle that order. Automatic checkout reconciliation/retry, pending cancellation, and overdue-fee payment endpoints are outside this plan. Do not close issue #26 solely from this subscription implementation: that issue also requires overdue-payment history and reconciliation.
+Provider failures leave a pending record because a timeout cannot prove that PayOS did not create the link. A valid later webhook can still settle that order. For overdue charges, a pending transaction reserves a single server-calculated amount and pauses further accrual until the signed webhook settles it. The checkout URL is saved for repeat requests. If PayOS fails before returning a URL, a later request retries the same order code. Only a verified, matching VND webhook marks the charge Paid and restores pickup access; return/cancel redirects have no effect. Provider reconciliation and live payment verification require an integration environment.
 
 ## Parcel cutoff
 
