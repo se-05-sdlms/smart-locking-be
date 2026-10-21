@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using smart_locking_be.API.Constants;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 
@@ -10,6 +12,13 @@ namespace smart_locking_be.API.Controllers;
 [Authorize(Roles = "Administrator,LockerOperator")]
 public class LockersController(ILockerService lockerService) : ControllerBase
 {
+    /// <summary>Thông tin locker tối thiểu cho Guest Web từ mã trên QR.</summary>
+    [HttpGet("public/by-code/{code}")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicyNames.PublicApi)]
+    public async Task<IActionResult> GetPublicLocker(string code, CancellationToken cancellationToken) =>
+        Ok(await lockerService.GetPublicLockerAsync(code, cancellationToken));
+
     /// <summary>
     /// Lấy danh sách tủ Locker (Admin xem tất cả, LockerOperator xem danh sách được phân công).
     /// </summary>
