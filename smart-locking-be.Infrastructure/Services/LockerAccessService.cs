@@ -28,6 +28,11 @@ public sealed class LockerAccessService(
             throw new BadRequestException(LockerErrorCodes.InvalidCompartment, "Compartment does not belong to the requested locker.");
         }
 
+        if (compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
+        {
+            throw new ConflictException(LockerErrorCodes.Offline, "Locker is offline or has not reported its connection status.");
+        }
+
         DateTimeOffset now = timeProvider.GetUtcNow();
         LockerAccessEvent accessEvent = new()
         {

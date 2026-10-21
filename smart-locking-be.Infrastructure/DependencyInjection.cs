@@ -104,6 +104,8 @@ public static class DependencyInjection
         services.AddScoped<ISystemPolicyService, SystemPolicyService>();
 
         services.AddHostedService<MqttLockerListenerService>();
+        services.AddScoped<LockerConnectionMonitor>();
+        services.AddHostedService<LockerConnectionWorker>();
 
         services.AddScoped<INotificationRuleService, NotificationRuleService>();
 

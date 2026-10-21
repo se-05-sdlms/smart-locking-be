@@ -1,0 +1,7 @@
+# Locker connectivity
+
+The backend subscribes to `lockers/{device}/heartbeat` and `lockers/{device}/status`. A heartbeat or `online` status marks the locker online. A `status` payload of `offline` marks it offline immediately; firmware should configure that message as its MQTT Last Will. Valid door status messages also refresh `LastSeenAt`.
+
+Set `LockerMonitoring:OfflineAfterSeconds` to more than the firmware heartbeat interval (minimum 10 seconds; default 90). The worker checks every 5 seconds and marks a locker offline if no signal arrived before the configured cutoff. A newly registered locker stays `Unknown` until its first signal and becomes `Offline` after the cutoff.
+
+On a connection change, the backend writes `LockerEvent.ConnectionChanged` and publishes `LockerConnectionChanged` through OperationsHub. Offline transitions also create in-app notifications for assigned active operators, or active administrators if no operator is assigned. Remote unlocks return HTTP 409 with code `locker/offline` when connection status is not online.
