@@ -11,7 +11,8 @@ namespace smart_locking_be.Infrastructure.Services;
 
 public sealed class UserService(
     ApplicationDbContext dbContext,
-    IPasswordHashService passwordHashService) : IUserService
+    IPasswordHashService passwordHashService,
+    IEmailSender emailSender) : IUserService
 {
     public async Task<PagedResult<UserListItemResponse>> GetUsersAsync(
         GetUsersFilterRequest filter,
@@ -114,7 +115,7 @@ public sealed class UserService(
             throw new ConflictException(UserErrorCodes.AlreadyExists, "Email or phone number is already in use.");
         }
 
-        string temporaryPassword = string.IsNullOrWhiteSpace(request.Password)
+        string temporaryPassword = request.Role == UserRole.LockerOperator || string.IsNullOrWhiteSpace(request.Password)
             ? GenerateTemporaryPassword()
             : request.Password;
 
@@ -177,6 +178,17 @@ public sealed class UserService(
         dbContext.AuditLogs.Add(auditLog);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        try
+        {
+            await emailSender.SendAsync(email, "Your Smart Locking account",
+                $"Sign in with {email} and temporary password: {temporaryPassword}\nChange it after signing in.", cancellationToken);
+        }
+        catch (ServiceUnavailableException exception)
+        {
+            throw new ServiceUnavailableException(UserErrorCodes.EmailUnavailable,
+                "Account was created, but the credential email was not delivered. Reissue a temporary password.", exception);
+        }
+
         return new CreateUserResponse(
             user.Id,
             profile.FullName,
@@ -184,9 +196,51 @@ public sealed class UserService(
             user.PhoneNumber,
             user.Role,
             user.Status,
-            temporaryPassword,
             user.CreatedAt
         );
+    }
+
+    public async Task ReissueTemporaryPasswordAsync(Guid actorAdminId, Guid operatorId, string? ipAddress = null,
+        CancellationToken cancellationToken = default)
+    {
+        User user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == operatorId &&
+            item.Role == UserRole.LockerOperator, cancellationToken)
+            ?? throw new NotFoundException(UserErrorCodes.NotFound, "Locker operator not found.");
+        if (string.IsNullOrWhiteSpace(user.Email))
+            throw new ConflictException(UserErrorCodes.EmailUnavailable, "Locker operator has no email address.");
+
+        string temporaryPassword = GenerateTemporaryPassword();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        user.PasswordHash = passwordHashService.HashPassword(temporaryPassword);
+        user.MustChangePassword = true;
+        user.UpdatedAt = now;
+        List<RefreshToken> tokens = await dbContext.RefreshTokens.Where(item => item.UserId == user.Id &&
+            item.RevokedAt == null).ToListAsync(cancellationToken);
+        foreach (RefreshToken token in tokens) token.RevokedAt = now;
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = actorAdminId,
+            Action = "ReissueTemporaryPassword",
+            EntityType = nameof(User),
+            EntityId = user.Id,
+            Result = AuditLogResult.Succeeded,
+            IpAddress = ipAddress,
+            OccurredAt = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await emailSender.SendAsync(user.Email, "Your new Smart Locking temporary password",
+                $"Sign in with {user.Email} and temporary password: {temporaryPassword}\nChange it after signing in.",
+                cancellationToken);
+        }
+        catch (ServiceUnavailableException exception)
+        {
+            throw new ServiceUnavailableException(UserErrorCodes.EmailUnavailable,
+                "Password was reset, but the credential email was not delivered. Reissue it again.", exception);
+        }
     }
 
     public async Task<UserDetailResponse> UpdateUserAsync(

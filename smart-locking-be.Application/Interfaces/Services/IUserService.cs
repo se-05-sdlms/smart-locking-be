@@ -19,6 +19,9 @@ public interface IUserService
         string? ipAddress = null,
         CancellationToken cancellationToken = default);
 
+    Task ReissueTemporaryPasswordAsync(Guid actorAdminId, Guid operatorId, string? ipAddress = null,
+        CancellationToken cancellationToken = default);
+
     Task<UserDetailResponse> UpdateUserAsync(
         Guid actorAdminId,
         Guid id,

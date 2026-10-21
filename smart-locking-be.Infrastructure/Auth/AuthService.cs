@@ -238,12 +238,10 @@ public sealed class AuthService(
         CancellationToken cancellationToken)
     {
         User? user = await FindUserByIdentifierAsync(request.LoginIdentifier, cancellationToken);
-        if (user?.PhoneNumber is null)
-        {
-            return;
-        }
-
-        await otpService.IssueAsync(user.PhoneNumber, OtpPurpose.PasswordReset, user.Id, cancellationToken);
+        if (user?.PhoneNumber is not null)
+            await otpService.IssueAsync(user.PhoneNumber, OtpPurpose.PasswordReset, user.Id, cancellationToken);
+        else if (user?.Email is not null && user.Role is UserRole.LockerOperator or UserRole.Administrator)
+            await otpService.IssueEmailAsync(user.Email, OtpPurpose.PasswordReset, user.Id, cancellationToken);
     }
 
     public async Task ResetPasswordAsync(
@@ -254,7 +252,7 @@ public sealed class AuthService(
         User user = await FindUserByIdentifierAsync(request.LoginIdentifier, cancellationToken)
             ?? throw new BadRequestException(AuthErrorCodes.InvalidOtp, "Invalid OTP.");
 
-        if (user.PhoneNumber is null)
+        if (user.PhoneNumber is null && (user.Email is null || user.Role == UserRole.Resident))
         {
             throw new BadRequestException(AuthErrorCodes.InvalidOtp, "Invalid OTP.");
         }
@@ -264,12 +262,12 @@ public sealed class AuthService(
             throw BadRequestException.For("newPassword", "Password must contain at least 8 characters.");
         }
 
-        await otpService.VerifyAndConsumeAsync(
-            user.PhoneNumber,
-            request.OtpCode,
-            OtpPurpose.PasswordReset,
-            user.Id,
-            cancellationToken);
+        if (user.PhoneNumber is not null)
+            await otpService.VerifyAndConsumeAsync(user.PhoneNumber, request.OtpCode,
+                OtpPurpose.PasswordReset, user.Id, cancellationToken);
+        else
+            await otpService.VerifyAndConsumeEmailAsync(user.Email!, request.OtpCode,
+                OtpPurpose.PasswordReset, user.Id, cancellationToken);
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         user.PasswordHash = passwordHashService.HashPassword(request.NewPassword);
