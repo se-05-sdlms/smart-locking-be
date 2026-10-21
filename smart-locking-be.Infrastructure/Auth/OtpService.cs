@@ -146,6 +146,17 @@ public sealed class OtpService(
             if (challenge.AttemptCount >= maxAttempts)
             {
                 challenge.LockedUntil = now.AddMinutes(lockoutMinutes);
+                dbContext.AuditLogs.Add(new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorUserId = challenge.UserId,
+                    Action = "Auth.OtpLocked",
+                    EntityType = nameof(OtpChallenge),
+                    EntityId = challenge.Id,
+                    Result = AuditLogResult.Failed,
+                    Details = $"Purpose={challenge.Purpose}",
+                    OccurredAt = now
+                });
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);

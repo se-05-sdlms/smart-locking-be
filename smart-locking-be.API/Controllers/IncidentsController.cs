@@ -43,7 +43,8 @@ public sealed class IncidentsController(IIncidentService incidentService) : Cont
         [FromBody] CreateGuestIncidentRequest request,
         CancellationToken cancellationToken)
     {
-        GuestIncidentResponse response = await incidentService.CreateGuestIncidentAsync(request, cancellationToken);
+        string? token = Request.Headers["X-Guest-Session-Token"].FirstOrDefault();
+        GuestIncidentResponse response = await incidentService.CreateGuestIncidentAsync(request, token, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, response);
     }
 }

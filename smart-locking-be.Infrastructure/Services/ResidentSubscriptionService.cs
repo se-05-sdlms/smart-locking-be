@@ -105,9 +105,7 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
     {
         DateTimeOffset now = clock.GetUtcNow();
         var query = db.ResidentSubscriptions.Where(s => s.Status == SubscriptionStatus.Active && s.EndDate < now);
-        if (db.Database.IsRelational())
-            return await query.ExecuteUpdateAsync(setters => setters.SetProperty(s => s.Status, SubscriptionStatus.Expired)
-                .SetProperty(s => s.UpdatedAt, now), cancellationToken);
+        // ponytail: tracked expiry keeps each status change auditable; revisit bulk updates if volume grows.
         var expired = await query.ToListAsync(cancellationToken);
         foreach (var subscription in expired) { subscription.Status = SubscriptionStatus.Expired; subscription.UpdatedAt = now; }
         await db.SaveChangesAsync(cancellationToken);
