@@ -11,4 +11,5 @@ public static class DeliveryErrorCodes
     public const string LookupLimitReached = "delivery/lookup_limit_reached";
     public const string ParcelImageRequired = "delivery/parcel_image_required";
     public const string RecipientNotFound = "delivery/recipient_not_found";
+    public const string RecipientCannotReceive = "delivery/recipient_cannot_receive";
 }
