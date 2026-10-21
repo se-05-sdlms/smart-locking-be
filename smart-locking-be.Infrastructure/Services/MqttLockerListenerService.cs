@@ -63,7 +63,7 @@ public sealed class MqttLockerListenerService(
             {
                 string topic = e.ApplicationMessage.Topic;
                 string payload = e.ApplicationMessage.ConvertPayloadToString();
-                await HandleMessageAsync(topic, payload, stoppingToken);
+                await HandleMessageAsync(topic, payload, stoppingToken, e.ApplicationMessage.Retain);
             }
             catch (Exception ex)
             {
@@ -105,7 +105,7 @@ public sealed class MqttLockerListenerService(
         }
     }
 
-    internal async Task HandleMessageAsync(string topic, string payload, CancellationToken cancellationToken)
+    internal async Task HandleMessageAsync(string topic, string payload, CancellationToken cancellationToken, bool isRetained = false)
     {
         // Topic pattern: lockers/{deviceId}/doors/{channel}/status
         var parts = topic.Split('/');
@@ -136,6 +136,7 @@ public sealed class MqttLockerListenerService(
         {
             return;
         }
+        if (isRetained) return;
 
         string deviceIdentifier = parts[1];
         if (!int.TryParse(parts[3], out int channel))
