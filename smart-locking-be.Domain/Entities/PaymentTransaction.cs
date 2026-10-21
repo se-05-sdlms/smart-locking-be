@@ -22,6 +22,8 @@ public sealed class PaymentTransaction
     /// </summary>
     public string? ExternalOrderCode { get; set; }
 
+    public string? CheckoutUrl { get; set; }
+
     /// <summary>
     /// Mã giao dịch bên ngoài do PayOS cung cấp; null trước khi cổng thanh toán phản hồi thành công.
     /// </summary>

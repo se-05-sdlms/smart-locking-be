@@ -1203,6 +1203,10 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<string>("CheckoutUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying");
+
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1243,6 +1247,11 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("UX_PaymentTransaction_ExternalTransactionId")
                         .HasFilter("\"ExternalTransactionId\" IS NOT NULL");
+
+                    b.HasIndex("OverdueChargeId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PaymentTransaction_PendingCharge")
+                        .HasFilter("\"Status\" = 'Pending'");
 
                     b.HasIndex("RequestedAt")
                         .HasDatabaseName("IX_PaymentTransaction_RequestedAt");
