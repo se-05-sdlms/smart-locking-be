@@ -90,6 +90,7 @@ public sealed class ParcelPickupService(
             throw new ConflictException(ParcelErrorCodes.InvalidAccessEvent, "Unlock event is invalid for pickup confirmation.");
         }
 
+        await using var transaction = await ParcelTransitionLock.AcquireAsync(dbContext, accessEvent.ParcelId.Value, cancellationToken);
         Parcel parcel = await dbContext.Parcels
             .Include(item => item.DeliveryRequest)
             .SingleOrDefaultAsync(item => item.Id == accessEvent.ParcelId.Value, cancellationToken)
@@ -126,6 +127,7 @@ public sealed class ParcelPickupService(
             ChangedAt = now,
         });
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         return new PickupConfirmationResponse(parcel.Id, parcel.Status, now);
     }
 }

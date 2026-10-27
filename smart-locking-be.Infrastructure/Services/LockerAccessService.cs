@@ -19,6 +19,19 @@ public sealed class LockerAccessService(
         CancellationToken cancellationToken = default)
     {
         ValidateContext(request);
+        await using var parcelTransaction = request.AccessType == LockerAccessType.ResidentPickup
+            ? await ParcelTransitionLock.AcquireAsync(dbContext, request.ParcelId!.Value, cancellationToken)
+            : null;
+        if (request.AccessType == LockerAccessType.ResidentPickup)
+        {
+            bool available = await dbContext.Parcels.AnyAsync(item => item.Id == request.ParcelId &&
+                item.DeliveryRequest.LockerId == request.LockerId &&
+                item.DeliveryRequest.AllocatedCompartmentId == request.LockerCompartmentId &&
+                (item.Status == ParcelStatus.Stored || item.Status == ParcelStatus.Overdue) &&
+                item.MaxStorageUntil > timeProvider.GetUtcNow(), cancellationToken);
+            if (!available)
+                throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel is no longer available for pickup.");
+        }
 
         LockerCompartment compartment = await dbContext.LockerCompartments
             .Include(item => item.Locker)
@@ -91,6 +104,7 @@ public sealed class LockerAccessService(
             OccurredAt = now
         });
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (parcelTransaction is not null) await parcelTransaction.CommitAsync(cancellationToken);
         return Map(accessEvent, compartment);
     }
 
