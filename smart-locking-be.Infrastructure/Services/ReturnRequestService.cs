@@ -31,7 +31,7 @@ public sealed class ReturnRequestService(
         // Client truyền tủ đang kết nối; giữ cách gọi cũ cho app chưa cập nhật.
         Locker? locker = string.IsNullOrWhiteSpace(request.DeviceIdentifier) ? resident.RegisteredLocker :
             await dbContext.Lockers.SingleOrDefaultAsync(x => x.DeviceIdentifier == request.DeviceIdentifier, cancellationToken);
-        if (locker is null || locker.Id != resident.RegisteredLockerId || !await dbContext.OperationalLockers().AnyAsync(item => item.Id == locker.Id, cancellationToken))
+        if (locker is null || !await dbContext.OperationalLockers().AnyAsync(item => item.Id == locker.Id, cancellationToken))
             throw new ConflictException(LockerErrorCodes.NotOperational, "Chọn hoặc kết nối một tủ đang hoạt động trước khi gửi đồ.");
 
         DateTimeOffset now = timeProvider.GetUtcNow();
