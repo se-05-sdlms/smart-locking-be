@@ -90,6 +90,12 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
             throw BadRequestException.For("fee", "Fee or currency is invalid.");
         if (request.OtpMaxAttempts <= 0 || request.OtpLockoutMinutes <= 0)
             throw BadRequestException.For("otpPolicy", "OTP policy is invalid.");
+        IncidentSlaPolicy sla = request.IncidentSla ?? new();
+        (int Acknowledge, int Resolve)[] limits = [(sla.CriticalAcknowledgeMinutes, sla.CriticalResolveMinutes),
+            (sla.HighAcknowledgeMinutes, sla.HighResolveMinutes), (sla.MediumAcknowledgeMinutes, sla.MediumResolveMinutes),
+            (sla.LowAcknowledgeMinutes, sla.LowResolveMinutes)];
+        if (limits.Any(limit => limit.Acknowledge <= 0 || limit.Resolve < limit.Acknowledge))
+            throw BadRequestException.For("incidentSla", "SLA targets must be positive; resolution must not precede acknowledgement.");
     }
 
     private static void Apply(SystemPolicy policy, SaveSystemPolicyRequest request)
@@ -111,6 +117,15 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
         policy.EnableRemoteUnlock = request.EnableRemoteUnlock;
         policy.EnableBluetoothUnlock = request.EnableBluetoothUnlock;
         policy.EffectiveFrom = request.EffectiveFrom;
+        IncidentSlaPolicy sla = request.IncidentSla ?? new();
+        policy.IncidentCriticalAcknowledgeMinutes = sla.CriticalAcknowledgeMinutes;
+        policy.IncidentCriticalResolveMinutes = sla.CriticalResolveMinutes;
+        policy.IncidentHighAcknowledgeMinutes = sla.HighAcknowledgeMinutes;
+        policy.IncidentHighResolveMinutes = sla.HighResolveMinutes;
+        policy.IncidentMediumAcknowledgeMinutes = sla.MediumAcknowledgeMinutes;
+        policy.IncidentMediumResolveMinutes = sla.MediumResolveMinutes;
+        policy.IncidentLowAcknowledgeMinutes = sla.LowAcknowledgeMinutes;
+        policy.IncidentLowResolveMinutes = sla.LowResolveMinutes;
     }
 
     private void AddAudit(Guid actor, string action, Guid id, string details, DateTimeOffset now) =>
@@ -132,5 +147,9 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
         item.OverdueStartAfterHours, item.OverdueFeePerHour, item.Currency, item.MaxStorageHours,
         item.ClearanceEligibilityAfterHours, item.ClearanceNoticeBeforeHours, item.PickupReminderStartDay,
         item.OtpMaxAttempts, item.OtpLockoutMinutes, item.EnableOtp, item.EnableRemoteUnlock,
-        item.EnableBluetoothUnlock, item.EffectiveFrom, item.EffectiveTo, item.IsActive, item.CreatedAt);
+        item.EnableBluetoothUnlock, item.EffectiveFrom, item.EffectiveTo, item.IsActive, item.CreatedAt,
+        new IncidentSlaPolicy(item.IncidentCriticalAcknowledgeMinutes, item.IncidentCriticalResolveMinutes,
+            item.IncidentHighAcknowledgeMinutes, item.IncidentHighResolveMinutes,
+            item.IncidentMediumAcknowledgeMinutes, item.IncidentMediumResolveMinutes,
+            item.IncidentLowAcknowledgeMinutes, item.IncidentLowResolveMinutes));
 }
