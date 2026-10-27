@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -15,7 +16,9 @@ public sealed class OtpService(
     TimeProvider timeProvider,
     IConfiguration configuration,
     ILogger<OtpService> logger,
-    IEmailSender? emailSender = null) : IOtpService
+    IEmailSender? emailSender = null,
+    ISmsSender? smsSender = null,
+    IHostEnvironment? hostEnvironment = null) : IOtpService
 {
     private static readonly Regex PhonePattern = new("^0[0-9]{9}$", RegexOptions.Compiled);
     private const int DefaultMaxAttempts = 5;
@@ -38,13 +41,8 @@ public sealed class OtpService(
                 challenge.RevokedAt == null)
             .ToListAsync(cancellationToken);
 
-        foreach (OtpChallenge challenge in activeChallenges)
-        {
-            challenge.RevokedAt = now;
-        }
-
         string code = tokenHashService.CreateNumericCode();
-        dbContext.OtpChallenges.Add(new OtpChallenge
+        OtpChallenge issued = new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -54,14 +52,19 @@ public sealed class OtpService(
             ExpiresAt = now.Add(Lifetime),
             AttemptCount = 0,
             CreatedAt = now
-        });
+        };
 
-        // ponytail: opt-in local delivery; replace with the notification/SMS adapter before production.
-        if (bool.TryParse(configuration["Otp:LogCode"], out bool logCode) && logCode)
-        {
-            logger.LogInformation("{Purpose} OTP for {PhoneNumber}: {OtpCode}", purpose, normalizedPhone, code);
-        }
+        // Hosted API always injects a sender. Keep direct challenge-store construction compatible.
+        // Never acknowledge a hosted request when its transport was omitted from DI.
+        if (smsSender is null && hostEnvironment is not null)
+            throw new ServiceUnavailableException("sms/unavailable", "SMS delivery is not configured.");
+        if (smsSender is not null)
+            await smsSender.SendOtpAsync(normalizedPhone, code, purpose.ToString(), issued.Id, cancellationToken);
+        foreach (OtpChallenge challenge in activeChallenges) challenge.RevokedAt = now;
+        dbContext.OtpChallenges.Add(issued);
         await dbContext.SaveChangesAsync(cancellationToken);
+        logger.LogDebug("Created {Purpose} OTP challenge {ChallengeId}; sandbox code logging requested: {LogCode}",
+            purpose, issued.Id, configuration.GetValue<bool>("Otp:LogCode"));
     }
 
     public async Task VerifyAndConsumeAsync(
