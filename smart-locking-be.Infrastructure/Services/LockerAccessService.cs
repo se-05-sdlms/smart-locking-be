@@ -54,6 +54,9 @@ public sealed class LockerAccessService(
         };
 
         string? blockedReason = GetBlockedReason(compartment, monitoringEnabled);
+        if (blockedReason is null && request.AccessType != LockerAccessType.OperatorEmergency &&
+            !await dbContext.OperationalCompartments().AnyAsync(item => item.Id == compartment.Id, cancellationToken))
+            blockedReason = "Locker or compartment is blocked by maintenance or an unresolved equipment incident.";
         if (blockedReason is not null)
         {
             accessEvent.Result = LockerAccessResult.Blocked;

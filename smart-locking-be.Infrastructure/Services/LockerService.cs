@@ -30,7 +30,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         if (locker.OperationalStatus == LockerOperationalStatus.Inactive)
             throw new ConflictException(LockerErrorCodes.NotOperational, "An inactive locker cannot be restored here.");
         if (locker.OperationalStatus == request.OperationalStatus)
-            return MapToDetailResponse(locker);
+            return await MapToDetailResponseAsync(locker, cancellationToken);
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         if (request.OperationalStatus == LockerOperationalStatus.OutOfService &&
@@ -73,7 +73,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         if (realtimeNotifier is not null)
             await realtimeNotifier.PublishToLockerAsync(lockerId, new RealtimeEvent("LockerStatusChanged", lockerId,
                 lockerId, locker.OperationalStatus.ToString(), reason, now), cancellationToken);
-        return MapToDetailResponse(locker);
+        return await MapToDetailResponseAsync(locker, cancellationToken);
     }
 
     public async Task<PublicLockerResponse> GetPublicLockerAsync(string code, CancellationToken cancellationToken = default)
@@ -86,7 +86,8 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             .Select(item => new { item.Code, item.Address, item.OperationalStatus })
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
-        if (locker.OperationalStatus != LockerOperationalStatus.Operational)
+        if (locker.OperationalStatus != LockerOperationalStatus.Operational ||
+            !await dbContext.OperationalLockers().AnyAsync(item => item.Code == locker.Code, cancellationToken))
             throw new ConflictException(LockerErrorCodes.NotOperational, "Locker is not operational.");
 
         return new PublicLockerResponse(locker.Code, locker.Address, true);
@@ -134,6 +135,11 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         var lockers = await query
             .OrderByDescending(l => l.CreatedAt)
             .ToListAsync(cancellationToken);
+        Guid[] lockerIds = lockers.Select(item => item.Id).ToArray();
+        HashSet<Guid> availableLockers = (await dbContext.OperationalLockers()
+            .Where(item => lockerIds.Contains(item.Id)).Select(item => item.Id).ToListAsync(cancellationToken)).ToHashSet();
+        HashSet<Guid> availableCompartments = (await dbContext.OperationalCompartments()
+            .Where(item => lockerIds.Contains(item.LockerId)).Select(item => item.Id).ToListAsync(cancellationToken)).ToHashSet();
 
         return lockers.Select(l => new LockerSummaryResponse(
             l.Id,
@@ -141,11 +147,12 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             l.Address,
             l.RecoveryAddress,
             l.DeviceIdentifier,
-            l.OperationalStatus,
+            l.OperationalStatus == LockerOperationalStatus.Operational && !availableLockers.Contains(l.Id)
+                ? LockerOperationalStatus.OutOfService : l.OperationalStatus,
             l.ConnectionStatus,
             l.LastSeenAt,
             l.Compartments.Count,
-            l.Compartments.Count(c => c.OperationalStatus == LockerCompartmentOperationalStatus.Operational),
+            l.Compartments.Count(c => availableCompartments.Contains(c.Id)),
             l.CreatedAt,
             l.UpdatedAt
         )).ToList();
@@ -183,7 +190,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             throw new ForbiddenException(LockerErrorCodes.AccessDenied, $"Role '{userRole}' cannot access locker details.");
         }
 
-        return MapToDetailResponse(locker);
+        return await MapToDetailResponseAsync(locker, cancellationToken);
     }
 
     public async Task<LockerDetailResponse> CreateLockerAsync(
@@ -226,7 +233,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         dbContext.AuditLogs.Add(CreateAudit(actorUserId, "Locker.Created", nameof(Locker), locker.Id, null, now));
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return MapToDetailResponse(locker);
+        return await MapToDetailResponseAsync(locker, cancellationToken);
     }
 
     public async Task<LockerDetailResponse> UpdateLockerAsync(
@@ -294,7 +301,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return MapToDetailResponse(locker);
+        return await MapToDetailResponseAsync(locker, cancellationToken);
     }
 
     public async Task<bool> SoftDeleteLockerAsync(Guid actorUserId, Guid lockerId, CancellationToken cancellationToken = default)
@@ -362,9 +369,11 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             throw new ForbiddenException(LockerErrorCodes.AccessDenied, $"Role '{userRole}' cannot access locker compartments.");
         }
 
+        HashSet<Guid> availableCompartments = (await dbContext.OperationalCompartments()
+            .Where(item => item.LockerId == lockerId).Select(item => item.Id).ToListAsync(cancellationToken)).ToHashSet();
         return locker.Compartments
             .OrderBy(c => c.Code)
-            .Select(MapCompartmentToResponse)
+            .Select(item => MapCompartmentToResponse(item, availableCompartments.Contains(item.Id)))
             .ToList();
     }
 
@@ -425,7 +434,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             $"LockerId={lockerId}", now));
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return MapCompartmentToResponse(compartment);
+        return await MapCompartmentToResponseAsync(compartment, cancellationToken);
     }
 
     public async Task<LockerCompartmentResponse> UpdateCompartmentAsync(Guid actorUserId, Guid lockerId,
@@ -446,7 +455,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         dbContext.AuditLogs.Add(CreateAudit(actorUserId, "LockerCompartment.Updated", nameof(LockerCompartment),
             compartment.Id, $"LockerId={lockerId}", compartment.UpdatedAt));
         await dbContext.SaveChangesAsync(cancellationToken);
-        return MapCompartmentToResponse(compartment);
+        return await MapCompartmentToResponseAsync(compartment, cancellationToken);
     }
 
     public async Task<LockerCompartmentResponse> UpdateCompartmentStatusAsync(
@@ -524,7 +533,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return MapCompartmentToResponse(compartment);
+        return await MapCompartmentToResponseAsync(compartment, cancellationToken);
     }
 
     private async Task EnsureNoActiveOperationsAsync(Guid lockerId, Guid? compartmentId, CancellationToken cancellationToken)
@@ -637,24 +646,32 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         return (trimmedCode, trimmedHardwareCode);
     }
 
-    private static LockerDetailResponse MapToDetailResponse(Locker locker)
+    private async Task<LockerDetailResponse> MapToDetailResponseAsync(Locker locker, CancellationToken cancellationToken)
     {
+        bool available = await dbContext.OperationalLockers().AnyAsync(item => item.Id == locker.Id, cancellationToken);
+        HashSet<Guid> availableCompartments = (await dbContext.OperationalCompartments()
+            .Where(item => item.LockerId == locker.Id).Select(item => item.Id).ToListAsync(cancellationToken)).ToHashSet();
         return new LockerDetailResponse(
             locker.Id,
             locker.Code,
             locker.Address,
             locker.RecoveryAddress,
             locker.DeviceIdentifier,
-            locker.OperationalStatus,
+            locker.OperationalStatus == LockerOperationalStatus.Operational && !available
+                ? LockerOperationalStatus.OutOfService : locker.OperationalStatus,
             locker.ConnectionStatus,
             locker.LastSeenAt,
             locker.CreatedAt,
             locker.UpdatedAt,
-            locker.Compartments.Select(MapCompartmentToResponse).ToList()
+            locker.Compartments.Select(item => MapCompartmentToResponse(item, availableCompartments.Contains(item.Id))).ToList()
         );
     }
 
-    private static LockerCompartmentResponse MapCompartmentToResponse(LockerCompartment c)
+    private async Task<LockerCompartmentResponse> MapCompartmentToResponseAsync(LockerCompartment compartment, CancellationToken cancellationToken) =>
+        MapCompartmentToResponse(compartment,
+            await dbContext.OperationalCompartments().AnyAsync(item => item.Id == compartment.Id, cancellationToken));
+
+    private static LockerCompartmentResponse MapCompartmentToResponse(LockerCompartment c, bool available)
     {
         return new LockerCompartmentResponse(
             c.Id,
@@ -662,7 +679,8 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             c.Code,
             c.HardwareCode,
             c.HardwareChannel,
-            c.OperationalStatus,
+            c.OperationalStatus == LockerCompartmentOperationalStatus.Operational && !available
+                ? LockerCompartmentOperationalStatus.OutOfService : c.OperationalStatus,
             c.DoorStatus,
             c.CreatedAt,
             c.UpdatedAt

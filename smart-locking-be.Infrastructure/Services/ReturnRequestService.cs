@@ -28,7 +28,8 @@ public sealed class ReturnRequestService(
             .SingleOrDefaultAsync(item => item.UserId == residentUserId, cancellationToken)
             ?? throw new NotFoundException(UserErrorCodes.NotFound, "Resident profile not found.");
         if (resident.User.Status != UserStatus.Active) throw new ConflictException(ReturnErrorCodes.InvalidState, "Resident account is inactive.");
-        if (resident.RegisteredLocker is null || resident.RegisteredLocker.OperationalStatus != LockerOperationalStatus.Operational)
+        if (resident.RegisteredLocker is null ||
+            !await dbContext.OperationalLockers().AnyAsync(item => item.Id == resident.RegisteredLockerId, cancellationToken))
             throw new ConflictException(LockerErrorCodes.NotOperational, "Registered locker is unavailable.");
 
         DateTimeOffset now = timeProvider.GetUtcNow();

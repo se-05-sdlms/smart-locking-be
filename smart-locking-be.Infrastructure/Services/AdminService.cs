@@ -34,19 +34,24 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
             .ToListAsync(cancellationToken);
 
         int totalLockers = lockers.Count;
-        int activeLockers = lockers.Count(l => l.OperationalStatus == LockerOperationalStatus.Operational);
-        int maintenanceLockers = lockers.Count(l => l.OperationalStatus == LockerOperationalStatus.OutOfService);
+        HashSet<Guid> availableLockerIds = (await dbContext.OperationalLockers()
+            .Select(item => item.Id).ToListAsync(cancellationToken)).ToHashSet();
+        HashSet<Guid> availableCompartmentIds = (await dbContext.OperationalCompartments()
+            .Select(item => item.Id).ToListAsync(cancellationToken)).ToHashSet();
+        int activeLockers = availableLockerIds.Count;
+        int maintenanceLockers = lockers.Count(l => l.OperationalStatus != LockerOperationalStatus.Inactive && !availableLockerIds.Contains(l.Id));
         int suspendedLockers = lockers.Count(l => l.OperationalStatus == LockerOperationalStatus.Inactive);
         int offlineLockers = lockers.Count(l => l.ConnectionStatus == LockerConnectionStatus.Offline);
 
         var attentionLockers = lockers
-            .Where(l => l.ConnectionStatus == LockerConnectionStatus.Offline || l.OperationalStatus != LockerOperationalStatus.Operational)
+            .Where(l => l.ConnectionStatus == LockerConnectionStatus.Offline || !availableLockerIds.Contains(l.Id))
             .Select(l => new AttentionLockerResponse(
                 l.Id,
                 l.Code,
                 l.Address,
                 l.ConnectionStatus,
-                l.OperationalStatus
+                l.OperationalStatus == LockerOperationalStatus.Operational && !availableLockerIds.Contains(l.Id)
+                    ? LockerOperationalStatus.OutOfService : l.OperationalStatus
             ))
             .ToList();
 
@@ -100,7 +105,7 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
         int overdueCompartments = compartments.Count(c => overdueCompartmentIds.Contains(c.Id));
         int occupiedCompartments = compartments.Count(c => occupiedCompartmentIds.Contains(c.Id) && !overdueCompartmentIds.Contains(c.Id));
         int availableCompartments = compartments.Count(c =>
-            c.OperationalStatus == LockerCompartmentOperationalStatus.Operational && !occupiedCompartmentIds.Contains(c.Id));
+            availableCompartmentIds.Contains(c.Id) && !occupiedCompartmentIds.Contains(c.Id));
 
         int storedParcelsCount = activeParcels.Count;
         int overdueParcelsCount = activeParcels.Count(p => p.Status == ParcelStatus.Overdue);
