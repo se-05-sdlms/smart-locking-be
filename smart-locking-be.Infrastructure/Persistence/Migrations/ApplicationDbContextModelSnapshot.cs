@@ -1889,6 +1889,109 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.ResidentAccountChange", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("AppliedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("NewPhoneNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid?>("OriginalLockerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OriginalPhoneNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying");
+
+                    b.Property<DateTimeOffset?>("PhoneVerificationExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid>("ResidentUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReviewReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid?>("ReviewedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid?>("TargetLockerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResidentUserId", "CreatedAt");
+
+                    b.HasIndex("ResidentUserId", "Kind")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'Submitted'");
+
+                    b.ToTable("ResidentAccountChange", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ResidentAccountChange_Kind", "(\"Kind\" = 'Locker' AND \"TargetLockerId\" IS NOT NULL AND \"NewPhoneNumber\" IS NULL) OR (\"Kind\" = 'Phone' AND \"TargetLockerId\" IS NULL AND \"NewPhoneNumber\" IS NOT NULL AND \"PhoneVerificationExpiresAt\" IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.ResidentAccountChangeEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid>("ResidentAccountChangeId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResidentAccountChangeId", "CreatedAt");
+
+                    b.ToTable("ResidentAccountChangeEvent", (string)null);
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.ResidentBiometric", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3138,6 +3241,57 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.ResidentAccountChange", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.Locker", "OriginalLocker")
+                        .WithMany()
+                        .HasForeignKey("OriginalLockerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("smart_locking_be.Domain.Entities.User", "ResidentUser")
+                        .WithMany()
+                        .HasForeignKey("ResidentUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.User", "ReviewedByUser")
+                        .WithMany()
+                        .HasForeignKey("ReviewedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("smart_locking_be.Domain.Entities.Locker", "TargetLocker")
+                        .WithMany()
+                        .HasForeignKey("TargetLockerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("OriginalLocker");
+
+                    b.Navigation("ResidentUser");
+
+                    b.Navigation("ReviewedByUser");
+
+                    b.Navigation("TargetLocker");
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.ResidentAccountChangeEvent", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.User", "ActorUser")
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.ResidentAccountChange", "ResidentAccountChange")
+                        .WithMany("Events")
+                        .HasForeignKey("ResidentAccountChangeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ActorUser");
+
+                    b.Navigation("ResidentAccountChange");
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.ResidentBiometric", b =>
                 {
                     b.HasOne("smart_locking_be.Domain.Entities.ResidentProfile", "ResidentProfile")
@@ -3400,6 +3554,11 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("smart_locking_be.Domain.Entities.RefreshToken", b =>
                 {
                     b.Navigation("ReplacementForTokens");
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.ResidentAccountChange", b =>
+                {
+                    b.Navigation("Events");
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.ResidentProfile", b =>

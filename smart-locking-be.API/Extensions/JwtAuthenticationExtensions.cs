@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.EntityFrameworkCore;
 using smart_locking_be.API.Authorization;
 using smart_locking_be.API.Middleware;
+using smart_locking_be.Domain.Enums;
+using smart_locking_be.Infrastructure.Persistence;
 using System.Security.Claims;
 using System.Text;
 
@@ -44,6 +47,22 @@ public static class JwtAuthenticationExtensions
                 };
                 options.Events = new JwtBearerEvents
                 {
+                    OnTokenValidated = async context =>
+                    {
+                        string? subject = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                        if (!Guid.TryParse(subject, out Guid userId))
+                        {
+                            context.Fail("Invalid account identity.");
+                            return;
+                        }
+                        var db = context.HttpContext.RequestServices.GetRequiredService<ApplicationDbContext>();
+                        var account = await db.Users.AsNoTracking().Where(u => u.Id == userId)
+                            .Select(u => new { u.Status, u.Role, u.PhoneNumber }).SingleOrDefaultAsync(context.HttpContext.RequestAborted);
+                        if (account is null || account.Status != UserStatus.Active ||
+                            context.Principal?.IsInRole(account.Role.ToString()) != true ||
+                            context.Principal?.FindFirstValue("phone_number") != account.PhoneNumber)
+                            context.Fail("The account is inactive or its identity has changed.");
+                    },
                     OnMessageReceived = context =>
                     {
                         string? accessToken = context.Request.Query["access_token"].FirstOrDefault();

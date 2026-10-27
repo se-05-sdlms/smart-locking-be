@@ -102,15 +102,12 @@ public sealed class DeliveryRequestService(
                 cancellationToken)
             ?? throw new NotFoundException(DeliveryErrorCodes.NotFound, "No active resident was found for this phone number.");
 
-        if (resident.RegisteredLockerId != deliveryRequest.LockerId)
-        {
-            throw new ConflictException(DeliveryErrorCodes.InvalidState, "Resident is not registered to receive parcels at this locker.");
-        }
-
         // Count and claim one unit of the purchased quota in the same resident lock.
         // The decision transaction also owns the resident quota lock.
         if (dbContext.Database.IsRelational())
         {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT 1 FROM \"User\" WHERE \"Id\" = {resident.UserId} FOR UPDATE", cancellationToken);
             await dbContext.Database.ExecuteSqlInterpolatedAsync(
                 $"SELECT 1 FROM \"ResidentProfile\" WHERE \"Id\" = {resident.Id} FOR UPDATE", cancellationToken);
             await dbContext.Entry(resident).ReloadAsync(cancellationToken);
@@ -123,6 +120,11 @@ public sealed class DeliveryRequestService(
             if (deliveryRequest.SessionExpiresAt <= timeProvider.GetUtcNow())
                 throw new GoneException(DeliveryErrorCodes.SessionExpired, "Delivery session has expired.");
         }
+        // A phone/locker approval may have won while this guest request was waiting for the lock.
+        if (resident.User.PhoneNumber != recipientPhone || resident.User.Status != UserStatus.Active || resident.User.Role != UserRole.Resident)
+            throw new NotFoundException(DeliveryErrorCodes.NotFound, "No active resident was found for this phone number.");
+        if (resident.RegisteredLockerId != deliveryRequest.LockerId)
+            throw new ConflictException(DeliveryErrorCodes.InvalidState, "Resident is not registered to receive parcels at this locker.");
         await EnsureResidentCanReceiveAsync(resident.Id, cancellationToken);
 
         deliveryRequest.ResidentProfileId = resident.Id;
