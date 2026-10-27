@@ -1792,6 +1792,46 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<int>("GuestSessionTimeoutMinutes")
                         .HasColumnType("integer");
 
+                    b.Property<int>("IncidentCriticalAcknowledgeMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(15);
+
+                    b.Property<int>("IncidentCriticalResolveMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(60);
+
+                    b.Property<int>("IncidentHighAcknowledgeMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(30);
+
+                    b.Property<int>("IncidentHighResolveMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(240);
+
+                    b.Property<int>("IncidentLowAcknowledgeMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(480);
+
+                    b.Property<int>("IncidentLowResolveMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(4320);
+
+                    b.Property<int>("IncidentMediumAcknowledgeMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(120);
+
+                    b.Property<int>("IncidentMediumResolveMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1440);
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
@@ -1849,6 +1889,8 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.ToTable("SystemPolicy", null, t =>
                         {
                             t.HasCheckConstraint("CK_SystemPolicy_DurationsAndRates", "\"GuestSessionTimeoutMinutes\" > 0 AND \"ManualApprovalTimeoutMinutes\" > 0 AND \"CompartmentReservationMinutes\" > 0 AND \"OtpMaxAttempts\" > 0 AND \"OtpLockoutMinutes\" > 0 AND \"OverdueStartAfterHours\" >= 0 AND \"OverdueFeePerHour\" >= 0 AND \"MaxStorageHours\" > 0 AND \"ClearanceEligibilityAfterHours\" >= 0 AND \"ClearanceNoticeBeforeHours\" >= 0 AND \"PickupReminderStartDay\" > 0");
+
+                            t.HasCheckConstraint("CK_SystemPolicy_IncidentSla", "\"IncidentCriticalAcknowledgeMinutes\" > 0 AND \"IncidentCriticalResolveMinutes\" >= \"IncidentCriticalAcknowledgeMinutes\" AND \"IncidentHighAcknowledgeMinutes\" > 0 AND \"IncidentHighResolveMinutes\" >= \"IncidentHighAcknowledgeMinutes\" AND \"IncidentMediumAcknowledgeMinutes\" > 0 AND \"IncidentMediumResolveMinutes\" >= \"IncidentMediumAcknowledgeMinutes\" AND \"IncidentLowAcknowledgeMinutes\" > 0 AND \"IncidentLowResolveMinutes\" >= \"IncidentLowAcknowledgeMinutes\"");
                         });
                 });
 
