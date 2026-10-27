@@ -15,10 +15,12 @@ public sealed class OfflinePinProvisioner(ApplicationDbContext db, TimeProvider 
         DateTimeOffset now = clock.GetUtcNow();
         if (!await db.SystemPolicies.AnyAsync(x => x.IsActive && x.EnableBluetoothUnlock && x.EffectiveFrom <= now &&
             (!x.EffectiveTo.HasValue || x.EffectiveTo > now), ct)) return;
+        var operationalCompartments = db.OperationalCompartments();
         var parcels = await db.Parcels.Include(x => x.DeliveryRequest).ThenInclude(x => x.ResidentProfile)
             .Include(x => x.DeliveryRequest).ThenInclude(x => x.AllocatedCompartment)
             .Include(x => x.DeliveryRequest).ThenInclude(x => x.Locker)
-            .Where(x => (x.Status == ParcelStatus.Stored || x.Status == ParcelStatus.Overdue) &&
+            .Where(x => (x.Status == ParcelStatus.Stored || x.Status == ParcelStatus.Overdue) && x.MaxStorageUntil > now &&
+                operationalCompartments.Any(available => available.Id == x.DeliveryRequest.AllocatedCompartmentId) &&
                 !db.OfflineLockerPins.Any(p => p.ParcelId == x.Id)).ToListAsync(ct);
         foreach (Parcel parcel in parcels)
         {

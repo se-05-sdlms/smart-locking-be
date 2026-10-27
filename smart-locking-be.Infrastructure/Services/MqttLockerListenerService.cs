@@ -121,11 +121,12 @@ public sealed class MqttLockerListenerService(
         DateTimeOffset now = (timeProvider ?? TimeProvider.System).GetUtcNow();
         bool bluetoothEnabled = await db.SystemPolicies.AnyAsync(x => x.IsActive && x.EnableBluetoothUnlock && x.EffectiveFrom <= now &&
             (!x.EffectiveTo.HasValue || x.EffectiveTo > now), ct);
+        var operationalCompartments = db.OperationalCompartments();
         var channels = await db.LockerCompartments.Select(x => new
         {
             Device = x.Locker.DeviceIdentifier,
             Channel = x.HardwareChannel,
-            Busy = x.OperationalStatus != LockerCompartmentOperationalStatus.Operational || x.Locker.OperationalStatus != LockerOperationalStatus.Operational ||
+            Busy = !operationalCompartments.Any(available => available.Id == x.Id) ||
                 db.Parcels.Any(p => p.DeliveryRequest.AllocatedCompartmentId == x.Id && (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue)) ||
                 db.ReturnRequests.Any(r => r.AllocatedCompartmentId == x.Id && (r.Status == ReturnRequestStatus.Allocated || r.Status == ReturnRequestStatus.Deposited)) ||
                 db.CompartmentReservations.Any(r => r.LockerCompartmentId == x.Id && r.ReleasedAt == null && r.ExpiresAt > now)
@@ -139,9 +140,9 @@ public sealed class MqttLockerListenerService(
             await _mqttClient.PublishAsync(new MqttApplicationMessageBuilder().WithTopic($"lockers/{locker.Key}/inventory")
                 .WithPayload($"{(bluetoothEnabled ? 1 : 0)}:{mask}").WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build(), ct);
         }
-        var pins = await db.OfflineLockerPins.Where(x => x.ConsumedAt == null &&
+        var pins = await db.OfflineLockerPins.Where(x => bluetoothEnabled && x.ConsumedAt == null &&
             db.Parcels.Any(p => p.Id == x.ParcelId && (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue) &&
-                p.DeliveryRequest.AllocatedCompartment!.OperationalStatus == LockerCompartmentOperationalStatus.Operational))
+                p.MaxStorageUntil > now && operationalCompartments.Any(available => available.Id == p.DeliveryRequest.AllocatedCompartmentId)))
             .Join(db.Parcels, pin => pin.ParcelId, parcel => parcel.Id, (pin, parcel) => new
             {
                 Device = parcel.DeliveryRequest.Locker.DeviceIdentifier,

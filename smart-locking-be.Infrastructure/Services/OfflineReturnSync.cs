@@ -9,9 +9,12 @@ public sealed partial class OfflinePinService
     // Nhật ký R/G đi chung hàng đợi với D/P, giữ đúng thứ tự của tủ.
     private async Task ApplyReturnAsync(OfflineLockerEvent item, CancellationToken ct)
     {
+        // ReceiveAsync owns the encompassing transaction; serialize with cancellation
+        // before reloading this request so delayed MQTT cannot restore revoked access.
+        await using var transition = await ReturnTransitionLock.AcquireAsync(db, item.DeliveryId, ct);
         var compartment = await FindCompartment(item, ct);
         if (compartment is null) { Review(item, "Unknown return compartment.", null); return; }
-        var request = await db.ReturnRequests.Include(x => x.ResidentProfile).ThenInclude(x => x.User)
+        var request = await db.ReturnRequests.Include(x => x.Cancellation).Include(x => x.ResidentProfile).ThenInclude(x => x.User)
             .SingleOrDefaultAsync(x => x.Id == item.DeliveryId, ct);
         var occurred = item.ClosedAt ?? item.ReceivedAt;
         bool notify = request is null || (item.Kind == "R" ? request.Status == ReturnRequestStatus.Allocated : request.Status == ReturnRequestStatus.Deposited);
@@ -19,31 +22,10 @@ public sealed partial class OfflinePinService
         {
             if (request is null)
             {
-                string international = "+84" + item.RecipientPhone[1..];
-                var residents = await db.ResidentProfiles.Include(x => x.User).Where(x =>
-                    x.User.Role == UserRole.Resident && x.User.Status == UserStatus.Active &&
-                    (x.User.PhoneNumber == item.RecipientPhone || x.User.PhoneNumber == international)).ToListAsync(ct);
-                if (residents.Count != 1) { Review(item, "Offline resident is unknown or ambiguous.", compartment); return; }
-                if (await db.ReturnRequests.AnyAsync(x => x.ReturnCode == item.PinCode, ct))
-                { Review(item, "Return code conflict; physical parcel requires reconciliation.", compartment); return; }
-                if (await CompartmentConflictAsync(compartment.Id, item.DeliveryId, occurred, ct))
-                { Review(item, "Offline return conflicts with another parcel or reservation.", compartment); return; }
-                request = new()
-                {
-                    Id = item.DeliveryId,
-                    ResidentProfileId = residents[0].Id,
-                    ResidentProfile = residents[0],
-                    LockerId = compartment.LockerId,
-                    AllocatedCompartmentId = compartment.Id,
-                    ReturnCode = item.PinCode!,
-                    ReturnReason = "Offline Bluetooth; image pending upload.",
-                    Status = ReturnRequestStatus.Deposited,
-                    CreatedAt = item.OpenedAt ?? occurred,
-                    AllocatedAt = item.OpenedAt ?? occurred,
-                    ResidentDepositedAt = occurred,
-                    UpdatedAt = item.ReceivedAt
-                };
-                db.ReturnRequests.Add(request);
+                // A phone number in unsigned device evidence cannot authorize a new
+                // resident obligation or bypass registered-locker change eligibility.
+                Review(item, "Offline return requires an existing authorized request; unsigned resident identity requires reconciliation.", compartment, blockCompartment: true);
+                return;
             }
             else
             {
@@ -73,11 +55,25 @@ public sealed partial class OfflinePinService
             request.Status = ReturnRequestStatus.Completed;
             request.ShipperPickedUpAt ??= occurred;
             request.CompartmentReleasedAt ??= occurred;
-            request.ShipperSessionTokenHash = null;
+            if (request.Cancellation is not null)
+            {
+                request.Cancellation.Status = "AlreadyCollected";
+                request.Cancellation.CompletedAt ??= occurred;
+                request.ShipperSessionTokenHash = null;
+                db.AuditLogs.Add(new()
+                {
+                    Id = Guid.NewGuid(),
+                    Action = "ReturnCancellation.AlreadyCollected",
+                    EntityType = nameof(ReturnRequest),
+                    EntityId = request.Id,
+                    OccurredAt = item.ReceivedAt,
+                    Result = AuditLogResult.Succeeded,
+                    Details = "Device pickup completed after cancellation was requested; cancellation did not complete."
+                });
+            }
             request.UpdatedAt = item.ReceivedAt;
         }
-        compartment.DoorStatus = DoorStatus.Closed;
-        compartment.UpdatedAt = item.ReceivedAt;
+        ObserveClosure(item, compartment);
         // Access này là kết quả cảm biến, không phải chỉ là lệnh mở chốt.
         db.LockerAccessEvents.Add(new()
         {
@@ -113,7 +109,11 @@ public sealed partial class OfflinePinService
                     Type = item.Kind == "R" ? "ReturnDeposited" : "ReturnPickedUp",
                     Channel = notificationChannel,
                     Title = item.Kind == "R" ? "Da gui do vao tu" : "Guest da lay do",
-                    Message = item.Kind == "R" ? $"Do da o ngan {compartment.Code}. Mo app de chia se ma lay do." : $"Do tai ngan {compartment.Code} da duoc lay.",
+                    Message = item.Kind == "R"
+                        ? request.Cancellation is null
+                            ? $"Do da o ngan {compartment.Code}. Mo app de chia se ma lay do."
+                            : "Cancellation is pending verification. Do not share the previous pickup code or retrieve the parcel. Contact the locker operator."
+                        : $"Do tai ngan {compartment.Code} da duoc lay.",
                     DeliveryStatus = notificationChannel == NotificationChannel.InApp ? NotificationDeliveryStatus.Sent : NotificationDeliveryStatus.Pending,
                     SentAt = notificationChannel == NotificationChannel.InApp ? item.ReceivedAt : null,
                     CreatedAt = item.ReceivedAt

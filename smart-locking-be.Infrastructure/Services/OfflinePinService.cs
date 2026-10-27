@@ -213,8 +213,7 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
         parcel.DeliveryRequest.UpdatedAt = item.ReceivedAt;
         foreach (CompartmentReservation reservation in await db.CompartmentReservations.Where(x =>
             x.DeliveryRequestId == item.DeliveryId && x.ReleasedAt == null).ToListAsync(ct)) reservation.ReleasedAt = occurred;
-        compartment.DoorStatus = DoorStatus.Closed;
-        compartment.UpdatedAt = item.ReceivedAt;
+        ObserveClosure(item, compartment);
         Guid? user = parcel.DeliveryRequest.ResidentProfile?.UserId;
         db.ParcelStatusHistories.Add(new()
         {
@@ -247,6 +246,16 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
         db.LockerCompartments.Include(x => x.Locker).SingleOrDefaultAsync(x =>
             x.Locker.DeviceIdentifier == item.DeviceIdentifier && x.HardwareChannel == item.HardwareChannel, ct);
 
+    private static void ObserveClosure(OfflineLockerEvent item, LockerCompartment compartment)
+    {
+        // Journal replay may arrive after a newer live door signal. Missing clock
+        // evidence never creates a fresh closed-door observation.
+        if (!item.ClosedAt.HasValue || compartment.DoorStatusObservedAt >= item.ClosedAt.Value) return;
+        compartment.DoorStatus = DoorStatus.Closed;
+        compartment.DoorStatusObservedAt = item.ClosedAt;
+        compartment.UpdatedAt = item.ReceivedAt;
+    }
+
     private void Access(OfflineLockerEvent item, LockerCompartment compartment, Guid delivery, Guid parcel, Guid? user, LockerAccessType type)
     {
         db.LockerAccessEvents.Add(new()
@@ -275,7 +284,7 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
         });
     }
 
-    private void Review(OfflineLockerEvent item, string reason, LockerCompartment? compartment)
+    private void Review(OfflineLockerEvent item, string reason, LockerCompartment? compartment, bool blockCompartment = false)
     {
         item.Status = "NeedsReview";
         item.ReviewReason = reason;
@@ -317,7 +326,7 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
             Id = Guid.NewGuid(),
             Source = IncidentSource.System,
             Status = IncidentStatus.Open,
-            Type = "OfflinePinReconciliation",
+            Type = blockCompartment ? "Compartment" : "OfflinePinReconciliation",
             Title = "Offline PIN event requires review",
             Description = $"Event {item.Id:N}: {reason}",
             LockerId = compartment?.LockerId,
