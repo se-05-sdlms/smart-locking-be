@@ -7,6 +7,11 @@ namespace smart_locking_be.Domain.Entities;
 /// </summary>
 public sealed class SystemPolicy
 {
+    public double? OperatorReplacementRadiusKm { get; set; }
+    public int? OperatorReplacementMaxLoad { get; set; }
+    public string[]? OperatorReplacementAreas { get; set; }
+    public Guid[]? OperatorReplacementEligibleUserIds { get; set; }
+
     /// <summary>
     /// Mã định danh của phiên bản chính sách.
     /// </summary>

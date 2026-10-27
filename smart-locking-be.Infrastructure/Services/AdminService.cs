@@ -33,6 +33,12 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
                     .ThenInclude(u => u!.ResidentProfile)
             .ToListAsync(cancellationToken);
 
+        var effective = await dbContext.EffectiveOperatorAssignments(now).ToListAsync(cancellationToken);
+        var operatorIds = effective.Select(x => x.OperatorUserId).Distinct().ToList();
+        var operatorNames = await dbContext.Users.Where(x => operatorIds.Contains(x.Id))
+            .Select(x => new { x.Id, Name = x.ResidentProfile != null ? x.ResidentProfile.FullName : x.PhoneNumber ?? x.Email })
+            .ToDictionaryAsync(x => x.Id, x => x.Name, cancellationToken);
+
         int totalLockers = lockers.Count;
         int activeLockers = lockers.Count(l => l.OperationalStatus == LockerOperationalStatus.Operational);
         int maintenanceLockers = lockers.Count(l => l.OperationalStatus == LockerOperationalStatus.OutOfService);
@@ -56,10 +62,8 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
             .Take(recentLimit)
             .Select(l =>
             {
-                var activeAssignment = l.OperatorAssignments.FirstOrDefault(a => a.RevokedAt == null);
-                string? operatorName = activeAssignment?.OperatorUser?.ResidentProfile?.FullName
-                    ?? activeAssignment?.OperatorUser?.PhoneNumber
-                    ?? activeAssignment?.OperatorUser?.Email;
+                var activeAssignment = effective.FirstOrDefault(a => a.LockerId == l.Id);
+                string? operatorName = activeAssignment != null ? operatorNames.GetValueOrDefault(activeAssignment.OperatorUserId) : null;
 
                 return new RecentLockerResponse(
                     l.Id,

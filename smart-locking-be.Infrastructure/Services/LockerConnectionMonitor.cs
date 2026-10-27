@@ -89,9 +89,8 @@ public sealed class LockerConnectionMonitor(
         List<Guid> recipients = [];
         if (status == LockerConnectionStatus.Offline)
         {
-            recipients = await dbContext.OperatorAssignments
-                .Where(item => item.LockerId == locker.Id && item.RevokedAt == null &&
-                    item.OperatorUser.Status == UserStatus.Active)
+            recipients = await dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow())
+                .Where(item => item.LockerId == locker.Id && item.RevokedAt == null)
                 .Select(item => item.OperatorUserId)
                 .ToListAsync(cancellationToken);
             if (recipients.Count == 0)

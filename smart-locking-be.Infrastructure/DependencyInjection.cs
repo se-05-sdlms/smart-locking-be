@@ -128,6 +128,8 @@ public static class DependencyInjection
 
         services.AddScoped<IOperatorSupportService, OperatorSupportService>();
         services.AddScoped<ISystemPolicyService, SystemPolicyService>();
+        services.AddScoped<IOperatorCoverageService, OperatorCoverageService>();
+        services.AddHostedService<OperatorCoverageWorker>();
 
         services.AddHostedService<MqttLockerListenerService>();
         services.AddHostedService<DoorOpenAlertWorker>();
