@@ -46,6 +46,10 @@ public static class DependencyInjection
         });
         services.AddScoped<ISubscriptionPlanService, SubscriptionPlanService>();
         services.AddScoped<IResidentSubscriptionService, ResidentSubscriptionService>();
+        services.AddOptions<ResidentSubscriptionOptions>()
+            .Configure(options => options.EnforceParcelLimits =
+                !bool.TryParse(configuration[$"{ResidentSubscriptionOptions.SectionName}:EnforceParcelLimits"], out bool enforce) || enforce);
+        services.AddScoped<IParcelQuotaService, ParcelQuotaService>();
         services.AddScoped<IOverduePaymentService, OverduePaymentService>();
         services.AddScoped<IPaymentGatewayService, PayOSPaymentGatewayService>();
         services.AddScoped<ILockerService, LockerService>();

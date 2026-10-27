@@ -21,6 +21,7 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
             ?? throw new NotFoundException(UserErrorCodes.NotFound, "Resident profile not found.");
         var plan = await db.SubscriptionPlans.AsNoTracking().SingleOrDefaultAsync(p => p.Id == request.PlanId && p.IsActive, cancellationToken)
             ?? throw new NotFoundException(SubscriptionErrorCodes.NotFound, "Subscription plan is unavailable.");
+        if (plan.Price == 0) return await ActivateFreePlanAsync(resident.Id, plan, cancellationToken);
         if (plan.Price <= 0 || plan.Price > int.MaxValue || decimal.Truncate(plan.Price) != plan.Price)
             throw new BadRequestException(SubscriptionErrorCodes.InvalidPayment, "PayOS payment requires a positive VND amount.");
         if (!IsHttpUrl(options.Value.ReturnUrl) || !IsHttpUrl(options.Value.CancelUrl))
@@ -49,6 +50,43 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
         var link = await gateway.CreatePaymentLinkAsync(new(orderCode, checked((int)plan.Price), "Subscription",
             options.Value.ReturnUrl, options.Value.CancelUrl), cancellationToken);
         return new(subscription.Id, link.CheckoutUrl, orderCode, plan.Price);
+    }
+
+    // A free plan needs no PayOS checkout: it takes effect immediately and queues after any current period.
+    private async Task<SubscriptionCheckoutResponse> ActivateFreePlanAsync(Guid residentId, SubscriptionPlan plan, CancellationToken cancellationToken)
+    {
+        await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (db.Database.IsRelational())
+        {
+            // Same lock as paid activation so concurrent subscribes for one resident cannot stack twice.
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"ResidentProfile\" WHERE \"Id\" = {residentId} FOR UPDATE", cancellationToken);
+        }
+
+        DateTimeOffset now = clock.GetUtcNow();
+        var active = await db.ResidentSubscriptions.AsNoTracking()
+            .Where(s => s.ResidentProfileId == residentId && s.Status == SubscriptionStatus.Active && s.EndDate > now)
+            .Select(s => new { s.SubscriptionPlanId, s.EndDate }).ToListAsync(cancellationToken);
+        // Free periods must not be farmed: one running or queued period per free plan.
+        if (active.Any(s => s.SubscriptionPlanId == plan.Id))
+            throw new ConflictException(SubscriptionErrorCodes.AlreadyExists, "This free plan is already active.");
+
+        DateTimeOffset start = active.Count > 0 ? active.Max(s => s.EndDate) : now;
+        var subscription = new ResidentSubscription
+        {
+            Id = Guid.NewGuid(),
+            ResidentProfileId = residentId,
+            SubscriptionPlanId = plan.Id,
+            Status = SubscriptionStatus.Active,
+            PriceSnapshot = 0,
+            StartDate = start,
+            EndDate = start.AddDays(plan.DurationDays),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.ResidentSubscriptions.Add(subscription);
+        await db.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        return new(subscription.Id, string.Empty, 0, 0, Activated: true);
     }
 
     public async Task ActivateSubscriptionAsync(PayOSWebhookData payment, CancellationToken cancellationToken = default)
