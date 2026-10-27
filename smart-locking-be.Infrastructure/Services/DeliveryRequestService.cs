@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 using smart_locking_be.Application.DTOs.Lockers;
@@ -83,6 +84,7 @@ public sealed class DeliveryRequestService(
         SubmitDeliveryRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using IDbContextTransaction? transaction = await LockDecisionAsync(id, cancellationToken);
         DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
         string recipientPhone = RequireValue(request.RecipientPhone, nameof(request.RecipientPhone), 20);
         string parcelImageUrl = string.IsNullOrWhiteSpace(request.ParcelImageUrl)
@@ -132,6 +134,7 @@ public sealed class DeliveryRequestService(
 
         AddAudit(null, "DeliveryRequest.Submitted", deliveryRequest, deliveryRequest.Status.ToString(), now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         if (pushNotificationId.HasValue)
         {
             await pushNotificationService.TrySendAsync(pushNotificationId.Value, cancellationToken);
@@ -148,6 +151,7 @@ public sealed class DeliveryRequestService(
         string contentType,
         CancellationToken cancellationToken = default)
     {
+        await using IDbContextTransaction? transaction = await LockDecisionAsync(id, cancellationToken);
         DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
 
         int attempts = await CountAuditActionsAsync(deliveryRequest.Id, WaybillScannedAction, cancellationToken);
@@ -182,6 +186,7 @@ public sealed class DeliveryRequestService(
         RefreshSession(deliveryRequest, now);
         AddAudit(null, WaybillScannedAction, deliveryRequest, deliveryRequest.OcrStatus.ToString(), now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
 
         return new WaybillOcrResponse(
             ocr.Succeeded ? "Succeeded" : "Failed",
@@ -196,6 +201,7 @@ public sealed class DeliveryRequestService(
         ResolveRecipientRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using IDbContextTransaction? transaction = await LockDecisionAsync(id, cancellationToken);
         DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
         string phone = VietnamPhoneNumber.Normalize(request.Phone)
             ?? throw BadRequestException.For("phone", "Enter a valid Vietnamese mobile phone number of 10 digits.");
@@ -230,6 +236,7 @@ public sealed class DeliveryRequestService(
         AddAudit(null, RecipientLookupAction, deliveryRequest, fullName is null ? "NotFound" : "Found", now);
         RefreshSession(deliveryRequest, now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
 
         if (recipient is null)
         {
@@ -268,6 +275,7 @@ public sealed class DeliveryRequestService(
         string guestSessionToken,
         CancellationToken cancellationToken = default)
     {
+        await using IDbContextTransaction? transaction = await LockDecisionAsync(id, cancellationToken);
         DeliveryRequest deliveryRequest = await FindValidSessionAsync(id, guestSessionToken, cancellationToken);
 
         if (deliveryRequest.Status == DeliveryRequestStatus.PendingApproval &&
@@ -278,6 +286,8 @@ public sealed class DeliveryRequestService(
             deliveryRequest.UpdatedAt = timeProvider.GetUtcNow();
             await dbContext.SaveChangesAsync(cancellationToken);
         }
+
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
 
         string? compartmentCode = deliveryRequest.AllocatedCompartmentId.HasValue
             ? await dbContext.LockerCompartments
@@ -301,29 +311,119 @@ public sealed class DeliveryRequestService(
             deliveryRequest.FailureDetail);
     }
 
+    public async Task<DeliveryRequestSummaryResponse> CancelAsync(
+        Guid id,
+        string guestSessionToken,
+        CancellationToken cancellationToken = default)
+    {
+        await using IDbContextTransaction? transaction = await LockDecisionAsync(id, cancellationToken);
+        DeliveryRequest request = await FindValidSessionAsync(id, guestSessionToken, cancellationToken);
+        if (request.Status == DeliveryRequestStatus.Cancelled) return MapSummary(request);
+        if (request.Status != DeliveryRequestStatus.PendingApproval)
+        {
+            throw new ConflictException(DeliveryErrorCodes.InvalidState,
+                "Only a delivery waiting for resident approval can be cancelled. An approved delivery requires operator assistance.");
+        }
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        if (request.ApprovalExpiresAt <= now)
+        {
+            request.Status = DeliveryRequestStatus.Expired;
+            request.FailureCode = DeliveryRequestFailureCode.ApprovalExpired;
+            request.UpdatedAt = now;
+            AddAudit(null, "DeliveryRequest.Expired", request, "Approval expired.", now);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            throw new GoneException(DeliveryErrorCodes.ApprovalExpired, "Delivery request approval period has expired.");
+        }
+
+        // A pending request should never have opened a door or stored a parcel. Fail closed
+        // on inconsistent legacy data rather than releasing a compartment with physical work.
+        if (request.DecisionAt.HasValue || request.AllocatedCompartmentId.HasValue ||
+            await dbContext.Parcels.AnyAsync(p => p.DeliveryRequestId == id, cancellationToken) ||
+            await dbContext.LockerAccessEvents.AnyAsync(e => e.DeliveryRequestId == id, cancellationToken) ||
+            await dbContext.CompartmentReservations.AnyAsync(r => r.DeliveryRequestId == id && r.ReleasedAt == null, cancellationToken))
+        {
+            throw new ConflictException(DeliveryErrorCodes.InvalidState,
+                "This delivery has physical activity or a reservation and requires operator assistance.");
+        }
+
+        request.Status = DeliveryRequestStatus.Cancelled;
+        request.DecisionAt = now;
+        request.LastActivityAt = now;
+        request.UpdatedAt = now;
+        List<Notification> approvalNotifications = await dbContext.Notifications
+            .Where(n => n.DeliveryRequestId == id && n.Type == "DeliveryApprovalRequested")
+            .ToListAsync(cancellationToken);
+        foreach (Notification notification in approvalNotifications)
+        {
+            notification.Type = "DeliveryRequestCancelled";
+            notification.Title = "Delivery request cancelled";
+            notification.Message = "The shipper cancelled this delivery before approval. No action is required.";
+            // Any retry now carries the cancelled state rather than an approval prompt.
+        }
+        Guid residentUserId = await dbContext.ResidentProfiles
+            .Where(r => r.Id == request.ResidentProfileId).Select(r => r.UserId).SingleAsync(cancellationToken);
+        Guid pushId = Guid.NewGuid();
+        foreach (NotificationChannel channel in new[] { NotificationChannel.InApp, NotificationChannel.Push })
+        {
+            dbContext.Notifications.Add(new Notification
+            {
+                Id = channel == NotificationChannel.Push ? pushId : Guid.NewGuid(),
+                UserId = residentUserId,
+                DeliveryRequestId = id,
+                Type = "DeliveryRequestCancelled",
+                Channel = channel,
+                Title = "Delivery request cancelled",
+                Message = $"The shipper cancelled the delivery at locker {request.Locker.Code} before approval.",
+                DeliveryStatus = channel == NotificationChannel.Push ? NotificationDeliveryStatus.Pending : NotificationDeliveryStatus.Sent,
+                SentAt = channel == NotificationChannel.InApp ? now : null,
+                CreatedAt = now
+            });
+        }
+        AddAudit(null, "DeliveryRequest.Cancelled", request, "Owning guest session cancelled before approval.", now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        await pushNotificationService.TrySendAsync(pushId, cancellationToken);
+        return MapSummary(request);
+    }
+
+    public async Task<ResidentDeliveryRequestResponse> GetForResidentAsync(
+        Guid residentUserId,
+        Guid requestId,
+        CancellationToken cancellationToken = default)
+    {
+        ResidentProfile resident = await GetActiveResidentProfileAsync(residentUserId, cancellationToken);
+        DeliveryRequest request = await dbContext.DeliveryRequests.AsNoTracking().Include(r => r.Locker)
+            .SingleOrDefaultAsync(r => r.Id == requestId && r.ResidentProfileId == resident.Id, cancellationToken)
+            ?? throw new NotFoundException(DeliveryErrorCodes.NotFound, "Delivery request not found.");
+        DeliveryRequestStatus status = request.Status == DeliveryRequestStatus.PendingApproval &&
+            request.ApprovalExpiresAt <= timeProvider.GetUtcNow() ? DeliveryRequestStatus.Expired : request.Status;
+        return new ResidentDeliveryRequestResponse(request.Id, status, request.Locker.Code,
+            request.Locker.Address, request.ParcelImageUrl, request.RecipientPhoneSnapshot,
+            request.CreatedAt, request.ApprovalExpiresAt, request.DecisionAt);
+    }
+
     public async Task<int> ExpireStartedSessionsAsync(CancellationToken cancellationToken = default)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
-        List<DeliveryRequest> expiredSessions = await dbContext.DeliveryRequests
-            .Where(request =>
-                request.Status == DeliveryRequestStatus.Started &&
-                request.SessionExpiresAt <= now)
-            .ToListAsync(cancellationToken);
-
-        foreach (DeliveryRequest request in expiredSessions)
+        List<Guid> requestIds = await dbContext.DeliveryRequests.AsNoTracking()
+            .Where(r => r.Status == DeliveryRequestStatus.Started && r.SessionExpiresAt <= now)
+            .Select(r => r.Id).ToListAsync(cancellationToken);
+        int expired = 0;
+        foreach (Guid id in requestIds)
         {
+            await using IDbContextTransaction? transaction = await LockDecisionAsync(id, cancellationToken);
+            DeliveryRequest request = await dbContext.DeliveryRequests.SingleAsync(r => r.Id == id, cancellationToken);
+            if (request.Status != DeliveryRequestStatus.Started || request.SessionExpiresAt > now) continue;
             request.Status = DeliveryRequestStatus.Expired;
             request.FailureCode = DeliveryRequestFailureCode.SessionExpired;
             request.UpdatedAt = now;
             AddAudit(null, "DeliveryRequest.Expired", request, "Guest session expired.", now);
-        }
-
-        if (expiredSessions.Count > 0)
-        {
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            expired++;
         }
-
-        return expiredSessions.Count;
+        return expired;
     }
 
     // ==========================================
@@ -372,6 +472,7 @@ public sealed class DeliveryRequestService(
         Guid requestId,
         CancellationToken cancellationToken = default)
     {
+        await using IDbContextTransaction? transaction = await LockDecisionAsync(requestId, cancellationToken);
         DateTimeOffset now = timeProvider.GetUtcNow();
         ResidentProfile resident = await GetActiveResidentProfileAsync(residentUserId, cancellationToken);
 
@@ -396,6 +497,7 @@ public sealed class DeliveryRequestService(
             deliveryRequest.FailureCode = DeliveryRequestFailureCode.ApprovalExpired;
             deliveryRequest.UpdatedAt = now;
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
             throw new GoneException(DeliveryErrorCodes.ApprovalExpired, "Delivery request approval period has expired.");
         }
 
@@ -406,6 +508,7 @@ public sealed class DeliveryRequestService(
 
         AddAudit(residentUserId, "DeliveryRequest.Approved", deliveryRequest, null, now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         return MapSummary(deliveryRequest);
     }
 
@@ -414,6 +517,7 @@ public sealed class DeliveryRequestService(
         Guid requestId,
         CancellationToken cancellationToken = default)
     {
+        await using IDbContextTransaction? transaction = await LockDecisionAsync(requestId, cancellationToken);
         DateTimeOffset now = timeProvider.GetUtcNow();
         ResidentProfile resident = await GetActiveResidentProfileAsync(residentUserId, cancellationToken);
 
@@ -438,6 +542,7 @@ public sealed class DeliveryRequestService(
             deliveryRequest.FailureCode = DeliveryRequestFailureCode.ApprovalExpired;
             deliveryRequest.UpdatedAt = now;
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
             throw new GoneException(DeliveryErrorCodes.ApprovalExpired, "Delivery request approval period has expired.");
         }
 
@@ -448,32 +553,32 @@ public sealed class DeliveryRequestService(
 
         AddAudit(residentUserId, "DeliveryRequest.Rejected", deliveryRequest, null, now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         return MapSummary(deliveryRequest);
     }
 
     public async Task<int> ExpirePendingApprovalsAsync(CancellationToken cancellationToken = default)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
-        List<DeliveryRequest> expiredRequests = await dbContext.DeliveryRequests
-            .Where(r => r.Status == DeliveryRequestStatus.PendingApproval &&
-                        r.ApprovalExpiresAt != null &&
-                        r.ApprovalExpiresAt <= now)
+        List<Guid> requestIds = await dbContext.DeliveryRequests.AsNoTracking()
+            .Where(r => r.Status == DeliveryRequestStatus.PendingApproval && r.ApprovalExpiresAt <= now)
+            .Select(r => r.Id)
             .ToListAsync(cancellationToken);
-
-        foreach (DeliveryRequest request in expiredRequests)
+        int expired = 0;
+        foreach (Guid id in requestIds)
         {
+            await using IDbContextTransaction? transaction = await LockDecisionAsync(id, cancellationToken);
+            DeliveryRequest request = await dbContext.DeliveryRequests.SingleAsync(r => r.Id == id, cancellationToken);
+            if (request.Status != DeliveryRequestStatus.PendingApproval || request.ApprovalExpiresAt > now) continue;
             request.Status = DeliveryRequestStatus.Expired;
             request.FailureCode = DeliveryRequestFailureCode.ApprovalExpired;
             request.UpdatedAt = now;
             AddAudit(null, "DeliveryRequest.Expired", request, "Approval expired.", now);
-        }
-
-        if (expiredRequests.Count > 0)
-        {
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            expired++;
         }
-
-        return expiredRequests.Count;
+        return expired;
     }
 
     public async Task<CompartmentReservationResponse> OpenCompartmentAsync(
@@ -683,6 +788,26 @@ public sealed class DeliveryRequestService(
     // ==========================================
     // Private Helpers
     // ==========================================
+
+    // PostgreSQL row locks serialize all approval decisions across API/worker instances.
+    // The lock is acquired before loading the request so a waiting contender sees the winner.
+    // Nonrelational providers are retained for the existing in-memory service checks.
+    private async Task<IDbContextTransaction?> LockDecisionAsync(Guid id, CancellationToken cancellationToken)
+    {
+        if (!dbContext.Database.IsRelational()) return null;
+        IDbContextTransaction transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT 1 FROM \"DeliveryRequest\" WHERE \"Id\" = {id} FOR UPDATE", cancellationToken);
+            return transaction;
+        }
+        catch
+        {
+            await transaction.DisposeAsync();
+            throw;
+        }
+    }
 
     private async Task<DeliveryRequest> FindStartedSessionAsync(
         Guid id,

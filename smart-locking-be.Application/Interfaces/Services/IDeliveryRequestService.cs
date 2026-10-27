@@ -36,6 +36,16 @@ public interface IDeliveryRequestService
 
     Task<int> ExpireStartedSessionsAsync(CancellationToken cancellationToken = default);
 
+    Task<DeliveryRequestSummaryResponse> CancelAsync(
+        Guid id,
+        string guestSessionToken,
+        CancellationToken cancellationToken = default);
+
+    Task<ResidentDeliveryRequestResponse> GetForResidentAsync(
+        Guid residentUserId,
+        Guid requestId,
+        CancellationToken cancellationToken = default);
+
     Task<PagedResult<PendingDeliveryRequestResponse>> GetPendingRequestsForResidentAsync(
         Guid residentUserId,
         CancellationToken cancellationToken = default,
