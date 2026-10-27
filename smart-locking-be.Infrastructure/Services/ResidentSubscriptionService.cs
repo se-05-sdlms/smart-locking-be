@@ -27,6 +27,11 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
         if (!IsHttpUrl(options.Value.ReturnUrl) || !IsHttpUrl(options.Value.CancelUrl))
             throw new InternalServerException("A valid PayOS payment URL is not configured.");
 
+        await using var creationTransaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (db.Database.IsRelational())
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"ResidentProfile\" WHERE \"Id\" = {resident.Id} FOR UPDATE", cancellationToken);
+        // Re-read after locking; account changes serialize on this same resident row.
+        resident = await db.ResidentProfiles.AsNoTracking().SingleAsync(r => r.Id == resident.Id, cancellationToken);
         DateTimeOffset now = clock.GetUtcNow();
         // Random positive 52-bit code stays exact in JavaScript and works across API instances.
         long orderCode = (BitConverter.ToInt64(RandomNumberGenerator.GetBytes(8)) & 0x000FFFFFFFFFFFFF) + 1;
@@ -52,6 +57,7 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
         db.ResidentSubscriptions.Add(subscription);
         // Persist first so fast webhooks or an ambiguous provider timeout remain recoverable.
         await db.SaveChangesAsync(cancellationToken);
+        if (creationTransaction is not null) await creationTransaction.CommitAsync(cancellationToken);
         var link = await gateway.CreatePaymentLinkAsync(new(orderCode, checked((int)plan.Price), "Subscription",
             options.Value.ReturnUrl, options.Value.CancelUrl), cancellationToken);
         return new(subscription.Id, link.CheckoutUrl, orderCode, plan.Price);

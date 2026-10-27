@@ -76,7 +76,10 @@ public enum OtpPurpose
     /// <summary>
     /// Xác thực quyền lấy kiện hàng tại locker.
     /// </summary>
-    ParcelRetrieval
+    ParcelRetrieval,
+
+    /// <summary>Verify a new account phone before administrator approval.</summary>
+    PhoneChange
 }
 
 /// <summary>

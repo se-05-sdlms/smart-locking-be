@@ -156,6 +156,15 @@ public sealed class AuthService(
         CancellationToken cancellationToken)
     {
         User? user = await FindUserByIdentifierAsync(request.LoginIdentifier, cancellationToken);
+        await using var loginTransaction = user is not null && dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (loginTransaction is not null)
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"User\" WHERE \"Id\" = {user!.Id} FOR UPDATE", cancellationToken);
+            await dbContext.Entry(user!).ReloadAsync(cancellationToken);
+            string identifier = request.LoginIdentifier.Trim();
+            if (user!.PhoneNumber != identifier && user.Email != NormalizeEmail(identifier)) user = null;
+        }
         if (user is null || user.Status != UserStatus.Active ||
             !passwordHashService.VerifyPassword(request.Password, user.PasswordHash))
         {
@@ -171,6 +180,7 @@ public sealed class AuthService(
         (AuthTokenResponse response, _) = IssueTokens(user, ipAddress, now);
         AddAuthAudit("Auth.LoginSucceeded", user.Id, AuditLogResult.Succeeded, ipAddress);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (loginTransaction is not null) await loginTransaction.CommitAsync(cancellationToken);
 
         return response;
     }
@@ -189,7 +199,15 @@ public sealed class AuthService(
                 refreshToken.RevokedAt == null &&
                 refreshToken.ExpiresAt > now, cancellationToken);
 
-        if (token is null || token.User.Status != UserStatus.Active)
+        await using var refreshTransaction = token is not null && dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (refreshTransaction is not null)
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"User\" WHERE \"Id\" = {token!.UserId} FOR UPDATE", cancellationToken);
+            await dbContext.Entry(token!).ReloadAsync(cancellationToken);
+            await dbContext.Entry(token!.User).ReloadAsync(cancellationToken);
+        }
+        if (token is null || token.User.Status != UserStatus.Active || token.RevokedAt is not null || token.ExpiresAt <= DateTimeOffset.UtcNow)
         {
             AddAuthAudit("Auth.InvalidRefreshToken", token?.UserId, AuditLogResult.Failed, ipAddress);
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -202,6 +220,7 @@ public sealed class AuthService(
         token.ReplacedByTokenId = replacementToken.Id;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (refreshTransaction is not null) await refreshTransaction.CommitAsync(cancellationToken);
 
         return response;
     }
