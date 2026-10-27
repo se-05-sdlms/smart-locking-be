@@ -23,7 +23,8 @@ public sealed record SaveSystemPolicyRequest(
     double? OperatorReplacementRadiusKm = null,
     int? OperatorReplacementMaxLoad = null,
     string[]? OperatorReplacementAreas = null,
-    Guid[]? OperatorReplacementEligibleUserIds = null);
+    Guid[]? OperatorReplacementEligibleUserIds = null,
+    IncidentSlaPolicy? IncidentSla = null);
 
 public sealed record SystemPolicyResponse(
     Guid Id,
@@ -51,4 +52,15 @@ public sealed record SystemPolicyResponse(
     double? OperatorReplacementRadiusKm = null,
     int? OperatorReplacementMaxLoad = null,
     string[]? OperatorReplacementAreas = null,
-    Guid[]? OperatorReplacementEligibleUserIds = null);
+    Guid[]? OperatorReplacementEligibleUserIds = null,
+    IncidentSlaPolicy? IncidentSla = null);
+
+public sealed record IncidentSlaPolicy(
+    int CriticalAcknowledgeMinutes = 15,
+    int CriticalResolveMinutes = 60,
+    int HighAcknowledgeMinutes = 30,
+    int HighResolveMinutes = 240,
+    int MediumAcknowledgeMinutes = 120,
+    int MediumResolveMinutes = 1440,
+    int LowAcknowledgeMinutes = 480,
+    int LowResolveMinutes = 4320);

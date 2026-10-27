@@ -102,6 +102,15 @@ public sealed class SystemPolicy
     /// </summary>
     public bool EnableBluetoothUnlock { get; set; }
 
+    public int IncidentCriticalAcknowledgeMinutes { get; set; } = 15;
+    public int IncidentCriticalResolveMinutes { get; set; } = 60;
+    public int IncidentHighAcknowledgeMinutes { get; set; } = 30;
+    public int IncidentHighResolveMinutes { get; set; } = 240;
+    public int IncidentMediumAcknowledgeMinutes { get; set; } = 120;
+    public int IncidentMediumResolveMinutes { get; set; } = 1440;
+    public int IncidentLowAcknowledgeMinutes { get; set; } = 480;
+    public int IncidentLowResolveMinutes { get; set; } = 4320;
+
     /// <summary>
     /// Thời điểm chính sách bắt đầu có hiệu lực.
     /// </summary>
