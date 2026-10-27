@@ -1169,6 +1169,127 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.ToTable("OperatorSupportContact", (string)null);
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OperatorTaskAcknowledgement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("HandoverId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("ReceiverName")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid>("ReceiverUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HandoverId", "ReceiverUserId")
+                        .IsUnique();
+
+                    b.ToTable("OperatorTaskAcknowledgement", (string)null);
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OperatorTaskHandover", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AuthorName")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid>("AuthorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Blockers")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("IntendedReceiverUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("LockerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("NextSteps")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TaskKind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("WorkDone")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskKind", "TaskId", "CreatedAt");
+
+                    b.ToTable("OperatorTaskHandover", (string)null);
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OperatorTaskAcknowledgement", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.OperatorTaskHandover", null)
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("ReceiverUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OperatorTaskHandover", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("IntendedReceiverUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("smart_locking_be.Domain.Entities.Locker", null)
+                        .WithMany()
+                        .HasForeignKey("LockerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.OtpChallenge", b =>
                 {
                     b.Property<Guid>("Id")

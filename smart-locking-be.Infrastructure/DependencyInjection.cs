@@ -132,6 +132,7 @@ public static class DependencyInjection
         services.AddScoped<IReportService, ReportService>();
 
         services.AddScoped<IOperatorSupportService, OperatorSupportService>();
+        services.AddScoped<IOperatorTaskService, OperatorTaskService>();
         services.AddScoped<ISystemPolicyService, SystemPolicyService>();
         services.AddScoped<IOperatorCoverageService, OperatorCoverageService>();
         services.AddHostedService<OperatorCoverageWorker>();
