@@ -37,6 +37,11 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
             SubscriptionPlanId = plan.Id,
             Status = SubscriptionStatus.PendingPayment,
             PriceSnapshot = plan.Price,
+            PlanCodeSnapshot = plan.Code,
+            PlanNameSnapshot = plan.Name,
+            DurationDaysSnapshot = plan.DurationDays,
+            MaxActiveParcelsSnapshot = plan.MaxActiveParcels,
+            BenefitsSnapshotRecordedAt = now,
             ExternalOrderCode = orderCode.ToString(CultureInfo.InvariantCulture),
             // Preserve the purchased duration in the pending interval, independent of later plan edits.
             StartDate = now,
@@ -78,6 +83,11 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
             SubscriptionPlanId = plan.Id,
             Status = SubscriptionStatus.Active,
             PriceSnapshot = 0,
+            PlanCodeSnapshot = plan.Code,
+            PlanNameSnapshot = plan.Name,
+            DurationDaysSnapshot = plan.DurationDays,
+            MaxActiveParcelsSnapshot = plan.MaxActiveParcels,
+            BenefitsSnapshotRecordedAt = now,
             StartDate = start,
             EndDate = start.AddDays(plan.DurationDays),
             CreatedAt = now,
@@ -113,7 +123,8 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
         DateTimeOffset? latestEnd = await db.ResidentSubscriptions.AsNoTracking()
             .Where(s => s.ResidentProfileId == residentId && s.Status == SubscriptionStatus.Active && s.EndDate > now)
             .MaxAsync(s => (DateTimeOffset?)s.EndDate, cancellationToken);
-        TimeSpan duration = subscription.EndDate - subscription.StartDate;
+        TimeSpan duration = subscription.DurationDaysSnapshot is int days
+            ? TimeSpan.FromDays(days) : subscription.EndDate - subscription.StartDate;
         if (duration <= TimeSpan.Zero) throw new InternalServerException("Subscription duration is invalid.");
         subscription.StartDate = latestEnd ?? now;
         subscription.EndDate = subscription.StartDate.Add(duration);
@@ -128,14 +139,14 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
     public async Task<ResidentSubscriptionResponse?> GetCurrentAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         DateTimeOffset now = clock.GetUtcNow();
-        var row = await db.ResidentSubscriptions.AsNoTracking().Include(s => s.SubscriptionPlan)
+        var row = await db.ResidentSubscriptions.AsNoTracking()
             .Where(s => s.ResidentProfile.UserId == userId && s.Status == SubscriptionStatus.Active && s.StartDate <= now && s.EndDate > now)
             .OrderBy(s => s.StartDate).FirstOrDefaultAsync(cancellationToken);
         return row is null ? null : Map(row);
     }
 
     public async Task<IReadOnlyList<ResidentSubscriptionResponse>> GetHistoryAsync(Guid userId, CancellationToken cancellationToken = default) =>
-        (await db.ResidentSubscriptions.AsNoTracking().Include(s => s.SubscriptionPlan)
+        (await db.ResidentSubscriptions.AsNoTracking()
             .Where(s => s.ResidentProfile.UserId == userId).OrderByDescending(s => s.CreatedAt)
             .ToListAsync(cancellationToken)).Select(Map).ToArray();
 
@@ -151,6 +162,10 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
     }
 
     private static bool IsHttpUrl(string value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
-    private static ResidentSubscriptionResponse Map(ResidentSubscription s) => new(s.Id, s.SubscriptionPlanId, s.SubscriptionPlan.Name,
-        s.StartDate, s.EndDate, s.Status.ToString(), s.PriceSnapshot, s.ExternalOrderCode, s.PaidAt);
+    private static ResidentSubscriptionResponse Map(ResidentSubscription s) => new(s.Id, s.SubscriptionPlanId,
+        s.PlanNameSnapshot ?? "Historical plan - benefits need reconciliation",
+        s.StartDate, s.EndDate, s.Status.ToString(), s.PriceSnapshot, s.ExternalOrderCode, s.PaidAt,
+        s.PlanCodeSnapshot, s.DurationDaysSnapshot, s.MaxActiveParcelsSnapshot,
+        s.BenefitsSnapshotRecordedAt is null || s.PlanNameSnapshot is null ||
+        s.DurationDaysSnapshot is null || s.MaxActiveParcelsSnapshot is null);
 }
