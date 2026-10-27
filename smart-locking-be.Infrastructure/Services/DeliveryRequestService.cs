@@ -107,6 +107,22 @@ public sealed class DeliveryRequestService(
             throw new ConflictException(DeliveryErrorCodes.InvalidState, "Resident is not registered to receive parcels at this locker.");
         }
 
+        // Count and claim one unit of the purchased quota in the same resident lock.
+        // The decision transaction also owns the resident quota lock.
+        if (dbContext.Database.IsRelational())
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT 1 FROM \"ResidentProfile\" WHERE \"Id\" = {resident.Id} FOR UPDATE", cancellationToken);
+            await dbContext.Entry(resident).ReloadAsync(cancellationToken);
+            await dbContext.Entry(resident.User).ReloadAsync(cancellationToken);
+            if (resident.RegisteredLockerId != deliveryRequest.LockerId || resident.User.PhoneNumber != recipientPhone || resident.User.Status != UserStatus.Active)
+                throw new ConflictException(DeliveryErrorCodes.InvalidState, "Resident details changed. Look up the recipient again.");
+            await dbContext.Entry(deliveryRequest).ReloadAsync(cancellationToken);
+            if (deliveryRequest.Status != DeliveryRequestStatus.Started)
+                throw new ConflictException(DeliveryErrorCodes.InvalidState, "Delivery request has already been submitted.");
+            if (deliveryRequest.SessionExpiresAt <= timeProvider.GetUtcNow())
+                throw new GoneException(DeliveryErrorCodes.SessionExpired, "Delivery session has expired.");
+        }
         await EnsureResidentCanReceiveAsync(resident.Id, cancellationToken);
 
         deliveryRequest.ResidentProfileId = resident.Id;

@@ -1472,8 +1472,14 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("BenefitsSnapshotRecordedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("DurationDaysSnapshot")
+                        .HasColumnType("integer");
 
                     b.Property<DateTimeOffset>("EndDate")
                         .HasColumnType("timestamp with time zone");
@@ -1486,8 +1492,19 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying");
 
+                    b.Property<int?>("MaxActiveParcelsSnapshot")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset?>("PaidAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PlanCodeSnapshot")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("PlanNameSnapshot")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying");
 
                     b.Property<decimal>("PriceSnapshot")
                         .HasPrecision(18, 2)
