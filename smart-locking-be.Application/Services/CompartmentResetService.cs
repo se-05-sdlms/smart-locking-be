@@ -184,62 +184,14 @@ public sealed class CompartmentResetService(ICompartmentResetStore store, ICompa
         if (slot.OperationalStatus != LockerCompartmentOperationalStatus.OutOfService)
             throw new ConflictException(BluetoothErrorCodes.InvalidState, "Trạng thái vận hành đã đổi khi đang đặt lại; cần đối soát.");
         await NoOtherGoodsAsync(slot.Id, data.SubjectId, ct);
-        Parcel? transferred = null;
-        if (data.TransferParcelId is { } transferredId)
-        {
-            transferred = await store.FindTransferParcelAsync(transferredId, ct);
-            if (transferred is null || transferred.DeliveryRequestId != data.SubjectId ||
-                transferred.DeliveryRequest.AllocatedCompartmentId != slot.Id ||
-                transferred.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
-                throw new ConflictException(BluetoothErrorCodes.InvalidState, "Kiện hàng chuyển điểm tập kết đã đổi trạng thái; cần đối soát.");
-        }
+        // A reset receipt confirms credential/state reset only. Physical goods outcomes belong
+        // to the explicit resident/Operator workflow, never to a device ACK.
         var now = clock.GetUtcNow();
-        var returned = await store.FindReturnAsync(data.SubjectId, ct);
-        if (returned is not null)
-        {
-            // Reset quản trị không được giả thành khách đã nhận. Giữ terminal state cũ nếu đã kết thúc.
-            if (returned.Status is ReturnRequestStatus.Allocated or ReturnRequestStatus.Deposited)
-            {
-                returned.Status = ReturnRequestStatus.Cancelled;
-                returned.FailureReason = data.Reason;
-            }
-            returned.CompartmentReleasedAt ??= now;
-            returned.ShipperSessionTokenHash = null;
-            returned.UpdatedAt = now;
-        }
-        var delivery = await store.FindDeliveryAsync(data.SubjectId, ct);
-        if (delivery is not null)
-        {
-            if (delivery.Status == DeliveryRequestStatus.Allocated) delivery.Status = DeliveryRequestStatus.Cancelled;
-            delivery.CompartmentReleasedAt ??= now;
-            delivery.UpdatedAt = now;
-            // Hàng được quản trị lấy ra là Removed, không phải Retrieved của cư dân.
-            foreach (var parcel in await store.GetStoredParcelsAsync(delivery.Id, ct))
-            {
-                store.Add(new ParcelStatusHistory()
-                {
-                    Id = Guid.NewGuid(),
-                    ParcelId = parcel.Id,
-                    FromStatus = parcel.Status,
-                    ToStatus = ParcelStatus.Removed,
-                    ChangedByUserId = audit.ActorUserId,
-                    ChangedAt = now,
-                    Reason = data.TransferParcelId.HasValue ? "Transferred to overdue collection point" : data.Reason
-                });
-                parcel.Status = ParcelStatus.Removed;
-                parcel.RemovedAt = now;
-                parcel.RemovedByUserId = audit.ActorUserId;
-                parcel.RemovalReason = data.TransferParcelId.HasValue ? "Transferred to overdue collection point" : data.Reason;
-                parcel.UpdatedAt = now;
-            }
-        }
-        foreach (var reservation in await store.GetReservationsAsync(slot.Id, data.SubjectId, ct)) reservation.ReleasedAt = now;
         foreach (var pin in await store.GetPinsAsync(data.SubjectId, ct))
         {
             pin.PinCode = "";
             pin.ConsumedAt = now;
         }
-        if (transferred is not null) RecordTransfer(transferred, audit.ActorUserId, now);
         // Khôi phục trạng thái trước yêu cầu, không tự bật lại ngăn vốn đang bảo trì/hỏng.
         slot.OperationalStatus = data.PreviousStatus;
         slot.DoorStatus = receipt.DoorStatus;
@@ -270,20 +222,22 @@ public sealed class CompartmentResetService(ICompartmentResetStore store, ICompa
         await AuthorizeAsync(userId, role, delivery.LockerId, ct);
         if (delivery.AllocatedCompartmentId is not { } slotId || delivery.ResidentProfile is null)
             throw new ConflictException(BluetoothErrorCodes.InvalidState, "Kiện hàng không có ngăn hoặc cư dân nhận.");
-        // Request này được dùng sau khi Operator đã lấy hàng ra bằng luồng mở vận hành riêng.
-        // Retry sau ACK chỉ đọc trạng thái cuối; không phát lệnh hoặc gửi thông báo lần hai.
-        if (parcel.Status == ParcelStatus.Removed)
+        var applied = (await store.GetAppliedRequestsAsync(slotId, ct))
+            .FirstOrDefault(x => JsonSerializer.Deserialize<Details>(x.Details!)?.TransferParcelId == parcel.Id);
+        if (applied is not null)
         {
-            var applied = (await store.GetAppliedRequestsAsync(slotId, ct))
-                .FirstOrDefault(x => JsonSerializer.Deserialize<Details>(x.Details!)?.TransferParcelId == parcel.Id);
-            if (applied is not null)
-                return new(parcel.Id, parcel.ParcelCode, delivery.Locker.RecoveryAddress, parcel.Status.ToString(), applied.Id, "Applied");
-            // Dữ liệu Removed của phiên bản cũ không chứng minh PIN đã được xóa trên ESP.
-            throw new ConflictException(BluetoothErrorCodes.InvalidState,
-                "Kiện đã được đánh dấu chuyển nhưng chưa có xác nhận thu hồi PIN. Cần đối soát qua chức năng đặt lại ngăn.");
+            // This authenticated Operator call explicitly confirms arrival at RecoveryAddress.
+            // ACK handling never calls this physical-outcome operation.
+            parcel = await store.ConfirmRecoveryArrivalAsync(userId, parcel.Id, applied.Id, clock.GetUtcNow(), ct);
+            return new(parcel.Id, parcel.ParcelCode, delivery.Locker.RecoveryAddress, parcel.Status.ToString(), applied.Id, "Applied");
         }
+        if (parcel.Status == ParcelStatus.Removed)
+            throw new ConflictException(BluetoothErrorCodes.InvalidState,
+                "Arrival is recorded but credential revocation is unconfirmed. Reconcile the existing reset before reuse.");
         if (parcel.MaxStorageUntil > clock.GetUtcNow() || parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
             throw new ConflictException(BluetoothErrorCodes.InvalidState, "Kiện hàng chưa đủ điều kiện chuyển điểm tập kết.");
+        if (string.IsNullOrWhiteSpace(delivery.Locker.RecoveryAddress))
+            throw new ConflictException(BluetoothErrorCodes.InvalidState, "Locker recovery address is not configured.");
         var result = await RequestCoreAsync(userId, role, delivery.LockerId, slotId,
             new(delivery.Id, true, "Transferred to overdue collection point"), parcel.Id, ct);
         return new(parcel.Id, parcel.ParcelCode, delivery.Locker.RecoveryAddress, parcel.Status.ToString(), result.CommandId, result.Status);
@@ -318,37 +272,6 @@ public sealed class CompartmentResetService(ICompartmentResetStore store, ICompa
                 await store.SaveChangesAsync(ct);
             }
         }
-    }
-
-    private void RecordTransfer(Parcel parcel, Guid? actorId, DateTimeOffset now)
-    {
-        var delivery = parcel.DeliveryRequest;
-        store.Add(new AuditLog
-        {
-            Id = Guid.NewGuid(),
-            ActorUserId = actorId,
-            Action = "Parcel.Transferred",
-            EntityType = nameof(Parcel),
-            EntityId = parcel.Id,
-            Result = AuditLogResult.Succeeded,
-            Details = delivery.Locker.RecoveryAddress,
-            OccurredAt = now
-        });
-        foreach (var channel in new[] { NotificationChannel.InApp, NotificationChannel.Push })
-            store.Add(new Notification
-            {
-                Id = Guid.NewGuid(),
-                UserId = delivery.ResidentProfile!.UserId,
-                ParcelId = parcel.Id,
-                DeliveryRequestId = delivery.Id,
-                Type = "ParcelTransferred",
-                Channel = channel,
-                Title = "Kiện hàng đã chuyển điểm tập kết",
-                Message = $"Nhận kiện tại {delivery.Locker.RecoveryAddress}. PIN cũ đã vô hiệu hóa.",
-                DeliveryStatus = channel == NotificationChannel.InApp ? NotificationDeliveryStatus.Sent : NotificationDeliveryStatus.Pending,
-                SentAt = channel == NotificationChannel.InApp ? now : null,
-                CreatedAt = now
-            });
     }
 
 }

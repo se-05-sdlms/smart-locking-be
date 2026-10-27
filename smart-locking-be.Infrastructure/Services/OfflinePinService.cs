@@ -180,6 +180,8 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
 
     private async Task ApplyPickupAsync(OfflineLockerEvent item, CancellationToken ct)
     {
+        Guid? parcelId = await db.Parcels.Where(x => x.DeliveryRequestId == item.DeliveryId).Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
+        await using var parcelLock = parcelId.HasValue ? await ParcelTransitionLock.AcquireAsync(db, parcelId.Value, ct) : null;
         LockerCompartment? compartment = await FindCompartment(item, ct);
         Parcel? parcel = await db.Parcels.Include(x => x.DeliveryRequest).ThenInclude(x => x.ResidentProfile)
             .SingleOrDefaultAsync(x => x.DeliveryRequestId == item.DeliveryId, ct);
@@ -196,6 +198,10 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
         }
         if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
         { Review(item, "Parcel already moved, removed or retrieved; no allocation was changed.", compartment); return; }
+        string recoveryParcelId = parcel.Id.ToString();
+        if (await db.AuditLogs.AnyAsync(x => x.EntityId == compartment.Id &&
+            x.Action == "LockerCompartment.ResetRequested" && x.Details != null && x.Details.Contains(recoveryParcelId), ct))
+        { Review(item, "Pickup received after recovery reset was requested; reconcile its physical outcome.", compartment); return; }
         DateTimeOffset occurred = item.ClosedAt ?? item.ReceivedAt;
         if (occurred < parcel.StoredAt) { Review(item, "Pickup precedes deposit; event time requires review.", compartment); return; }
         ParcelStatus before = parcel.Status;

@@ -22,6 +22,7 @@ public interface ICompartmentResetStore
     Task<ReturnRequest?> FindReturnAsync(Guid subjectId, CancellationToken ct);
     Task<DeliveryRequest?> FindDeliveryAsync(Guid subjectId, CancellationToken ct);
     Task<Parcel?> FindTransferParcelAsync(Guid parcelId, CancellationToken ct);
+    Task<Parcel> ConfirmRecoveryArrivalAsync(Guid actorId, Guid parcelId, Guid resetCommandId, DateTimeOffset now, CancellationToken ct);
     Task<List<AuditLog>> GetPendingRequestsAsync(CancellationToken ct);
     Task<List<AuditLog>> GetAppliedRequestsAsync(Guid slotId, CancellationToken ct);
     Task<List<Parcel>> GetStoredParcelsAsync(Guid deliveryId, CancellationToken ct);

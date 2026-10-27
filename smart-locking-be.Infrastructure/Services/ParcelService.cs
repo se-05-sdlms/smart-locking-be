@@ -183,12 +183,13 @@ public sealed class ParcelService(ApplicationDbContext dbContext, TimeProvider t
         DateTimeOffset completedAt,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ParcelTransitionLock.AcquireAsync(dbContext, parcelId, cancellationToken);
         Parcel parcel = await dbContext.Parcels
             .Include(item => item.DeliveryRequest)
             .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
             ?? throw new NotFoundException(ParcelErrorCodes.NotFound, "Parcel not found.");
 
-        if (parcel.Status == ParcelStatus.Retrieved)
+        if (parcel.Status is ParcelStatus.Retrieved or ParcelStatus.Removed)
             return;
         if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
             throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel cannot complete pickup in its current state.");
@@ -210,6 +211,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, TimeProvider t
             ChangedAt = completedAt,
         });
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         await PublishAsync(parcel, completedAt, cancellationToken);
     }
 

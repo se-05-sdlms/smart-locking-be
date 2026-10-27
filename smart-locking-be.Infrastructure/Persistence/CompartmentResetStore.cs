@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
+using smart_locking_be.Infrastructure.Services;
 
 namespace smart_locking_be.Infrastructure.Persistence;
 
@@ -83,6 +84,78 @@ public sealed class CompartmentResetStore(ApplicationDbContext db) : ICompartmen
         .Include(x => x.DeliveryRequest).ThenInclude(x => x.Locker)
         .Include(x => x.DeliveryRequest).ThenInclude(x => x.ResidentProfile)
         .SingleOrDefaultAsync(x => x.Id == parcelId, ct);
+
+    public async Task<Parcel> ConfirmRecoveryArrivalAsync(Guid actorId, Guid parcelId, Guid resetCommandId, DateTimeOffset now, CancellationToken ct)
+    {
+        await using var transaction = await ParcelTransitionLock.AcquireAsync(db, parcelId, ct);
+        Parcel parcel = await db.Parcels.Include(item => item.DeliveryRequest).ThenInclude(item => item.Locker)
+            .Include(item => item.DeliveryRequest).ThenInclude(item => item.ResidentProfile)
+            .Include(item => item.DeliveryRequest).ThenInclude(item => item.AllocatedCompartment)
+            .SingleAsync(item => item.Id == parcelId, ct);
+        if (!await db.LockerEvents.AnyAsync(item => item.Id == resetCommandId && item.NewValue == "ResetApplied", ct))
+            throw new ConflictException(BluetoothErrorCodes.InvalidState, "Credential reset is not confirmed.");
+        if (parcel.Status == ParcelStatus.Removed && parcel.RemovedAt.HasValue &&
+            parcel.RemovalReason == "Transferred to overdue collection point") return parcel;
+        if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue) || parcel.MaxStorageUntil > now ||
+            string.IsNullOrWhiteSpace(parcel.DeliveryRequest.Locker.RecoveryAddress))
+            throw new ConflictException(BluetoothErrorCodes.InvalidState, "Parcel cannot be confirmed at the recovery address.");
+        var slot = parcel.DeliveryRequest.AllocatedCompartment;
+        DateTimeOffset? observed = slot?.DoorStatusObservedAt;
+        bool closed = slot?.DoorStatus == DoorStatus.Closed;
+        if (await db.LockerAccessEvents.AnyAsync(item => item.ParcelId == parcel.Id &&
+            item.AccessType == LockerAccessType.ResidentPickup && item.Result == LockerAccessResult.Succeeded &&
+            (!closed || !observed.HasValue || item.OccurredAt >= observed.Value), ct))
+            throw new ConflictException(BluetoothErrorCodes.InvalidState, "A pickup unlock still awaits reconciliation.");
+        ParcelStatus previous = parcel.Status;
+        parcel.Status = ParcelStatus.Removed;
+        parcel.RemovedAt = now;
+        parcel.RemovedByUserId = actorId;
+        parcel.RemovalReason = "Transferred to overdue collection point";
+        parcel.UpdatedAt = now;
+        parcel.DeliveryRequest.CompartmentReleasedAt = now;
+        parcel.DeliveryRequest.UpdatedAt = now;
+        foreach (var reservation in await db.CompartmentReservations.Where(item => item.DeliveryRequestId == parcel.DeliveryRequestId && item.ReleasedAt == null).ToListAsync(ct))
+            reservation.ReleasedAt = now;
+        db.ParcelStatusHistories.Add(new ParcelStatusHistory
+        {
+            Id = Guid.NewGuid(),
+            ParcelId = parcel.Id,
+            FromStatus = previous,
+            ToStatus = ParcelStatus.Removed,
+            Reason = "Operator confirmed delivery to the locker recovery address.",
+            ChangedByUserId = actorId,
+            ChangedAt = now
+        });
+        db.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = actorId,
+            Action = "Parcel.Transferred",
+            EntityType = nameof(Parcel),
+            EntityId = parcel.Id,
+            Result = AuditLogResult.Succeeded,
+            Details = parcel.DeliveryRequest.Locker.RecoveryAddress,
+            OccurredAt = now
+        });
+        foreach (var channel in new[] { NotificationChannel.InApp, NotificationChannel.Push })
+            db.Notifications.Add(new Notification
+            {
+                Id = Guid.NewGuid(),
+                UserId = parcel.DeliveryRequest.ResidentProfile!.UserId,
+                ParcelId = parcel.Id,
+                DeliveryRequestId = parcel.DeliveryRequestId,
+                Type = "ParcelTransferred",
+                Channel = channel,
+                Title = "Parcel transferred to collection point",
+                Message = $"Collect your parcel at {parcel.DeliveryRequest.Locker.RecoveryAddress}.",
+                DeliveryStatus = channel == NotificationChannel.InApp ? NotificationDeliveryStatus.Sent : NotificationDeliveryStatus.Pending,
+                SentAt = channel == NotificationChannel.InApp ? now : null,
+                CreatedAt = now
+            });
+        await db.SaveChangesAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
+        return parcel;
+    }
 
     public Task<List<AuditLog>> GetPendingRequestsAsync(CancellationToken ct) => db.AuditLogs
         .Where(x => x.Action == CompartmentResetActions.Requested && !db.LockerEvents.Any(e => e.Id == x.Id))
