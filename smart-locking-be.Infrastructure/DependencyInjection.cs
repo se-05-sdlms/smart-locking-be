@@ -59,6 +59,14 @@ public static class DependencyInjection
         services.AddScoped<ILockerCommissioningService, LockerCommissioningService>();
         services.AddOptions<LockerCommissioningOptions>().Bind(configuration.GetSection(LockerCommissioningOptions.SectionName));
         services.AddScoped<ILockerAccessService, LockerAccessService>();
+        services.AddScoped<ICompartmentResetStore, CompartmentResetStore>();
+        services.AddScoped<ICompartmentResetDispatcher, MqttLockerCommandDispatcher>();
+        services.AddScoped<IOfflinePinService, OfflinePinService>();
+        services.AddScoped<OfflinePinProvisioner>();
+        services.AddHostedService<OfflinePinNotificationWorker>();
+        services.AddSingleton<IBluetoothMessageCodec, BluetoothProtocol>();
+        services.AddSingleton<ICompartmentResetProtocol, BluetoothProtocol>();
+        services.AddScoped<IBluetoothWorkflowStore, BluetoothWorkflowStore>();
         services.AddScoped<ILockerCommandDispatcher, MqttLockerCommandDispatcher>();
         services.AddScoped<ICompartmentAllocationService, CompartmentAllocationService>();
         services.AddScoped<IDeliveryRequestService, DeliveryRequestService>();

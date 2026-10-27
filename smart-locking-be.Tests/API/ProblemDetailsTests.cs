@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,14 +18,46 @@ namespace smart_locking_be.Tests.API;
 
 public sealed class ProblemDetailsTests
 {
+    [Fact]
+    public void PublicRoutes_UseCanonicalOperationsAndImageEndpoints()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddControllers().AddApplicationPart(typeof(smart_locking_be.API.Controllers.LockersController).Assembly);
+        using var provider = services.BuildServiceProvider();
+        var routes = provider.GetRequiredService<IActionDescriptorCollectionProvider>().ActionDescriptors.Items
+            .Select(action => action.AttributeRouteInfo?.Template?.TrimStart('/').ToLowerInvariant())
+            .Where(route => route is not null).ToArray();
+
+        Assert.DoesNotContain(routes, route => route!.StartsWith("api/operations"));
+        Assert.DoesNotContain("api/uploads/image", routes);
+        Assert.DoesNotContain("api/uploads/return-image", routes);
+        Assert.Contains("api/images", routes);
+        Assert.Contains("api/uploads/images", routes);
+        Assert.Contains("api/emergency-unlocks", routes);
+        Assert.Contains("api/lockers/{id:guid}/status", routes);
+        Assert.Contains("api/parcels/{id:guid}:transfertocollectionpoint", routes);
+    }
+
     [Theory]
     [InlineData(401, "auth/invalid_credentials", "Invalid credentials.")]
     [InlineData(409, "locker/no_available_compartment", "No available compartment.")]
+    [InlineData(400, "bluetooth/invalid_message", "Invalid device response.")]
+    [InlineData(403, "bluetooth/access_denied", "Locker is outside operator scope.")]
+    [InlineData(404, "bluetooth/not_found", "Reset request not found.")]
+    [InlineData(409, "bluetooth/disabled", "Bluetooth is disabled by policy.")]
+    [InlineData(503, "locker/open_failed", "Cannot connect to the locker.")]
     public async Task HandlerWritesDomainProblem(int status, string code, string message)
     {
-        Exception exception = status == 401
-            ? new UnauthorizedException(code, message)
-            : new ConflictException(code, message);
+        Exception exception = status switch
+        {
+            400 => new BadRequestException(code, message),
+            401 => new UnauthorizedException(code, message),
+            403 => new ForbiddenException(code, message),
+            404 => new NotFoundException(code, message),
+            503 => new ServiceUnavailableException(code, message),
+            _ => new ConflictException(code, message)
+        };
 
         using JsonDocument body = await HandleAsync(exception, status);
         JsonElement root = body.RootElement;

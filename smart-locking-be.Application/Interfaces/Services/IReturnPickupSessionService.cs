@@ -1,3 +1,4 @@
+using smart_locking_be.Domain.Enums;
 using smart_locking_be.Application.DTOs.Returns;
 
 namespace smart_locking_be.Application.Interfaces.Services;
@@ -16,7 +17,7 @@ public interface IReturnPickupSessionService
     Task<ReturnPickupSessionResponse> OpenCompartmentAsync(
         Guid id,
         string guestSessionToken,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default, LockerAccessMethod accessMethod = LockerAccessMethod.GuestSession);
 
     Task FinalizePickupAsync(
         Guid id,

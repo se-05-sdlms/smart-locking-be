@@ -79,6 +79,7 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         await using IDbContextTransaction? transaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
         await LockerAvailability.LockScopeAsync(dbContext, request.LockerId, cancellationToken);
+        await EnsureAccessAsync(userId, role, request.LockerId, cancellationToken);
         if (!await dbContext.Lockers.AnyAsync(item => item.Id == request.LockerId, cancellationToken))
             throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
         DateTimeOffset now = timeProvider.GetUtcNow();

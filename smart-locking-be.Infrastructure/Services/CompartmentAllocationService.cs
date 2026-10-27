@@ -17,7 +17,8 @@ public sealed class CompartmentAllocationService(
         Guid? deliveryRequestId,
         Guid? returnRequestId,
         DateTimeOffset expiresAt,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool verifyDoorOnDevice = false)
     {
         ValidateOperation(deliveryRequestId, returnRequestId);
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -30,7 +31,7 @@ public sealed class CompartmentAllocationService(
             .Where(item => item.LockerId == lockerId &&
                            item.Locker.OperationalStatus == LockerOperationalStatus.Operational &&
                            item.OperationalStatus == LockerCompartmentOperationalStatus.Operational &&
-                           item.DoorStatus == DoorStatus.Closed)
+                           (verifyDoorOnDevice || item.DoorStatus == DoorStatus.Closed))
             .Where(item => !dbContext.CompartmentReservations.Any(reservation =>
                 reservation.LockerCompartmentId == item.Id &&
                 reservation.ReleasedAt == null &&
