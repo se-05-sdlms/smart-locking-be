@@ -3,6 +3,7 @@ using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.DTOs.Notifications;
+using smart_locking_be.Application.DTOs.Subscriptions;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -18,6 +19,7 @@ public sealed class DeliveryRequestService(
     ICompartmentAllocationService compartmentAllocationService,
     IImageStorageService imageStorageService,
     IWaybillOcrService waybillOcrService,
+    IParcelQuotaService parcelQuotaService,
     TimeProvider timeProvider,
     IOperationsRealtimeNotifier? realtimeNotifier = null) : IDeliveryRequestService
 {
@@ -102,6 +104,8 @@ public sealed class DeliveryRequestService(
         {
             throw new ConflictException(DeliveryErrorCodes.InvalidState, "Resident is not registered to receive parcels at this locker.");
         }
+
+        await EnsureResidentCanReceiveAsync(resident.Id, cancellationToken);
 
         deliveryRequest.ResidentProfileId = resident.Id;
         deliveryRequest.ParcelImageUrl = parcelImageUrl;
@@ -213,24 +217,43 @@ public sealed class DeliveryRequestService(
         }
 
         DateTimeOffset now = timeProvider.GetUtcNow();
-        string? fullName = await dbContext.ResidentProfiles
+        var recipient = await dbContext.ResidentProfiles
             .Where(profile => profile.User.PhoneNumber == phone &&
                               profile.User.Role == UserRole.Resident &&
                               profile.User.Status == UserStatus.Active &&
                               profile.RegisteredLockerId == deliveryRequest.LockerId)
-            .Select(profile => profile.FullName)
+            .Select(profile => new { profile.Id, profile.FullName })
             .FirstOrDefaultAsync(cancellationToken);
+        string? fullName = recipient?.FullName;
 
         // The phone number itself is never written to the audit trail, only whether the lookup matched.
         AddAudit(null, RecipientLookupAction, deliveryRequest, fullName is null ? "NotFound" : "Found", now);
         RefreshSession(deliveryRequest, now);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return fullName is null
-            ? throw new NotFoundException(
+        if (recipient is null)
+        {
+            throw new NotFoundException(
                 DeliveryErrorCodes.RecipientNotFound,
-                "This phone number is not registered to receive parcels at this locker.")
-            : new ResolveRecipientResponse(fullName);
+                "This phone number is not registered to receive parcels at this locker.");
+        }
+
+        // Tell the Shipper now, before the photo and request are sent, that this resident cannot take another parcel.
+        await EnsureResidentCanReceiveAsync(recipient.Id, cancellationToken);
+        return new ResolveRecipientResponse(recipient.FullName);
+    }
+
+    // Residents need an active subscription with room left under MaxActiveParcels (issue #157).
+    // The message stays generic on purpose: Shippers must not learn a resident's plan details.
+    private async Task EnsureResidentCanReceiveAsync(Guid residentProfileId, CancellationToken cancellationToken)
+    {
+        ParcelQuotaResult quota = await parcelQuotaService.CheckAsync(residentProfileId, cancellationToken);
+        if (quota.Decision != ParcelQuotaDecision.Allowed)
+        {
+            throw new ConflictException(
+                DeliveryErrorCodes.RecipientCannotReceive,
+                "This resident cannot receive more parcels right now.");
+        }
     }
 
     private Task<int> CountAuditActionsAsync(Guid deliveryRequestId, string action, CancellationToken cancellationToken) =>
