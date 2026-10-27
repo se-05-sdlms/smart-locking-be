@@ -158,19 +158,23 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         return await LoadAsync(id, cancellationToken);
     }
 
-    private IQueryable<MaintenanceRequest> Scope(Guid userId, string role) => role switch
+    private IQueryable<MaintenanceRequest> Scope(Guid userId, string role)
     {
-        nameof(UserRole.Administrator) => dbContext.MaintenanceRequests,
-        nameof(UserRole.LockerOperator) => dbContext.MaintenanceRequests.Where(item =>
-            dbContext.OperatorAssignments.Any(assignment =>
-                assignment.OperatorUserId == userId && assignment.LockerId == item.LockerId && assignment.RevokedAt == null)),
-        _ => throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.")
-    };
+        var assignments = dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow());
+        return role switch
+        {
+            nameof(UserRole.Administrator) => dbContext.MaintenanceRequests,
+            nameof(UserRole.LockerOperator) => dbContext.MaintenanceRequests.Where(item =>
+                assignments.Any(assignment =>
+                    assignment.OperatorUserId == userId && assignment.LockerId == item.LockerId && assignment.RevokedAt == null)),
+            _ => throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.")
+        };
+    }
 
     private async Task EnsureAccessAsync(Guid userId, string role, Guid lockerId, CancellationToken cancellationToken)
     {
         if (role == nameof(UserRole.Administrator)) return;
-        if (role != nameof(UserRole.LockerOperator) || !await dbContext.OperatorAssignments.AnyAsync(item =>
+        if (role != nameof(UserRole.LockerOperator) || !await dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow()).AnyAsync(item =>
             item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
             cancellationToken))
             throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.");

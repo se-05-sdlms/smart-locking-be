@@ -23,7 +23,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             .SingleOrDefaultAsync(item => item.Id == lockerId, cancellationToken)
             ?? throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
         if (userRole != nameof(UserRole.Administrator) &&
-            (userRole != nameof(UserRole.LockerOperator) || !await dbContext.OperatorAssignments.AnyAsync(item =>
+            (userRole != nameof(UserRole.LockerOperator) || !await dbContext.EffectiveOperatorAssignments(DateTimeOffset.UtcNow).AnyAsync(item =>
                 item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
                 cancellationToken)))
             throw new ForbiddenException(LockerErrorCodes.AccessDenied, "You cannot change this locker.");
@@ -110,7 +110,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         }
         else if (userRole == nameof(UserRole.LockerOperator))
         {
-            var assignedLockerIds = await dbContext.OperatorAssignments
+            var assignedLockerIds = await dbContext.EffectiveOperatorAssignments(DateTimeOffset.UtcNow)
                 .AsNoTracking()
                 .Where(a => a.OperatorUserId == userId && a.RevokedAt == null)
                 .Select(a => a.LockerId)
@@ -176,7 +176,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         }
         else if (userRole == nameof(UserRole.LockerOperator))
         {
-            var isAssigned = await dbContext.OperatorAssignments
+            var isAssigned = await dbContext.EffectiveOperatorAssignments(DateTimeOffset.UtcNow)
                 .AsNoTracking()
                 .AnyAsync(a => a.OperatorUserId == userId && a.LockerId == lockerId && a.RevokedAt == null, cancellationToken);
 
@@ -355,7 +355,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         }
         else if (userRole == nameof(UserRole.LockerOperator))
         {
-            var isAssigned = await dbContext.OperatorAssignments
+            var isAssigned = await dbContext.EffectiveOperatorAssignments(DateTimeOffset.UtcNow)
                 .AsNoTracking()
                 .AnyAsync(a => a.OperatorUserId == userId && a.LockerId == lockerId && a.RevokedAt == null, cancellationToken);
 
@@ -487,7 +487,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         }
         else if (userRole == nameof(UserRole.LockerOperator))
         {
-            var isAssigned = await dbContext.OperatorAssignments
+            var isAssigned = await dbContext.EffectiveOperatorAssignments(DateTimeOffset.UtcNow)
                 .AsNoTracking()
                 .AnyAsync(a => a.OperatorUserId == userId && a.LockerId == lockerId && a.RevokedAt == null, cancellationToken);
 

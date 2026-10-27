@@ -154,7 +154,8 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
 
         if (role == nameof(UserRole.LockerOperator))
         {
-            return query.Where(parcel => dbContext.OperatorAssignments.Any(assignment =>
+            var assignments = dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow());
+            return query.Where(parcel => assignments.Any(assignment =>
                 assignment.OperatorUserId == userId &&
                 assignment.LockerId == parcel.DeliveryRequest.LockerId &&
                 assignment.RevokedAt == null));
@@ -249,7 +250,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
     {
         if (role == nameof(UserRole.Administrator)) return;
         if (role != nameof(UserRole.LockerOperator) ||
-            !await dbContext.OperatorAssignments.AnyAsync(item =>
+            !await dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow()).AnyAsync(item =>
                 item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
                 cancellationToken))
             throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.");

@@ -406,6 +406,11 @@ public sealed class UserService(
         string? ipAddress = null,
         CancellationToken cancellationToken = default)
     {
+        await using var coverageTransaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (dbContext.Database.IsNpgsql())
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({EffectiveOperatorAssignmentQueries.AllocationLock})", cancellationToken);
+
         var user = await dbContext.Users
             .FirstOrDefaultAsync(u => u.Id == operatorId && u.Role == UserRole.LockerOperator, cancellationToken);
 
@@ -455,7 +460,9 @@ public sealed class UserService(
         };
 
         dbContext.AuditLogs.Add(auditLog);
+        await InvalidateCoverageForAssignmentChangeAsync(actorAdminId, operatorId, assignment.LockerId, now, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (coverageTransaction != null) await coverageTransaction.CommitAsync(cancellationToken);
 
         string? lockerCode = await dbContext.Lockers
             .Where(l => l.Id == assignment.LockerId)
@@ -480,6 +487,11 @@ public sealed class UserService(
         string? ipAddress = null,
         CancellationToken cancellationToken = default)
     {
+        await using var coverageTransaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (dbContext.Database.IsNpgsql())
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({EffectiveOperatorAssignmentQueries.AllocationLock})", cancellationToken);
+
         var assignment = await dbContext.OperatorAssignments
             .FirstOrDefaultAsync(a => a.Id == assignmentId && a.OperatorUserId == operatorId, cancellationToken);
 
@@ -511,7 +523,50 @@ public sealed class UserService(
         };
 
         dbContext.AuditLogs.Add(auditLog);
+        await InvalidateCoverageForAssignmentChangeAsync(actorAdminId, operatorId, assignment.LockerId, now, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (coverageTransaction != null) await coverageTransaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task InvalidateCoverageForAssignmentChangeAsync(Guid adminId, Guid operatorId, Guid lockerId,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var affected = await dbContext.TemporaryOperatorAssignments
+            .Where(x => (x.Status == TemporaryAssignmentStatus.Approved || x.Status == TemporaryAssignmentStatus.Active) &&
+                (x.OperatorUserId == operatorId || x.LockerId == lockerId || x.AnchorLockerId == lockerId)).ToListAsync(ct);
+        if (affected.Count == 0) return;
+        var admins = await dbContext.Users.Where(x => x.Role == UserRole.Administrator && x.Status == UserStatus.Active)
+            .Select(x => x.Id).ToListAsync(ct);
+        foreach (var coverage in affected)
+        {
+            coverage.Status = TemporaryAssignmentStatus.NeedsApproval;
+            coverage.ActivatedAt = null;
+            coverage.StatusReason = "Original assignments changed. Review anchors and whole-interval load before reapproval.";
+            dbContext.AuditLogs.Add(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                ActorUserId = adminId,
+                Action = "OperatorReplacement.ReapprovalRequired",
+                EntityType = nameof(TemporaryOperatorAssignment),
+                EntityId = coverage.Id,
+                Details = coverage.StatusReason,
+                Result = AuditLogResult.Succeeded,
+                OccurredAt = now
+            });
+            foreach (Guid recipient in admins.Concat(coverage.OperatorUserId is { } substitute ? new[] { substitute } : Array.Empty<Guid>()).Distinct())
+                dbContext.Notifications.Add(new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = recipient,
+                    Type = "OperatorReplacement",
+                    Title = "Coverage requires reapproval",
+                    Message = $"Locker {coverage.LockerId}; {coverage.StatusReason}",
+                    Channel = NotificationChannel.InApp,
+                    DeliveryStatus = NotificationDeliveryStatus.Sent,
+                    CreatedAt = now,
+                    SentAt = now
+                });
+        }
     }
 
     private static UserDetailResponse MapToDetail(User user)
