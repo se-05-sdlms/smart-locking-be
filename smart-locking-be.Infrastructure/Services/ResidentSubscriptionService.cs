@@ -118,7 +118,9 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
         if (db.Database.IsRelational()) await db.Entry(subscription).ReloadAsync(cancellationToken);
         if (subscription.PriceSnapshot != payment.Amount) throw new BadRequestException(SubscriptionErrorCodes.InvalidPayment, "Payment amount does not match.");
         if (subscription.PaidAt.HasValue) return;
-        if (subscription.Status != SubscriptionStatus.PendingPayment) throw new ConflictException(SubscriptionErrorCodes.InvalidState, "Subscription is not awaiting payment.");
+        // A verified late settlement may arrive after provider-confirmed expiry/cancellation.
+        if (subscription.Status is not (SubscriptionStatus.PendingPayment or SubscriptionStatus.Cancelled))
+            throw new ConflictException(SubscriptionErrorCodes.InvalidState, "Subscription is not awaiting payment.");
         DateTimeOffset now = clock.GetUtcNow();
         DateTimeOffset? latestEnd = await db.ResidentSubscriptions.AsNoTracking()
             .Where(s => s.ResidentProfileId == residentId && s.Status == SubscriptionStatus.Active && s.EndDate > now)
