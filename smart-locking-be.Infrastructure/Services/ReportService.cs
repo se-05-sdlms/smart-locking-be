@@ -83,7 +83,7 @@ public sealed class ReportService(ApplicationDbContext dbContext, TimeProvider t
         {
             ReportType.Parcels => (ParcelColumns, await ParcelsAsync(from, to, lockerId, status, skip, pageSize, cancellationToken)),
             ReportType.Returns => (ReturnColumns, await ReturnsAsync(from, to, lockerId, status, skip, pageSize, cancellationToken)),
-            ReportType.LockerUtilization => (UtilizationColumns, await UtilizationAsync(lockerId, status, skip, pageSize, cancellationToken)),
+            ReportType.LockerUtilization => (UtilizationColumns, await UtilizationAsync(from, to, lockerId, status, skip, pageSize, cancellationToken)),
             ReportType.Incidents => (IncidentColumns, await IncidentsAsync(from, to, lockerId, status, skip, pageSize, cancellationToken)),
             ReportType.Maintenance => (MaintenanceColumns, await MaintenanceAsync(from, to, lockerId, status, skip, pageSize, cancellationToken)),
             ReportType.OverdueTransfers => (TransferColumns, await TransfersAsync(from, to, lockerId, status, skip, pageSize, cancellationToken)),
@@ -152,42 +152,93 @@ public sealed class ReportService(ApplicationDbContext dbContext, TimeProvider t
     [
         new("locker", "Locker", "text"), new("address", "Địa chỉ", "text"), new("status", "Trạng thái", "text"),
         new("connection", "Kết nối", "text"), new("totalCompartments", "Tổng số ngăn", "number"),
-        new("usableCompartments", "Ngăn hoạt động", "number"), new("occupiedCompartments", "Ngăn đang có kiện", "number"),
-        new("utilizationPercent", "Tỉ lệ sử dụng (%)", "percent")
+        new("usableCompartments", "Ngăn hoạt động hiện tại", "number"), new("occupiedCompartments", "Ngăn có hàng hiện tại", "number"),
+        new("observedUntil", "Số liệu đến", "datetime"), new("occupiedMinutes", "Tổng phút ngăn chứa hàng trong kỳ", "number"),
+        new("capacityMinutes", "Tổng phút ngăn tồn tại trong kỳ", "number"), new("unresolvedIntervals", "Lượt thiếu mốc kết thúc", "number"),
+        new("utilizationPercent", "Tỉ lệ thời gian sử dụng trong kỳ (%)", "percent")
     ];
 
-    // A snapshot of right now, so the date range does not apply to this report.
-    private async Task<ReportPage> UtilizationAsync(Guid? lockerId, string? status, int skip, int take, CancellationToken ct)
+    private sealed record OccupancyInterval(Guid CompartmentId, DateTimeOffset Start, DateTimeOffset? End, bool Ongoing);
+
+    private async Task<ReportPage> UtilizationAsync(DateTimeOffset from, DateTimeOffset to, Guid? lockerId, string? status, int skip, int take, CancellationToken ct)
     {
         LockerOperationalStatus? parsed = ParseStatus<LockerOperationalStatus>(status);
-        IQueryable<Locker> source = dbContext.Lockers.AsNoTracking();
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        DateTimeOffset observedUntil = to < now ? to : now;
+        IQueryable<Locker> source = dbContext.Lockers.AsNoTracking().Where(item => item.CreatedAt < to);
         if (lockerId.HasValue) source = source.Where(item => item.Id == lockerId);
         if (parsed.HasValue) source = source.Where(item => item.OperationalStatus == parsed.Value);
-        return await PageAsync(source, item => item.OperationalStatus, null,
-            ordered => ordered.OrderBy(item => item.Code),
-            item => new
+        int total = await source.CountAsync(ct);
+        var groups = await source.GroupBy(item => item.OperationalStatus).Select(group => new { group.Key, Count = group.Count() }).ToListAsync(ct);
+        var lockers = await source.OrderBy(item => item.Code).ThenBy(item => item.Id).Skip(skip).Take(take)
+            .Select(item => new { item.Id, item.Code, item.Address, item.OperationalStatus, item.ConnectionStatus }).ToListAsync(ct);
+        List<Dictionary<string, object?>> rows = [];
+        // Bound history loading even for a 50,000-locker export; never query once per locker.
+        foreach (var batch in lockers.Chunk(200))
+        {
+            Guid[] ids = batch.Select(item => item.Id).ToArray();
+            var compartments = await dbContext.LockerCompartments.AsNoTracking().Where(item => ids.Contains(item.LockerId))
+                .Select(item => new { item.Id, item.LockerId, item.CreatedAt, item.OperationalStatus }).ToListAsync(ct);
+            var parcels = await dbContext.Parcels.AsNoTracking()
+                .Where(item => ids.Contains(item.DeliveryRequest.LockerId) && item.DeliveryRequest.AllocatedCompartmentId != null &&
+                    item.StoredAt < observedUntil && (item.DeliveryRequest.CompartmentReleasedAt ?? item.RetrievedAt ?? item.RemovedAt ?? observedUntil) > from)
+                .Select(item => new OccupancyInterval(item.DeliveryRequest.AllocatedCompartmentId!.Value, item.StoredAt,
+                    item.DeliveryRequest.CompartmentReleasedAt ?? item.RetrievedAt ?? item.RemovedAt,
+                    item.Status == ParcelStatus.Stored || item.Status == ParcelStatus.Overdue)).ToListAsync(ct);
+            var returns = await dbContext.ReturnRequests.AsNoTracking()
+                .Where(item => ids.Contains(item.LockerId) && item.AllocatedCompartmentId != null && item.ResidentDepositedAt != null &&
+                    item.ResidentDepositedAt < observedUntil && (item.CompartmentReleasedAt ?? item.ShipperPickedUpAt ?? observedUntil) > from)
+                .Select(item => new OccupancyInterval(item.AllocatedCompartmentId!.Value, item.ResidentDepositedAt!.Value,
+                    item.CompartmentReleasedAt ?? item.ShipperPickedUpAt, item.Status == ReturnRequestStatus.Deposited)).ToListAsync(ct);
+            var history = parcels.Concat(returns).ToLookup(item => item.CompartmentId);
+            // Snapshot columns are explicitly current and include deposited returns.
+            var occupiedParcels = dbContext.Parcels.Where(item => ids.Contains(item.DeliveryRequest.LockerId) &&
+                    (item.Status == ParcelStatus.Stored || item.Status == ParcelStatus.Overdue) && item.DeliveryRequest.AllocatedCompartmentId != null)
+                .Select(item => item.DeliveryRequest.AllocatedCompartmentId!.Value);
+            var occupiedReturns = dbContext.ReturnRequests.Where(item => ids.Contains(item.LockerId) &&
+                    item.Status == ReturnRequestStatus.Deposited && item.AllocatedCompartmentId != null)
+                .Select(item => item.AllocatedCompartmentId!.Value);
+            HashSet<Guid> occupiedNow = (await occupiedParcels.Union(occupiedReturns).ToListAsync(ct)).ToHashSet();
+            var byLocker = compartments.ToLookup(item => item.LockerId);
+            foreach (var locker in batch)
             {
-                item.Code,
-                item.Address,
-                item.OperationalStatus,
-                item.ConnectionStatus,
-                Total = dbContext.LockerCompartments.Count(compartment => compartment.LockerId == item.Id),
-                Usable = dbContext.LockerCompartments.Count(compartment =>
-                    compartment.LockerId == item.Id &&
-                    compartment.OperationalStatus == LockerCompartmentOperationalStatus.Operational),
-                Occupied = dbContext.Parcels
-                    .Where(parcel => parcel.DeliveryRequest.LockerId == item.Id &&
-                                     (parcel.Status == ParcelStatus.Stored || parcel.Status == ParcelStatus.Overdue) &&
-                                     parcel.DeliveryRequest.AllocatedCompartmentId != null)
-                    .Select(parcel => parcel.DeliveryRequest.AllocatedCompartmentId)
-                    .Distinct()
-                    .Count()
-            },
-            row => Row(("locker", row.Code), ("address", row.Address), ("status", row.OperationalStatus.ToString()),
-                ("connection", row.ConnectionStatus.ToString()), ("totalCompartments", row.Total),
-                ("usableCompartments", row.Usable), ("occupiedCompartments", row.Occupied),
-                ("utilizationPercent", row.Total == 0 ? 0m : Math.Round(row.Occupied * 100m / row.Total, 1))),
-            skip, take, ct);
+                var units = byLocker[locker.Id].ToArray();
+                double busy = 0, capacity = 0;
+                int unresolved = 0;
+                foreach (var unit in units)
+                {
+                    DateTimeOffset start = unit.CreatedAt > from ? unit.CreatedAt : from;
+                    if (start >= observedUntil) continue;
+                    capacity += (observedUntil - start).TotalMinutes;
+                    var intervals = history[unit.Id].ToArray();
+                    unresolved += intervals.Count(item => item.End == null && !item.Ongoing);
+                    busy += OccupiedMinutes(intervals, start, observedUntil);
+                }
+                rows.Add(Row(("locker", locker.Code), ("address", locker.Address), ("status", locker.OperationalStatus.ToString()),
+                    ("connection", locker.ConnectionStatus.ToString()), ("totalCompartments", units.Length),
+                    ("usableCompartments", units.Count(item => item.OperationalStatus == LockerCompartmentOperationalStatus.Operational)),
+                    ("occupiedCompartments", units.Count(item => occupiedNow.Contains(item.Id))), ("observedUntil", observedUntil),
+                    ("occupiedMinutes", Math.Round((decimal)busy, 2)), ("capacityMinutes", Math.Round((decimal)capacity, 2)),
+                    ("unresolvedIntervals", unresolved), ("utilizationPercent", unresolved > 0 || capacity <= 0 ? null : Math.Round((decimal)(busy * 100 / capacity), 1))));
+            }
+        }
+        return new ReportPage(total, rows, groups.ToDictionary(group => group.Key.ToString(), group => group.Count), null);
+    }
+
+    private static double OccupiedMinutes(IEnumerable<OccupancyInterval> history, DateTimeOffset from, DateTimeOffset to)
+    {
+        DateTimeOffset? end = null;
+        double minutes = 0;
+        foreach (OccupancyInterval item in history.Where(item => item.End != null || item.Ongoing).OrderBy(item => item.Start))
+        {
+            DateTimeOffset start = item.Start > from ? item.Start : from;
+            DateTimeOffset finish = item.End is { } actual && actual < to ? actual : to;
+            if (end.HasValue && start < end.Value) start = end.Value;
+            if (finish <= start) continue;
+            minutes += (finish - start).TotalMinutes;
+            end = finish;
+        }
+        return minutes;
     }
 
     private static readonly ReportColumn[] IncidentColumns =
@@ -237,7 +288,7 @@ public sealed class ReportService(ApplicationDbContext dbContext, TimeProvider t
         new("storedAt", "Lưu từ", "datetime"), new("maxStorageUntil", "Hạn lưu tối đa", "datetime"), new("reason", "Lý do", "text")
     ];
 
-    // Parcels an operator removed from a locker, which is how overdue parcels are moved to the collection point.
+    // Parcels confirmed delivered by an operator to Locker.RecoveryAddress; no warehouse workflow follows.
     private async Task<ReportPage> TransfersAsync(DateTimeOffset from, DateTimeOffset to, Guid? lockerId, string? status, int skip, int take, CancellationToken ct)
     {
         if (status is not null && !string.Equals(status, nameof(ParcelStatus.Removed), StringComparison.OrdinalIgnoreCase))
