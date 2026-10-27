@@ -1913,6 +1913,30 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.ToTable("ResidentSubscription", (string)null);
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnCancellationRequest", b =>
+                {
+                    b.Property<Guid>("ReturnRequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ResidentUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying");
+
+                    b.HasKey("ReturnRequestId");
+
+                    b.ToTable("ReturnCancellationRequest", (string)null);
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnRequest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3022,6 +3046,23 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("SubscriptionPlan");
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnCancellationRequest", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("ResidentUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.ReturnRequest", "ReturnRequest")
+                        .WithOne("Cancellation")
+                        .HasForeignKey("smart_locking_be.Domain.Entities.ReturnCancellationRequest", "ReturnRequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ReturnRequest");
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnRequest", b =>
                 {
                     b.HasOne("smart_locking_be.Domain.Entities.LockerCompartment", "AllocatedCompartment")
@@ -3235,6 +3276,8 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnRequest", b =>
                 {
                     b.Navigation("AccessEvents");
+
+                    b.Navigation("Cancellation");
 
                     b.Navigation("Incidents");
 
