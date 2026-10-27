@@ -1396,6 +1396,117 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.ToTable("ParcelStatusHistory", (string)null);
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.PaymentReconciliation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AssignedAdminUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PaymentTransactionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ProviderCheckedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProviderStatus")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid>("ResidentUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Response")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid?>("SubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PaymentTransactionId")
+                        .IsUnique()
+                        .HasFilter("\"PaymentTransactionId\" IS NOT NULL");
+
+                    b.HasIndex("Reference")
+                        .IsUnique();
+
+                    b.HasIndex("SubscriptionId")
+                        .IsUnique()
+                        .HasFilter("\"SubscriptionId\" IS NOT NULL");
+
+                    b.HasIndex("ResidentUserId", "CreatedAt");
+
+                    b.ToTable("PaymentReconciliation", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PaymentReconciliation_Subject", "(\"SubscriptionId\" IS NOT NULL AND \"PaymentTransactionId\" IS NULL) OR (\"SubscriptionId\" IS NULL AND \"PaymentTransactionId\" IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.PaymentReconciliationEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid>("PaymentReconciliationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProviderEvidence")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PaymentReconciliationId", "CreatedAt");
+
+                    b.ToTable("PaymentReconciliationEvent", (string)null);
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.PaymentTransaction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2662,6 +2773,57 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("Parcel");
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.PaymentReconciliation", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.User", "AssignedAdminUser")
+                        .WithMany()
+                        .HasForeignKey("AssignedAdminUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("smart_locking_be.Domain.Entities.PaymentTransaction", "PaymentTransaction")
+                        .WithMany()
+                        .HasForeignKey("PaymentTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("smart_locking_be.Domain.Entities.User", "ResidentUser")
+                        .WithMany()
+                        .HasForeignKey("ResidentUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.ResidentSubscription", "Subscription")
+                        .WithMany()
+                        .HasForeignKey("SubscriptionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AssignedAdminUser");
+
+                    b.Navigation("PaymentTransaction");
+
+                    b.Navigation("ResidentUser");
+
+                    b.Navigation("Subscription");
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.PaymentReconciliationEvent", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.User", "ActorUser")
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.PaymentReconciliation", "PaymentReconciliation")
+                        .WithMany("Events")
+                        .HasForeignKey("PaymentReconciliationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ActorUser");
+
+                    b.Navigation("PaymentReconciliation");
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.PaymentTransaction", b =>
                 {
                     b.HasOne("smart_locking_be.Domain.Entities.OverdueCharge", "OverdueCharge")
@@ -2919,6 +3081,11 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("ReturnRequests");
 
                     b.Navigation("StatusHistory");
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.PaymentReconciliation", b =>
+                {
+                    b.Navigation("Events");
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.PaymentTransaction", b =>

@@ -145,16 +145,23 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
             .Include(item => item.OverdueCharge).ThenInclude(item => item.Parcel)
                 .ThenInclude(item => item.DeliveryRequest).ThenInclude(item => item.ResidentProfile)
             .SingleAsync(item => item.ExternalOrderCode == orderCode, cancellationToken);
+        if (db.Database.IsRelational())
+        {
+            await db.Entry(payment).ReloadAsync(cancellationToken);
+            await db.Entry(payment.OverdueCharge).ReloadAsync(cancellationToken);
+        }
         if (payment.Amount != webhook.Amount || payment.Currency != webhook.Currency ||
             string.IsNullOrWhiteSpace(webhook.Reference) || webhook.Reference.Length > 150)
         {
             logger.LogWarning("Ignoring PayOS webhook with mismatched payment data for order {OrderCode}.", orderCode);
             return true;
         }
-        if (payment.Status != PaymentTransactionStatus.Pending) return true;
+        bool succeeded = webhook.Code == "00";
+        if (payment.Status == PaymentTransactionStatus.Success ||
+            (!succeeded && payment.Status != PaymentTransactionStatus.Pending) ||
+            (succeeded && payment.OverdueCharge.Status == OverdueChargeStatus.Paid)) return true;
 
         DateTimeOffset now = clock.GetUtcNow();
-        bool succeeded = webhook.Code == "00";
         payment.Status = succeeded ? PaymentTransactionStatus.Success : PaymentTransactionStatus.Failed;
         payment.CompletedAt = now;
         payment.ExternalTransactionId = webhook.Reference;

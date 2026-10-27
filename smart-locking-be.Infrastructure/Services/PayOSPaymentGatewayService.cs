@@ -68,6 +68,22 @@ public sealed class PayOSPaymentGatewayService(IOptions<PayOSOptions> options) :
         }
     }
 
+    public async Task<PaymentGatewayInformation> GetPaymentLinkInformationAsync(long orderCode, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var result = await CreateClient().getPaymentLinkInformation(orderCode);
+            return new(result.orderCode, result.amount, result.amountPaid, result.amountRemaining, result.status,
+                result.transactions.Select(t => new PaymentGatewayTransaction(t.reference, t.amount)).ToArray());
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new ServiceUnavailableException(PaymentErrorCodes.Unavailable,
+                "Verified payment information is currently unavailable. Do not pay again while the result is unclear.", exception);
+        }
+    }
+
     public PayOSWebhookData VerifyWebhook(PayOSWebhookPayload payload)
     {
         var client = CreateClient();
