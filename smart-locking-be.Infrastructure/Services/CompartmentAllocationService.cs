@@ -21,11 +21,12 @@ public sealed class CompartmentAllocationService(
     {
         ValidateOperation(deliveryRequestId, returnRequestId);
         DateTimeOffset now = timeProvider.GetUtcNow();
-        await using IDbContextTransaction? transaction = dbContext.Database.IsRelational()
-            ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+        await using IDbContextTransaction? transaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken)
             : null;
+        await LockerAvailability.LockScopeAsync(dbContext, lockerId, cancellationToken);
 
-        LockerCompartment? compartment = await dbContext.LockerCompartments
+        LockerCompartment? compartment = await dbContext.OperationalCompartments()
             .Where(item => item.LockerId == lockerId &&
                            item.Locker.OperationalStatus == LockerOperationalStatus.Operational &&
                            item.OperationalStatus == LockerCompartmentOperationalStatus.Operational &&
