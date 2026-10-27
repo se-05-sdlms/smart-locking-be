@@ -23,10 +23,18 @@ public sealed class ReturnRequestService(
     public async Task<ReturnRequestResponse> CreateAsync(Guid residentUserId, CreateReturnRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.ImageUrl)) throw BadRequestException.For("imageUrl", "Return image URL is required.");
+        await using var residentTransaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (dbContext.Database.IsRelational())
+            await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT 1 FROM \"ResidentProfile\" WHERE \"UserId\" = {residentUserId} FOR UPDATE", cancellationToken);
+        ResidentProfile? trackedResident = dbContext.ResidentProfiles.Local.FirstOrDefault(item => item.UserId == residentUserId);
+        if (trackedResident is not null) await dbContext.Entry(trackedResident).ReloadAsync(cancellationToken);
         ResidentProfile resident = await dbContext.ResidentProfiles
             .Include(item => item.User).Include(item => item.RegisteredLocker)
             .SingleOrDefaultAsync(item => item.UserId == residentUserId, cancellationToken)
             ?? throw new NotFoundException(UserErrorCodes.NotFound, "Không tìm thấy hồ sơ cư dân.");
+        if (dbContext.Database.IsRelational()) await dbContext.Entry(resident.User).ReloadAsync(cancellationToken);
         if (resident.User.Status != UserStatus.Active) throw new ConflictException(ReturnErrorCodes.InvalidState, "Tài khoản cư dân không hoạt động.");
         // Client truyền tủ đang kết nối; giữ cách gọi cũ cho app chưa cập nhật.
         Locker? locker = string.IsNullOrWhiteSpace(request.DeviceIdentifier) ? resident.RegisteredLocker :
@@ -51,6 +59,7 @@ public sealed class ReturnRequestService(
         AddAudit(residentUserId, "ReturnRequest.Created", nameof(ReturnRequest), entity.Id, "Resident created a return request.", now);
         await dbContext.SaveChangesAsync(cancellationToken);
         entity.Locker = locker;
+        if (residentTransaction is not null) await residentTransaction.CommitAsync(cancellationToken);
         return Map(entity);
     }
 
