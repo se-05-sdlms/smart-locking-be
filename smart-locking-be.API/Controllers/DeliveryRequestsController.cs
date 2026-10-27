@@ -98,6 +98,23 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     // Issue #20: Resident Approval Flow Endpoints
     // ==========================================
 
+    [HttpPost("{id:guid}:cancel")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Cancel(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetGuestSessionToken(out string token))
+        {
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
+        }
+
+        return Ok(await deliveryRequestService.CancelAsync(id, token, cancellationToken));
+    }
+
+    [HttpGet("{id:guid}/resident")]
+    [Authorize(Policy = ApiPolicies.Resident)]
+    public async Task<IActionResult> GetResidentStatus(Guid id, CancellationToken cancellationToken) =>
+        Ok(await deliveryRequestService.GetForResidentAsync(User.GetRequiredUserId(), id, cancellationToken));
+
     [HttpGet]
     [Authorize(Policy = ApiPolicies.Resident)]
     public async Task<IActionResult> GetPendingRequests(
