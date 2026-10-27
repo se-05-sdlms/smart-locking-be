@@ -29,6 +29,8 @@ public static class DependencyInjection
         services.AddScoped<IService, Service>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IOtpService, OtpService>();
+        services.AddHttpClient<ISmsSender, ConfiguredSmsSender>(client => client.Timeout = TimeSpan.FromSeconds(10))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddScoped<IEmailSender, SmtpEmailSender>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IPasswordHashService, Pbkdf2PasswordHashService>();
