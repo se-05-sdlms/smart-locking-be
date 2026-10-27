@@ -14,6 +14,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Locker> Lockers => Set<Locker>();
     public DbSet<LockerCompartment> LockerCompartments => Set<LockerCompartment>();
+    public DbSet<OperatorAbsence> OperatorAbsences => Set<OperatorAbsence>();
+    public DbSet<TemporaryOperatorAssignment> TemporaryOperatorAssignments => Set<TemporaryOperatorAssignment>();
     public DbSet<OperatorAssignment> OperatorAssignments => Set<OperatorAssignment>();
     public DbSet<SystemPolicy> SystemPolicies => Set<SystemPolicy>();
     public DbSet<NotificationRule> NotificationRules => Set<NotificationRule>();

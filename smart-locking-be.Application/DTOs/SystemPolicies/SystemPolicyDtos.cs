@@ -19,7 +19,11 @@ public sealed record SaveSystemPolicyRequest(
     bool EnableOtp,
     bool EnableRemoteUnlock,
     bool EnableBluetoothUnlock,
-    DateTimeOffset EffectiveFrom);
+    DateTimeOffset EffectiveFrom,
+    double? OperatorReplacementRadiusKm = null,
+    int? OperatorReplacementMaxLoad = null,
+    string[]? OperatorReplacementAreas = null,
+    Guid[]? OperatorReplacementEligibleUserIds = null);
 
 public sealed record SystemPolicyResponse(
     Guid Id,
@@ -43,4 +47,8 @@ public sealed record SystemPolicyResponse(
     DateTimeOffset EffectiveFrom,
     DateTimeOffset? EffectiveTo,
     bool IsActive,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    double? OperatorReplacementRadiusKm = null,
+    int? OperatorReplacementMaxLoad = null,
+    string[]? OperatorReplacementAreas = null,
+    Guid[]? OperatorReplacementEligibleUserIds = null);

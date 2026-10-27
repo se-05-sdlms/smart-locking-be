@@ -7,6 +7,13 @@ namespace smart_locking_be.Domain.Entities;
 /// </summary>
 public sealed class Locker
 {
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+    public string? ServiceArea { get; set; }
+    public Guid? LocationConfirmedByUserId { get; set; }
+    public DateTimeOffset? LocationConfirmedAt { get; set; }
+    public Guid? LocationRevision { get; set; }
+
     /// <summary>
     /// Mã định danh duy nhất của locker.
     /// </summary>

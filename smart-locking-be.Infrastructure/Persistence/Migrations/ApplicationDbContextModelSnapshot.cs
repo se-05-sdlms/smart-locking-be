@@ -491,6 +491,21 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<double?>("Latitude")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTimeOffset?>("LocationConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LocationConfirmedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("LocationRevision")
+                        .HasColumnType("uuid");
+
+                    b.Property<double?>("Longitude")
+                        .HasColumnType("double precision");
+
                     b.Property<string>("OperationalStatus")
                         .IsRequired()
                         .HasColumnType("character varying");
@@ -498,6 +513,10 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<string>("RecoveryAddress")
                         .IsRequired()
                         .HasMaxLength(500)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("ServiceArea")
+                        .HasMaxLength(100)
                         .HasColumnType("character varying");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
@@ -519,7 +538,10 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.HasIndex("ConnectionStatus", "LastSeenAt")
                         .HasDatabaseName("IX_Locker_ConnectionStatus_LastSeenAt");
 
-                    b.ToTable("Locker", (string)null);
+                    b.ToTable("Locker", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Locker_Coordinates", "(\"Latitude\" IS NULL AND \"Longitude\" IS NULL) OR (\"Latitude\" BETWEEN -90 AND 90 AND \"Longitude\" BETWEEN -180 AND 180)");
+                        });
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerAccessEvent", b =>
@@ -926,6 +948,45 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.ToTable("NotificationRule", null, t =>
                         {
                             t.HasCheckConstraint("CK_NotificationRule_LeadTimeMinutes", "\"LeadTimeMinutes\" IS NULL OR \"LeadTimeMinutes\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OperatorAbsence", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("EndsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OperatorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying");
+
+                    b.Property<DateTimeOffset>("StartsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperatorUserId", "StartsAt", "EndsAt");
+
+                    b.ToTable("OperatorAbsence", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_OperatorAbsence_Interval", "\"StartsAt\" < \"EndsAt\"");
                         });
                 });
 
@@ -1740,6 +1801,18 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<int>("MaxStorageHours")
                         .HasColumnType("integer");
 
+                    b.Property<string[]>("OperatorReplacementAreas")
+                        .HasColumnType("text[]");
+
+                    b.Property<Guid[]>("OperatorReplacementEligibleUserIds")
+                        .HasColumnType("uuid[]");
+
+                    b.Property<int?>("OperatorReplacementMaxLoad")
+                        .HasColumnType("integer");
+
+                    b.Property<double?>("OperatorReplacementRadiusKm")
+                        .HasColumnType("double precision");
+
                     b.Property<int>("OtpLockoutMinutes")
                         .HasColumnType("integer");
 
@@ -1777,6 +1850,89 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_SystemPolicy_DurationsAndRates", "\"GuestSessionTimeoutMinutes\" > 0 AND \"ManualApprovalTimeoutMinutes\" > 0 AND \"CompartmentReservationMinutes\" > 0 AND \"OtpMaxAttempts\" > 0 AND \"OtpLockoutMinutes\" > 0 AND \"OverdueStartAfterHours\" >= 0 AND \"OverdueFeePerHour\" >= 0 AND \"MaxStorageHours\" > 0 AND \"ClearanceEligibilityAfterHours\" >= 0 AND \"ClearanceNoticeBeforeHours\" >= 0 AND \"PickupReminderStartDay\" > 0");
                         });
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.TemporaryOperatorAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AbsenceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ActivatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AnchorLocationRevision")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AnchorLockerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BaseAssignmentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<double?>("DistanceKm")
+                        .HasColumnType("double precision");
+
+                    b.Property<int?>("LoadAfter")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LoadBefore")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("LockerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("OperatorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PolicyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SelectionFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("ServiceArea")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("StatusReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying");
+
+                    b.Property<Guid?>("TargetLocationRevision")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AbsenceId", "LockerId")
+                        .IsUnique();
+
+                    b.HasIndex("LockerId", "Status");
+
+                    b.HasIndex("OperatorUserId", "Status");
+
+                    b.ToTable("TemporaryOperatorAssignment", (string)null);
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.User", b =>
@@ -2034,6 +2190,14 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("Incident");
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.Locker", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("LocationConfirmedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerAccessEvent", b =>
                 {
                     b.HasOne("smart_locking_be.Domain.Entities.DeliveryRequest", "DeliveryRequest")
@@ -2224,6 +2388,21 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("SystemPolicy");
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OperatorAbsence", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("OperatorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.OperatorAssignment", b =>
@@ -2471,6 +2650,51 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("CreatedByUser");
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.TemporaryOperatorAssignment", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.OperatorAbsence", "Absence")
+                        .WithMany()
+                        .HasForeignKey("AbsenceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.Locker", null)
+                        .WithMany()
+                        .HasForeignKey("AnchorLockerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("ApprovedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("smart_locking_be.Domain.Entities.OperatorAssignment", "BaseAssignment")
+                        .WithMany()
+                        .HasForeignKey("BaseAssignmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.Locker", null)
+                        .WithMany()
+                        .HasForeignKey("LockerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("OperatorUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("smart_locking_be.Domain.Entities.SystemPolicy", null)
+                        .WithMany()
+                        .HasForeignKey("PolicyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Absence");
+
+                    b.Navigation("BaseAssignment");
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.DeliveryRequest", b =>
