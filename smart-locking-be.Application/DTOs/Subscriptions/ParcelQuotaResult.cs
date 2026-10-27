@@ -4,7 +4,8 @@ public enum ParcelQuotaDecision
 {
     Allowed,
     NoActiveSubscription,
-    LimitReached
+    LimitReached,
+    BenefitsReconciliationRequired
 }
 
 public sealed record ParcelQuotaResult(ParcelQuotaDecision Decision, int ActiveParcels, int? MaxActiveParcels);

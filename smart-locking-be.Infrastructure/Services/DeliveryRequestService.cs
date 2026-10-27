@@ -105,6 +105,20 @@ public sealed class DeliveryRequestService(
             throw new ConflictException(DeliveryErrorCodes.InvalidState, "Resident is not registered to receive parcels at this locker.");
         }
 
+        // Count and claim one unit of the purchased quota in the same resident lock.
+        // Reuse a decision transaction when the cancellation flow already owns one.
+        await using var quotaTransaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (dbContext.Database.IsRelational())
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT 1 FROM \"ResidentProfile\" WHERE \"Id\" = {resident.Id} FOR UPDATE", cancellationToken);
+            await dbContext.Entry(deliveryRequest).ReloadAsync(cancellationToken);
+            if (deliveryRequest.Status != DeliveryRequestStatus.Started)
+                throw new ConflictException(DeliveryErrorCodes.InvalidState, "Delivery request has already been submitted.");
+            if (deliveryRequest.SessionExpiresAt <= timeProvider.GetUtcNow())
+                throw new GoneException(DeliveryErrorCodes.SessionExpired, "Delivery session has expired.");
+        }
         await EnsureResidentCanReceiveAsync(resident.Id, cancellationToken);
 
         deliveryRequest.ResidentProfileId = resident.Id;
@@ -132,6 +146,7 @@ public sealed class DeliveryRequestService(
 
         AddAudit(null, "DeliveryRequest.Submitted", deliveryRequest, deliveryRequest.Status.ToString(), now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (quotaTransaction is not null) await quotaTransaction.CommitAsync(cancellationToken);
         if (pushNotificationId.HasValue)
         {
             await pushNotificationService.TrySendAsync(pushNotificationId.Value, cancellationToken);
