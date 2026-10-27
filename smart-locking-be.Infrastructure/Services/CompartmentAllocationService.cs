@@ -21,7 +21,7 @@ public sealed class CompartmentAllocationService(
     {
         ValidateOperation(deliveryRequestId, returnRequestId);
         DateTimeOffset now = timeProvider.GetUtcNow();
-        await using IDbContextTransaction? transaction = dbContext.Database.IsRelational()
+        await using IDbContextTransaction? transaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
             ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
             : null;
 

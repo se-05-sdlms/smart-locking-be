@@ -18,4 +18,8 @@ public sealed record ReturnRequestResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset? ReservationExpiresAt,
     DateTimeOffset? ResidentDepositedAt,
-    DateTimeOffset? ShipperPickedUpAt);
+    DateTimeOffset? ShipperPickedUpAt,
+    bool CanCancel = false,
+    ReturnCancellationResponse? Cancellation = null);
+
+public sealed record ReturnCancellationResponse(string Status, DateTimeOffset RequestedAt, DateTimeOffset? CompletedAt, bool CanRetrieve, string Message);

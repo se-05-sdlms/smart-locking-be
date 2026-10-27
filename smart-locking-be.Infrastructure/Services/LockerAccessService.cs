@@ -19,6 +19,20 @@ public sealed class LockerAccessService(
         CancellationToken cancellationToken = default)
     {
         ValidateContext(request);
+        await using var returnTransition = request.ReturnRequestId.HasValue
+            ? await ReturnTransitionLock.AcquireAsync(dbContext, request.ReturnRequestId.Value, cancellationToken) : null;
+        if (request.AccessType is LockerAccessType.ResidentReturnDropOff or LockerAccessType.ShipperReturnPickup)
+        {
+            ReturnRequest? returnRequest = await dbContext.ReturnRequests.Include(item => item.Cancellation)
+                .Include(item => item.ResidentProfile).SingleOrDefaultAsync(item => item.Id == request.ReturnRequestId, cancellationToken);
+            bool dropOff = request.AccessType == LockerAccessType.ResidentReturnDropOff;
+            if (returnRequest is null || returnRequest.Cancellation is not null || returnRequest.LockerId != request.LockerId
+                || returnRequest.AllocatedCompartmentId != request.LockerCompartmentId
+                || (dropOff ? returnRequest.Status != ReturnRequestStatus.Allocated || returnRequest.ResidentProfile.UserId != request.UserId
+                    : returnRequest.Status != ReturnRequestStatus.Deposited || string.IsNullOrWhiteSpace(returnRequest.ShipperSessionTokenHash)))
+                throw new ConflictException(ReturnErrorCodes.InvalidState, "Return access is revoked or no longer available.");
+        }
+
 
         LockerCompartment compartment = await dbContext.LockerCompartments
             .Include(item => item.Locker)
@@ -91,6 +105,7 @@ public sealed class LockerAccessService(
             OccurredAt = now
         });
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (returnTransition is not null) await returnTransition.CommitAsync(cancellationToken);
         return Map(accessEvent, compartment);
     }
 
