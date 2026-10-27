@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<IPasswordHashService, Pbkdf2PasswordHashService>();
         services.AddScoped<ITokenHashService, Sha256TokenHashService>();
         services.AddScoped<IResidentService, ResidentService>();
+        services.AddScoped<IResidentAccountChangeService, ResidentAccountChangeService>();
         services.Configure<Options.PayOSOptions>(options =>
         {
             options.ClientId = configuration["PayOS:ClientId"] ?? string.Empty;

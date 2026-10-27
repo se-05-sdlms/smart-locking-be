@@ -277,11 +277,19 @@ public sealed class PaymentReconciliationService(ApplicationDbContext db, IPayme
     private Task<IDbContextTransaction?> LockCaseAsync(Guid id, CancellationToken cancellationToken) => LockAsync("case", id, cancellationToken);
     private async Task<IDbContextTransaction?> LockPaymentAsync(PaymentLookupResponse payment, CancellationToken cancellationToken)
     {
-        // Use the same resident/charge lock as webhook activation and checkout creation.
-        Guid lockId = payment.Kind == "Subscription"
-            ? await db.ResidentProfiles.Where(r => r.UserId == payment.ResidentUserId).Select(r => r.Id).SingleAsync(cancellationToken)
-            : await db.PaymentTransactions.Where(p => p.Id == payment.Id).Select(p => p.OverdueChargeId).SingleAsync(cancellationToken);
-        return await LockAsync(payment.Kind, lockId, cancellationToken);
+        Guid residentId = await db.ResidentProfiles.Where(r => r.UserId == payment.ResidentUserId).Select(r => r.Id).SingleAsync(cancellationToken);
+        // Serialize creation of an unresolved obligation with account-change approval.
+        var transaction = await LockAsync("Subscription", residentId, cancellationToken);
+        try
+        {
+            if (transaction is not null && payment.Kind == "Overdue")
+            {
+                Guid chargeId = await db.PaymentTransactions.Where(p => p.Id == payment.Id).Select(p => p.OverdueChargeId).SingleAsync(cancellationToken);
+                await db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"OverdueCharge\" WHERE \"Id\" = {chargeId} FOR UPDATE", cancellationToken);
+            }
+            return transaction;
+        }
+        catch { if (transaction is not null) await transaction.DisposeAsync(); throw; }
     }
     private async Task<IDbContextTransaction?> LockAsync(string kind, Guid id, CancellationToken cancellationToken)
     {
