@@ -126,6 +126,7 @@ public static class DependencyInjection
 
         services.AddScoped<IReportService, ReportService>();
 
+        services.AddScoped<IOperatorTaskService, OperatorTaskService>();
         services.AddScoped<ISystemPolicyService, SystemPolicyService>();
 
         services.AddHostedService<MqttLockerListenerService>();
