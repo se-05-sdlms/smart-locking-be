@@ -73,7 +73,7 @@ public sealed class EmergencyUnlockService(
     {
         if (role == nameof(UserRole.Administrator)) return;
         if (role != nameof(UserRole.LockerOperator) ||
-            !await dbContext.OperatorAssignments.AnyAsync(item =>
+            !await dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow()).AnyAsync(item =>
                 item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
                 cancellationToken))
             throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.");

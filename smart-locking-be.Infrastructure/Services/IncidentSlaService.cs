@@ -146,15 +146,10 @@ public sealed class IncidentSlaService(
         }
 
         List<Guid> recipients = [];
-        if (incident.AssignedOperatorUserId.HasValue)
+        if (incident.LockerId.HasValue)
         {
-            recipients.Add(incident.AssignedOperatorUserId.Value);
-        }
-        else if (incident.LockerId.HasValue)
-        {
-            recipients = await dbContext.OperatorAssignments
-                .Where(assignment => assignment.LockerId == incident.LockerId && assignment.RevokedAt == null &&
-                                     assignment.OperatorUser.Status == UserStatus.Active)
+            recipients = await dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow())
+                .Where(assignment => assignment.LockerId == incident.LockerId && assignment.RevokedAt == null)
                 .Select(assignment => assignment.OperatorUserId)
                 .Distinct()
                 .ToListAsync(cancellationToken);

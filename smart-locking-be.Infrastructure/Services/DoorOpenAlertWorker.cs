@@ -74,9 +74,8 @@ public sealed class DoorOpenAlertWorker(
                     item.OccurredAt <= receivedAt && item.OccurredAt >= receivedAt.AddMinutes(-2))
                 .OrderByDescending(item => item.OccurredAt)
                 .FirstOrDefaultAsync(cancellationToken);
-            Guid? operatorId = await dbContext.OperatorAssignments
-                .Where(item => item.LockerId == compartment.LockerId && item.RevokedAt == null &&
-                    item.OperatorUser.Status == UserStatus.Active)
+            Guid? operatorId = await dbContext.EffectiveOperatorAssignments(DateTimeOffset.UtcNow)
+                .Where(item => item.LockerId == compartment.LockerId && item.RevokedAt == null)
                 .Select(item => (Guid?)item.OperatorUserId)
                 .FirstOrDefaultAsync(cancellationToken);
             string title = $"Door {compartment.Code} left open";
