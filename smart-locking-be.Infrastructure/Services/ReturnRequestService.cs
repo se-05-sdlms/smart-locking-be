@@ -166,8 +166,15 @@ public sealed class ReturnRequestService(
     public async Task<ReturnPickupSessionResponse> GetAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default)
     {
         await using var transition = await ReturnTransitionLock.AcquireAsync(dbContext, id, cancellationToken);
-        ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
+        ReturnRequest? completed = await FullQuery().SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
+        if (completed?.Status == ReturnRequestStatus.Completed && completed.Cancellation is null
+            && !string.IsNullOrWhiteSpace(completed.ShipperSessionTokenHash)
+            && string.Equals(completed.ShipperSessionTokenHash, tokenHashService.HashToken(guestSessionToken.Trim()), StringComparison.Ordinal)
+            && completed.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes) > timeProvider.GetUtcNow())
+            return new ReturnPickupSessionResponse(completed.Id, guestSessionToken, completed.Locker.Code,
+                completed.AllocatedCompartment!.Code, string.Empty, completed.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes), true);
+        ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         if (transition is not null) await transition.CommitAsync(cancellationToken);
         return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl!, entity.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes));
@@ -208,7 +215,8 @@ public sealed class ReturnRequestService(
             AddAudit(null, "ReturnCancellation.AlreadyCollected", nameof(ReturnRequest), entity.Id, "An already dispatched shipper pickup completed; cancellation did not release the compartment.", now);
         }
         entity.CompartmentReleasedAt = now;
-        entity.ShipperSessionTokenHash = null;
+        // Retain the hash briefly for authenticated completion reads only; unlock still requires Deposited.
+        if (entity.Cancellation is not null) entity.ShipperSessionTokenHash = null;
         entity.UpdatedAt = now;
         Guid pushId = pushNotificationService.EnqueueReturnNotification(
             entity.ResidentProfile.UserId, entity.Id, "ReturnPickedUp", "Shipper collected return parcel",
