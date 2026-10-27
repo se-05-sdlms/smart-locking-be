@@ -15,6 +15,7 @@ namespace smart_locking_be.API.Controllers;
 public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryRequestService) : ControllerBase
 {
     private const string GuestSessionHeaderName = "X-Guest-Session-Token";
+    private const int MaxWaybillImageBytes = 8 * 1024 * 1024;
 
     [HttpPost]
     [AllowAnonymous]
@@ -39,6 +40,46 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
         }
 
         return Ok(await deliveryRequestService.SubmitAsync(id, token, request, cancellationToken));
+    }
+
+    [HttpPost("{id:guid}:waybill-ocr")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicyNames.Upload)]
+    [RequestTimeout(RequestTimeoutPolicyNames.Upload)]
+    [RequestSizeLimit(MaxWaybillImageBytes)]
+    public async Task<IActionResult> ScanWaybill(
+        Guid id,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetGuestSessionToken(out string token))
+        {
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
+        }
+
+        if (file.Length == 0 || file.Length > MaxWaybillImageBytes)
+        {
+            throw new BadRequestException(ImageErrorCodes.InvalidImage, "Image must be JPG, PNG, or WEBP and no larger than 8 MB.");
+        }
+
+        await using Stream stream = file.OpenReadStream();
+        return Ok(await deliveryRequestService.ScanWaybillAsync(
+            id, token, stream, file.FileName, file.ContentType, cancellationToken));
+    }
+
+    [HttpPost("{id:guid}:resolve-recipient")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ResolveRecipient(
+        Guid id,
+        [FromBody] ResolveRecipientRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetGuestSessionToken(out string token))
+        {
+            throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
+        }
+
+        return Ok(await deliveryRequestService.ResolveRecipientAsync(id, token, request, cancellationToken));
     }
 
     [HttpGet("{id:guid}")]

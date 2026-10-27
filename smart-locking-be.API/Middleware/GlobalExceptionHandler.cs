@@ -19,6 +19,7 @@ public sealed class GlobalExceptionHandler(
             NotFoundException => StatusCodes.Status404NotFound,
             ConflictException => StatusCodes.Status409Conflict,
             GoneException => StatusCodes.Status410Gone,
+            TooManyRequestsException => StatusCodes.Status429TooManyRequests,
             ServiceUnavailableException => StatusCodes.Status503ServiceUnavailable,
             _ => StatusCodes.Status500InternalServerError
         };

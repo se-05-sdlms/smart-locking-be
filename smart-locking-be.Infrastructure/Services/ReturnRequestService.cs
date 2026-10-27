@@ -143,7 +143,7 @@ public sealed class ReturnRequestService(
     public async Task<ReturnPickupSessionResponse> CreateAsync(ValidateReturnPickupRequest request, CancellationToken cancellationToken = default)
     {
         string code = request.PickupCode.Trim();
-        if (!System.Text.RegularExpressions.Regex.IsMatch(code, "^[0-9]{6}$")) throw BadRequestException.For("pickupCode", "Pickup code must contain exactly six digits.");
+        if (code.Length != PickupCodeLength || !code.All(char.IsAsciiDigit)) throw BadRequestException.For("pickupCode", "Pickup code must contain exactly six digits.");
         ReturnRequest entity = await FullQuery().SingleOrDefaultAsync(item => item.ReturnCode == code && item.Locker.Code == request.LockerCode.Trim(), cancellationToken)
             ?? throw new NotFoundException(ReturnErrorCodes.InvalidPickupCode, "Pickup code is invalid for this locker.");
         if (entity.Status != ReturnRequestStatus.Deposited || entity.AllocatedCompartment is null)
@@ -255,11 +255,15 @@ public sealed class ReturnRequestService(
             .FirstAsync(cancellationToken);
     }
 
+    // The pickup code is exactly six digits (SRS BR-37..39); validation and generation share these values.
+    private const int PickupCodeLength = 6;
+    private const int PickupCodeSpace = 1_000_000;
+
     private async Task<string> GeneratePickupCodeAsync(CancellationToken cancellationToken)
     {
         for (int attempt = 0; attempt < 20; attempt++)
         {
-            string code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
+            string code = RandomNumberGenerator.GetInt32(0, PickupCodeSpace).ToString($"D{PickupCodeLength}");
             if (!await dbContext.ReturnRequests.AnyAsync(item => item.ReturnCode == code, cancellationToken)) return code;
         }
         throw new InternalServerException("Could not generate a pickup code after multiple attempts.");

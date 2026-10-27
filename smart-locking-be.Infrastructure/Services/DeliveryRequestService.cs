@@ -3,6 +3,7 @@ using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.DTOs.Notifications;
+using smart_locking_be.Application.DTOs.Subscriptions;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
@@ -16,9 +17,17 @@ public sealed class DeliveryRequestService(
     IPushNotificationService pushNotificationService,
     ILockerAccessService lockerAccessService,
     ICompartmentAllocationService compartmentAllocationService,
+    IImageStorageService imageStorageService,
+    IWaybillOcrService waybillOcrService,
+    IParcelQuotaService parcelQuotaService,
     TimeProvider timeProvider,
     IOperationsRealtimeNotifier? realtimeNotifier = null) : IDeliveryRequestService
 {
+    private const string WaybillScannedAction = "DeliveryRequest.WaybillScanned";
+    private const string RecipientLookupAction = "DeliveryRequest.RecipientLookedUp";
+    private const int MaxWaybillScansPerSession = 3;
+    private const int MaxRecipientLookupsPerSession = 5;
+
     public async Task<InitiateDeliveryResponse> CreateAsync(
         InitiateDeliveryRequest request,
         CancellationToken cancellationToken = default)
@@ -76,7 +85,10 @@ public sealed class DeliveryRequestService(
     {
         DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
         string recipientPhone = RequireValue(request.RecipientPhone, nameof(request.RecipientPhone), 20);
-        string parcelImageUrl = ValidateImageUrl(request.ParcelImageUrl);
+        string parcelImageUrl = string.IsNullOrWhiteSpace(request.ParcelImageUrl)
+            ? deliveryRequest.ParcelImageUrl
+                ?? throw BadRequestException.For("parcelImageUrl", "Parcel image is required. Upload it with :waybill-ocr first.")
+            : ValidateImageUrl(request.ParcelImageUrl);
         DateTimeOffset now = timeProvider.GetUtcNow();
 
         ResidentProfile resident = await dbContext.ResidentProfiles
@@ -87,6 +99,13 @@ public sealed class DeliveryRequestService(
                            profile.User.Status == UserStatus.Active,
                 cancellationToken)
             ?? throw new NotFoundException(DeliveryErrorCodes.NotFound, "No active resident was found for this phone number.");
+
+        if (resident.RegisteredLockerId != deliveryRequest.LockerId)
+        {
+            throw new ConflictException(DeliveryErrorCodes.InvalidState, "Resident is not registered to receive parcels at this locker.");
+        }
+
+        await EnsureResidentCanReceiveAsync(resident.Id, cancellationToken);
 
         deliveryRequest.ResidentProfileId = resident.Id;
         deliveryRequest.ParcelImageUrl = parcelImageUrl;
@@ -120,6 +139,129 @@ public sealed class DeliveryRequestService(
 
         return MapSummary(deliveryRequest);
     }
+
+    public async Task<WaybillOcrResponse> ScanWaybillAsync(
+        Guid id,
+        string guestSessionToken,
+        Stream image,
+        string fileName,
+        string contentType,
+        CancellationToken cancellationToken = default)
+    {
+        DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
+
+        int attempts = await CountAuditActionsAsync(deliveryRequest.Id, WaybillScannedAction, cancellationToken);
+        if (attempts >= MaxWaybillScansPerSession)
+        {
+            throw new TooManyRequestsException(
+                DeliveryErrorCodes.OcrLimitReached,
+                "Waybill scan limit reached for this session. Enter the phone number manually.");
+        }
+
+        byte[] bytes;
+        using (var buffer = new MemoryStream())
+        {
+            await image.CopyToAsync(buffer, cancellationToken);
+            bytes = buffer.ToArray();
+        }
+
+        // Upload (also validates the image) and OCR run together so the Shipper never waits on both in turn.
+        Task<string> uploadTask = imageStorageService.UploadAsync(
+            new MemoryStream(bytes), fileName, contentType, cancellationToken);
+        Task<WaybillOcrResult> ocrTask = waybillOcrService.ExtractRecipientPhonesAsync(
+            bytes, contentType, cancellationToken);
+        await Task.WhenAll(uploadTask, ocrTask);
+
+        string parcelImageUrl = await uploadTask;
+        WaybillOcrResult ocr = await ocrTask;
+        DateTimeOffset now = timeProvider.GetUtcNow();
+
+        deliveryRequest.ParcelImageUrl = parcelImageUrl;
+        deliveryRequest.OcrExtractedPhone = ocr.Succeeded ? ocr.Phones[0] : null;
+        deliveryRequest.OcrStatus = ocr.Succeeded ? OcrStatus.Succeeded : OcrStatus.Failed;
+        RefreshSession(deliveryRequest, now);
+        AddAudit(null, WaybillScannedAction, deliveryRequest, deliveryRequest.OcrStatus.ToString(), now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new WaybillOcrResponse(
+            ocr.Succeeded ? "Succeeded" : "Failed",
+            ocr.Phones,
+            ocr.IsMasked,
+            parcelImageUrl);
+    }
+
+    public async Task<ResolveRecipientResponse> ResolveRecipientAsync(
+        Guid id,
+        string guestSessionToken,
+        ResolveRecipientRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        DeliveryRequest deliveryRequest = await FindStartedSessionAsync(id, guestSessionToken, cancellationToken);
+        string phone = VietnamPhoneNumber.Normalize(request.Phone)
+            ?? throw BadRequestException.For("phone", "Enter a valid Vietnamese mobile phone number of 10 digits.");
+
+        // Lookup is only available after the parcel photo exists, to make bulk phone probing pointless.
+        if (string.IsNullOrWhiteSpace(deliveryRequest.ParcelImageUrl))
+        {
+            throw new ConflictException(
+                DeliveryErrorCodes.ParcelImageRequired,
+                "Photograph the parcel before looking up the recipient.");
+        }
+
+        int lookups = await CountAuditActionsAsync(deliveryRequest.Id, RecipientLookupAction, cancellationToken);
+        if (lookups >= MaxRecipientLookupsPerSession)
+        {
+            throw new TooManyRequestsException(
+                DeliveryErrorCodes.LookupLimitReached,
+                "Recipient lookup limit reached for this session.");
+        }
+
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        var recipient = await dbContext.ResidentProfiles
+            .Where(profile => profile.User.PhoneNumber == phone &&
+                              profile.User.Role == UserRole.Resident &&
+                              profile.User.Status == UserStatus.Active &&
+                              profile.RegisteredLockerId == deliveryRequest.LockerId)
+            .Select(profile => new { profile.Id, profile.FullName })
+            .FirstOrDefaultAsync(cancellationToken);
+        string? fullName = recipient?.FullName;
+
+        // The phone number itself is never written to the audit trail, only whether the lookup matched.
+        AddAudit(null, RecipientLookupAction, deliveryRequest, fullName is null ? "NotFound" : "Found", now);
+        RefreshSession(deliveryRequest, now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (recipient is null)
+        {
+            throw new NotFoundException(
+                DeliveryErrorCodes.RecipientNotFound,
+                "This phone number is not registered to receive parcels at this locker.");
+        }
+
+        // Tell the Shipper now, before the photo and request are sent, that this resident cannot take another parcel.
+        await EnsureResidentCanReceiveAsync(recipient.Id, cancellationToken);
+        return new ResolveRecipientResponse(recipient.FullName);
+    }
+
+    // Residents need an active subscription with room left under MaxActiveParcels (issue #157).
+    // The message stays generic on purpose: Shippers must not learn a resident's plan details.
+    private async Task EnsureResidentCanReceiveAsync(Guid residentProfileId, CancellationToken cancellationToken)
+    {
+        ParcelQuotaResult quota = await parcelQuotaService.CheckAsync(residentProfileId, cancellationToken);
+        if (quota.Decision != ParcelQuotaDecision.Allowed)
+        {
+            throw new ConflictException(
+                DeliveryErrorCodes.RecipientCannotReceive,
+                "This resident cannot receive more parcels right now.");
+        }
+    }
+
+    private Task<int> CountAuditActionsAsync(Guid deliveryRequestId, string action, CancellationToken cancellationToken) =>
+        dbContext.AuditLogs.CountAsync(
+            log => log.EntityType == nameof(DeliveryRequest) &&
+                   log.EntityId == deliveryRequestId &&
+                   log.Action == action,
+            cancellationToken);
 
     public async Task<GuestDeliveryStatusResponse> GetAsync(
         Guid id,

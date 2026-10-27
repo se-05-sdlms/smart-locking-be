@@ -30,7 +30,7 @@ The return/cancel URLs are server configuration, never supplied by a caller. Nei
 | `POST /api/webhooks/payos` | Anonymous, verified signature | Activates a matching successful VND payment |
 | `GET /api/parcels?view=ClearancePending` | Operator or Administrator | Stored/Overdue parcels at or beyond `MaxStorageUntil`; operators retain locker assignment scope |
 
-Plan requests use `code`, `name`, `description`, `price`, `durationDays`, and `maxActiveParcels`. Updates omit `code` and include `isActive`. Deactivation preserves purchased history. Prices must be whole VND; paid checkout requires a positive amount (zero-priced plans cannot use this checkout).
+Plan requests use `code`, `name`, `description`, `price`, `durationDays`, and `maxActiveParcels`. Updates omit `code` and include `isActive`. Deactivation preserves purchased history. Prices must be whole VND; paid checkout requires a positive amount. A zero-priced plan skips PayOS: `POST /api/resident-subscriptions/subscribe` activates it immediately and returns `{ activated: true, checkoutUrl: "", orderCode: 0, amount: 0 }`. It queues after the resident's current period, and the same free plan cannot be held twice at once (409 `subscription/already_exists`), so free periods cannot be farmed.
 
 ## Lifecycle
 
@@ -47,3 +47,30 @@ Provider failures leave a pending record because a timeout cannot prove that Pay
 ## Verification limits
 
 Tests cover real SDK checksum verification with signed fixtures, invalid/tampered data, subscription stacking/replay, captured purchase terms, expiry, ownership, cutoff boundaries, fee capping, and scoped clearance queries. Offline checkout tests cover validation/cancellation; a real provider checkout and PostgreSQL concurrency still need an integration environment. No real payment was created during implementation.
+
+## Resident package rules for parcel intake (issue #157)
+
+Residents choose a package at registration. The Backend records it through the normal subscription checkout, called right after
+registration with the new access token (`POST /api/resident-subscriptions/subscribe`), so `POST /api/auth/register` is unchanged.
+The pending subscription is saved before PayOS is called; the package takes effect once the verified webhook activates it.
+
+A resident can receive a new parcel only when both hold:
+
+1. They have an `Active` subscription whose period is in effect now (a stacked future period or an expired one does not count).
+2. The number of parcels they currently have is below the plan `MaxActiveParcels`. Parcels in `Stored` or `Overdue` status count, and so do delivery
+   requests that will become parcels (`PendingApproval`, `Approved`, `Allocated`). Retrieved or removed parcels and rejected, expired or
+   cancelled requests free capacity.
+
+Parcels already in a locker can always be picked up, whatever the subscription status.
+
+Where it is enforced (`ParcelQuotaService`):
+
+| Step | Result when the resident cannot receive |
+| --- | --- |
+| `POST /api/delivery-requests/{id}:resolve-recipient` | HTTP 409 `delivery/recipient_cannot_receive`, so the Shipper knows before sending the request |
+| `POST /api/delivery-requests/{id}:submit` | HTTP 409 `delivery/recipient_cannot_receive` |
+
+The message is intentionally generic so a Shipper cannot learn a resident's plan or parcel count.
+
+Set `ResidentSubscription__EnforceParcelLimits=false` to switch the rule off, for example in development databases that have no plans yet.
+It is on by default, so a deployment where residents have no subscription will refuse new parcels until they subscribe.

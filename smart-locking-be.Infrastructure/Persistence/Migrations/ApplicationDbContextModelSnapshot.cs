@@ -426,7 +426,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("ActionByUserId")
+                    b.Property<Guid?>("ActionByUserId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("ActionType")
@@ -2060,8 +2060,7 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.HasOne("smart_locking_be.Domain.Entities.User", "ActionByUser")
                         .WithMany("IncidentActions")
                         .HasForeignKey("ActionByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("smart_locking_be.Domain.Entities.Incident", "Incident")
                         .WithMany("Actions")

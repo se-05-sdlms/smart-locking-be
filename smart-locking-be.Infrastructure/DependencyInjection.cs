@@ -46,6 +46,10 @@ public static class DependencyInjection
         });
         services.AddScoped<ISubscriptionPlanService, SubscriptionPlanService>();
         services.AddScoped<IResidentSubscriptionService, ResidentSubscriptionService>();
+        services.AddOptions<ResidentSubscriptionOptions>()
+            .Configure(options => options.EnforceParcelLimits =
+                !bool.TryParse(configuration[$"{ResidentSubscriptionOptions.SectionName}:EnforceParcelLimits"], out bool enforce) || enforce);
+        services.AddScoped<IParcelQuotaService, ParcelQuotaService>();
         services.AddScoped<IOverduePaymentService, OverduePaymentService>();
         services.AddScoped<IPaymentGatewayService, PayOSPaymentGatewayService>();
         services.AddScoped<ILockerService, LockerService>();
@@ -65,6 +69,9 @@ public static class DependencyInjection
         services.AddScoped<IParcelPickupService, ParcelPickupService>();
         services.AddScoped<IOverdueChargeService, OverdueChargeService>();
         services.AddScoped<IIncidentService, IncidentService>();
+        services.AddOptions<IncidentSlaOptions>().Bind(configuration.GetSection(IncidentSlaOptions.SectionName));
+        services.AddScoped<IncidentSlaService>();
+        services.AddHostedService<IncidentSlaWorker>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IDeviceInstallationService, DeviceInstallationService>();
         services.AddSingleton(TimeProvider.System);
@@ -94,6 +101,20 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddHttpClient<SupabaseImageStorageService>(client =>
             client.Timeout = TimeSpan.FromSeconds(60))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        IConfigurationSection deepSeekSection = configuration.GetSection(DeepSeekOptions.SectionName);
+        services.AddOptions<DeepSeekOptions>()
+            .Configure(options =>
+            {
+                options.Enabled = !bool.TryParse(deepSeekSection["Enabled"], out bool enabled) || enabled;
+                options.ApiKey = deepSeekSection["ApiKey"] ?? string.Empty;
+                options.BaseUrl = deepSeekSection["BaseUrl"] ?? options.BaseUrl;
+                options.Model = deepSeekSection["Model"] ?? options.Model;
+                options.TimeoutSeconds = int.TryParse(deepSeekSection["TimeoutSeconds"], out int seconds)
+                    ? seconds
+                    : options.TimeoutSeconds;
+            });
+        services.AddHttpClient<IWaybillOcrService, DeepSeekWaybillOcrService>()
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddScoped<IPushNotificationService, ExpoPushNotificationService>();
         services.AddScoped<IUserService, UserService>();
