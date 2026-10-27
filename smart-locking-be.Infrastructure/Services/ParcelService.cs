@@ -162,29 +162,63 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
 
         throw new ForbiddenException(ParcelErrorCodes.AccessDenied, "Role cannot access parcels.");
     }
+    /// <summary>Confirms the Operator has already delivered the parcel to Locker.RecoveryAddress.</summary>
     public async Task<OverdueTransferResponse> TransferOverdueAsync(
         Guid userId,
         string role,
         Guid parcelId,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ParcelTransitionLock.AcquireAsync(dbContext, parcelId, cancellationToken);
         Parcel parcel = await dbContext.Parcels
             .Include(item => item.DeliveryRequest).ThenInclude(request => request.Locker)
             .Include(item => item.DeliveryRequest).ThenInclude(request => request.ResidentProfile)
+            .Include(item => item.DeliveryRequest).ThenInclude(request => request.AllocatedCompartment)
             .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
             ?? throw new NotFoundException(ParcelErrorCodes.NotFound, "Parcel not found.");
         await EnsureOperationalAccessAsync(userId, role, parcel.DeliveryRequest.LockerId, cancellationToken);
+        if (parcel.Status == ParcelStatus.Removed && parcel.RemovedAt.HasValue &&
+            parcel.RemovalReason == "Transferred to overdue collection point")
+            return TransferResponse(parcel);
+
         DateTimeOffset now = timeProvider.GetUtcNow();
         if (parcel.MaxStorageUntil > now || parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
             throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel is not eligible for transfer to the collection point.");
+        if (string.IsNullOrWhiteSpace(parcel.DeliveryRequest.Locker.RecoveryAddress))
+            throw new ConflictException(ParcelErrorCodes.InvalidState, "Locker recovery address is not configured.");
+
+        // A dispatched pickup must be reconciled before an Operator can take ownership of its outcome.
+        DateTimeOffset? doorObservedAt = parcel.DeliveryRequest.AllocatedCompartment?.DoorStatusObservedAt;
+        bool doorClosed = parcel.DeliveryRequest.AllocatedCompartment?.DoorStatus == DoorStatus.Closed;
+        if (await dbContext.LockerAccessEvents.AnyAsync(item => item.ParcelId == parcel.Id &&
+            item.AccessType == LockerAccessType.ResidentPickup && item.Result == LockerAccessResult.Succeeded &&
+            (!doorClosed || !doorObservedAt.HasValue || item.OccurredAt >= doorObservedAt.Value), cancellationToken))
+            throw new ConflictException(ParcelErrorCodes.InvalidState, "A pickup unlock is awaiting door confirmation. Reconcile it before confirming transfer.");
 
         ResidentProfile resident = parcel.DeliveryRequest.ResidentProfile
             ?? throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel has no recipient resident.");
+        ParcelStatus previousStatus = parcel.Status;
         parcel.Status = ParcelStatus.Removed;
         parcel.RemovedAt = now;
         parcel.RemovedByUserId = userId;
         parcel.RemovalReason = "Transferred to overdue collection point";
         parcel.UpdatedAt = now;
+        parcel.DeliveryRequest.CompartmentReleasedAt = now;
+        parcel.DeliveryRequest.UpdatedAt = now;
+        foreach (CompartmentReservation reservation in await dbContext.CompartmentReservations
+            .Where(item => item.DeliveryRequestId == parcel.DeliveryRequestId && item.ReleasedAt == null)
+            .ToListAsync(cancellationToken))
+            reservation.ReleasedAt = now;
+        dbContext.ParcelStatusHistories.Add(new ParcelStatusHistory
+        {
+            Id = Guid.NewGuid(),
+            ParcelId = parcel.Id,
+            FromStatus = previousStatus,
+            ToStatus = ParcelStatus.Removed,
+            Reason = "Operator confirmed delivery to the locker recovery address.",
+            ChangedByUserId = userId,
+            ChangedAt = now
+        });
         Guid pushId = pushNotificationService.EnqueueParcelTransferred(
             resident.UserId,
             parcel.DeliveryRequestId,
@@ -202,14 +236,14 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
             OccurredAt = now
         });
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         await pushNotificationService.TrySendAsync(pushId, cancellationToken);
         await PublishAsync(parcel, now, cancellationToken);
-        return new OverdueTransferResponse(
-            parcel.Id,
-            parcel.ParcelCode,
-            parcel.DeliveryRequest.Locker.RecoveryAddress,
-            parcel.Status.ToString());
+        return TransferResponse(parcel);
     }
+
+    private static OverdueTransferResponse TransferResponse(Parcel parcel) => new(
+        parcel.Id, parcel.ParcelCode, parcel.DeliveryRequest.Locker.RecoveryAddress, parcel.Status.ToString());
 
     private async Task EnsureOperationalAccessAsync(Guid userId, string role, Guid lockerId, CancellationToken cancellationToken)
     {
@@ -228,12 +262,14 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
         DateTimeOffset completedAt,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ParcelTransitionLock.AcquireAsync(dbContext, parcelId, cancellationToken);
         Parcel parcel = await dbContext.Parcels
             .Include(item => item.DeliveryRequest)
             .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
             ?? throw new NotFoundException(ParcelErrorCodes.NotFound, "Parcel not found.");
 
-        if (parcel.Status == ParcelStatus.Retrieved)
+        // Late door telemetry must not replace an Operator-confirmed transfer with resident pickup.
+        if (parcel.Status is ParcelStatus.Retrieved or ParcelStatus.Removed)
             return;
         if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
             throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel cannot complete pickup in its current state.");
@@ -255,6 +291,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
             ChangedAt = completedAt,
         });
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         await PublishAsync(parcel, completedAt, cancellationToken);
     }
 

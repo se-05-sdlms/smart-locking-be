@@ -13,18 +13,23 @@ public sealed class OverdueChargeService(
     public async Task<int> CalculateAsync(CancellationToken cancellationToken = default)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
-        List<Parcel> parcels = await dbContext.Parcels
-            .Include(parcel => parcel.DeliveryRequest)
-                .ThenInclude(request => request.SystemPolicy)
-            .Include(parcel => parcel.OverdueCharge)
+        List<Guid> parcelIds = await dbContext.Parcels
+            .AsNoTracking()
             .Where(parcel =>
                 (parcel.Status == ParcelStatus.Stored || parcel.Status == ParcelStatus.Overdue) &&
                 parcel.PickupDueAt < now)
+            .Select(parcel => parcel.Id)
             .ToListAsync(cancellationToken);
 
         int processed = 0;
-        foreach (Parcel parcel in parcels)
+        foreach (Guid parcelId in parcelIds)
         {
+            await using var transaction = await ParcelTransitionLock.AcquireAsync(dbContext, parcelId, cancellationToken);
+            Parcel? parcel = await dbContext.Parcels
+                .Include(item => item.DeliveryRequest).ThenInclude(request => request.SystemPolicy)
+                .Include(item => item.OverdueCharge)
+                .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken);
+            if (parcel is null || parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue)) continue;
             SystemPolicy policy = parcel.DeliveryRequest.SystemPolicy;
             if (policy.OverdueFeePerHour < 0 || string.IsNullOrWhiteSpace(policy.Currency))
             {
@@ -79,12 +84,9 @@ public sealed class OverdueChargeService(
                 }
             }
 
-            processed++;
-        }
-
-        if (processed > 0)
-        {
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            processed++;
         }
 
         return processed;
