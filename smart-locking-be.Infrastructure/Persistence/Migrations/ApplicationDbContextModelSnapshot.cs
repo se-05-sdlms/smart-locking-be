@@ -616,6 +616,69 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.ToTable("LockerAccessEvent", (string)null);
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerCommissioning", b =>
+                {
+                    b.Property<Guid>("LockerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("BoundAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("BoundDeviceIdentifier")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying");
+
+                    b.Property<DateTimeOffset?>("ConfiguredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FirmwareHardwareModel")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("FirmwareSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("FirmwareVersion")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying");
+
+                    b.Property<DateTimeOffset?>("HandedOverAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("HandedOverByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("VerifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("VerifiedConfigurationHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying");
+
+                    b.HasKey("LockerId");
+
+                    b.ToTable("LockerCommissioning", (string)null);
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerCompartment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2174,6 +2237,27 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Navigation("ReturnRequest");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerCommissioning", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("HandedOverByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("smart_locking_be.Domain.Entities.Locker", "Locker")
+                        .WithOne()
+                        .HasForeignKey("smart_locking_be.Domain.Entities.LockerCommissioning", "LockerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("VerifiedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Locker");
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.LockerCompartment", b =>

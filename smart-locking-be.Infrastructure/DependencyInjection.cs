@@ -53,6 +53,8 @@ public static class DependencyInjection
         services.AddScoped<IOverduePaymentService, OverduePaymentService>();
         services.AddScoped<IPaymentGatewayService, PayOSPaymentGatewayService>();
         services.AddScoped<ILockerService, LockerService>();
+        services.AddScoped<ILockerCommissioningService, LockerCommissioningService>();
+        services.AddOptions<LockerCommissioningOptions>().Bind(configuration.GetSection(LockerCommissioningOptions.SectionName));
         services.AddScoped<ILockerAccessService, LockerAccessService>();
         services.AddScoped<ILockerCommandDispatcher, MqttLockerCommandDispatcher>();
         services.AddScoped<ICompartmentAllocationService, CompartmentAllocationService>();
