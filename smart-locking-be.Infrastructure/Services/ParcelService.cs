@@ -147,6 +147,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, TimeProvider t
     private IQueryable<Parcel> ScopeToUser(Guid userId, string role)
     {
         IQueryable<Parcel> query = dbContext.Parcels.AsNoTracking();
+        if (role == nameof(UserRole.Administrator)) return query;
         if (role == nameof(UserRole.Resident))
         {
             return query.Where(parcel => parcel.DeliveryRequest.ResidentProfile!.UserId == userId);

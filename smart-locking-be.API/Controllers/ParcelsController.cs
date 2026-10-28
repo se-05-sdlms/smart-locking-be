@@ -31,7 +31,7 @@ public sealed class ParcelsController(
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Roles = "Resident,LockerOperator")]
+    [Authorize(Roles = "Resident,LockerOperator,Administrator")]
     public async Task<IActionResult> GetParcel(Guid id, CancellationToken cancellationToken)
     {
         var (userId, role) = User.GetRequiredIdentity();
@@ -39,7 +39,7 @@ public sealed class ParcelsController(
     }
 
     [HttpGet("{id:guid}/history")]
-    [Authorize(Roles = "Resident,LockerOperator")]
+    [Authorize(Roles = "Resident,LockerOperator,Administrator")]
     public async Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken)
     {
         var (userId, role) = User.GetRequiredIdentity();
