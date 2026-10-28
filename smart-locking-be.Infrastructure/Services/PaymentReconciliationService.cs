@@ -171,8 +171,11 @@ public sealed class PaymentReconciliationService(ApplicationDbContext db, IPayme
                 if (kind == "Subscription") await subscriptions.ActivateSubscriptionAsync(confirmed, cancellationToken);
                 else await overduePayments.TryCompleteAsync(confirmed, cancellationToken);
                 PaymentLookupResponse current = await PaymentAsync(actor, kind, paymentId, cancellationToken);
-                status = current.Status == "Success" ? "Resolved" : "Conflict";
-                message = current.Status == "Success" ? "Gateway payment verified and recorded. Benefits were applied once."
+                bool settled = current.Status == "Success" && (kind == "Subscription" ||
+                    await db.PaymentTransactions.AsNoTracking().AnyAsync(row => row.Id == paymentId &&
+                        row.OverdueCharge.Status == OverdueChargeStatus.Paid && row.FailureReason == null, cancellationToken));
+                status = settled ? "Resolved" : "Conflict";
+                message = settled ? "Gateway payment verified and recorded. Benefits were applied once."
                     : "The gateway confirms payment but the internal record conflicts. An administrator must investigate; do not pay again.";
             }
             else if (matching && information.Status is "CANCELLED" or "EXPIRED" && information.AmountPaid == 0 && information.Transactions.Count == 0)
@@ -225,10 +228,34 @@ public sealed class PaymentReconciliationService(ApplicationDbContext db, IPayme
         }
         else
         {
-            var row = await db.PaymentTransactions.SingleAsync(p => p.Id == payment.Id, cancellationToken);
-            if (db.Database.IsRelational()) await db.Entry(row).ReloadAsync(cancellationToken);
+            var row = await db.PaymentTransactions.Include(p => p.OverdueCharge).ThenInclude(charge => charge.Parcel)
+                .SingleAsync(p => p.Id == payment.Id, cancellationToken);
+            if (db.Database.IsRelational())
+            {
+                await db.Entry(row).ReloadAsync(cancellationToken);
+                await db.Entry(row.OverdueCharge).ReloadAsync(cancellationToken);
+            }
             if (row.Status == PaymentTransactionStatus.Pending)
-            { row.Status = PaymentTransactionStatus.Cancelled; row.CompletedAt = clock.GetUtcNow(); row.FailureReason = "Gateway confirmed this order ended without payment."; }
+            {
+                DateTimeOffset now = clock.GetUtcNow();
+                row.Status = PaymentTransactionStatus.Cancelled;
+                row.CompletedAt = now;
+                row.FailureReason = "Gateway confirmed this order ended without payment.";
+                // Match checkout cancellation semantics before releasing the shared charge lock.
+                // Never change the amount frozen by a different live replacement order.
+                if (row.OverdueCharge.Status == OverdueChargeStatus.Outstanding &&
+                    !await db.PaymentTransactions.AnyAsync(other => other.OverdueChargeId == row.OverdueChargeId &&
+                        other.Id != row.Id && other.Status == PaymentTransactionStatus.Pending, cancellationToken))
+                {
+                    OverdueCharge charge = row.OverdueCharge;
+                    DateTimeOffset cutoff = now > charge.Parcel.MaxStorageUntil ? charge.Parcel.MaxStorageUntil : now;
+                    cutoff = cutoff < charge.ChargeStartAt ? charge.ChargeStartAt : cutoff;
+                    int billableHours = (int)Math.Ceiling((cutoff - charge.ChargeStartAt).TotalHours);
+                    charge.Amount = billableHours * charge.RatePerHourSnapshot;
+                    charge.CalculatedThrough = cutoff;
+                    charge.UpdatedAt = now;
+                }
+            }
         }
         await db.SaveChangesAsync(cancellationToken);
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
