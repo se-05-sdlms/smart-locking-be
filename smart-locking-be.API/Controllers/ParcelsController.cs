@@ -31,7 +31,7 @@ public sealed class ParcelsController(
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Roles = "Resident,LockerOperator")]
+    [Authorize(Roles = "Resident,LockerOperator,Administrator")]
     public async Task<IActionResult> GetParcel(Guid id, CancellationToken cancellationToken)
     {
         var (userId, role) = User.GetRequiredIdentity();
@@ -39,7 +39,7 @@ public sealed class ParcelsController(
     }
 
     [HttpGet("{id:guid}/history")]
-    [Authorize(Roles = "Resident,LockerOperator")]
+    [Authorize(Roles = "Resident,LockerOperator,Administrator")]
     public async Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken)
     {
         var (userId, role) = User.GetRequiredIdentity();
@@ -74,11 +74,23 @@ public sealed class ParcelsController(
         };
     }
 
+    // Chỉ đọc kết quả đã đồng bộ từ ESP; không coi nút xác nhận là bằng chứng cửa đã mở/đóng.
+    [HttpPost("{id:guid}/confirm-pickup")]
+    [Authorize(Roles = "Resident")]
+    public async Task<IActionResult> ConfirmPickup(Guid id, [FromBody] ConfirmPickupRequest request, CancellationToken cancellationToken)
+    {
+        var response = await parcelPickupService.ConfirmPickupAsync(User.GetRequiredUserId(), request.AccessEventId, cancellationToken);
+        if (response.ParcelId != id)
+            throw new BadRequestException(ParcelErrorCodes.InvalidAccessEvent, "Lượt mở ngăn không thuộc kiện hàng được yêu cầu.");
+        return Ok(response);
+    }
+
     [HttpPost("{id:guid}:transferToCollectionPoint")]
     [Authorize(Roles = "Administrator,LockerOperator")]
     public async Task<IActionResult> TransferToCollectionPoint(Guid id, CancellationToken cancellationToken)
     {
         var (userId, role) = User.GetRequiredIdentity();
-        return Ok(await parcelService.TransferOverdueAsync(userId, role, id, cancellationToken));
+        var response = await parcelService.TransferOverdueAsync(userId, role, id, cancellationToken);
+        return response.ResetStatus == "Pending" ? Accepted(response) : Ok(response);
     }
 }

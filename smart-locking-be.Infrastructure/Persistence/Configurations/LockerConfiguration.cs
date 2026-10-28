@@ -8,6 +8,10 @@ public sealed class LockerConfiguration() : BaseConfiguration<Locker>(entity => 
 {
     protected override void ConfigureEntity(EntityTypeBuilder<Locker> builder)
     {
+        Varchar(builder.Property(x => x.ServiceArea)).HasMaxLength(100);
+        builder.HasOne<smart_locking_be.Domain.Entities.User>().WithMany().HasForeignKey(x => x.LocationConfirmedByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.ToTable(t => t.HasCheckConstraint("CK_Locker_Coordinates", "(\"Latitude\" IS NULL AND \"Longitude\" IS NULL) OR (\"Latitude\" BETWEEN -90 AND 90 AND \"Longitude\" BETWEEN -180 AND 180)"));
         Varchar(builder.Property(entity => entity.Code)).IsRequired().HasMaxLength(50);
         Varchar(builder.Property(entity => entity.Address)).IsRequired().HasMaxLength(500);
         Varchar(builder.Property(entity => entity.RecoveryAddress)).IsRequired().HasMaxLength(500);

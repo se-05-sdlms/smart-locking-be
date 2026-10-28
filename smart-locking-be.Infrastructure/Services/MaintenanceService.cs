@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using smart_locking_be.Application.DTOs.Common;
+using smart_locking_be.Application.DTOs.Notifications;
 using smart_locking_be.Application.DTOs.Operations;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -8,7 +10,8 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvider timeProvider) : IMaintenanceService
+public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvider timeProvider,
+    IOperationsRealtimeNotifier? realtimeNotifier = null) : IMaintenanceService
 {
     public async Task<PagedResult<MaintenanceResponse>> GetAsync(
         Guid userId, string role, Guid? lockerId = null, Guid? compartmentId = null,
@@ -16,6 +19,12 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         DateTimeOffset? from = null, DateTimeOffset? to = null,
         CancellationToken cancellationToken = default, int pageNumber = 1, int pageSize = 20)
     {
+        if (status.HasValue && !Enum.IsDefined(status.Value))
+            throw BadRequestException.For("status", "Maintenance status is invalid.");
+        if (priority.HasValue && !Enum.IsDefined(priority.Value))
+            throw BadRequestException.For("priority", "Maintenance priority is invalid.");
+        if (from.HasValue && to.HasValue && to <= from)
+            throw BadRequestException.For("to", "The end must be after the start.");
         IQueryable<MaintenanceRequest> query = Scope(userId, role)
             .Include(item => item.Locker)
             .Include(item => item.LockerCompartment);
@@ -54,6 +63,8 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
     public async Task<MaintenanceResponse> CreateAsync(Guid userId, string role, CreateMaintenanceRequest request, CancellationToken cancellationToken = default)
     {
         await EnsureAccessAsync(userId, role, request.LockerId, cancellationToken);
+        if (!Enum.IsDefined(request.Priority))
+            throw BadRequestException.For("priority", "Maintenance priority is invalid.");
         if (string.IsNullOrWhiteSpace(request.Description))
             throw BadRequestException.For("description", "Maintenance description is required.");
         if (request.CompartmentId.HasValue && !await dbContext.LockerCompartments.AnyAsync(
@@ -65,6 +76,12 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
             item.LockerCompartmentId == request.CompartmentId, cancellationToken))
             throw new BadRequestException(MaintenanceErrorCodes.InvalidRequest, "Incident does not match the locker or compartment under maintenance.");
 
+        await using IDbContextTransaction? transaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        await LockerAvailability.LockScopeAsync(dbContext, request.LockerId, cancellationToken);
+        await EnsureAccessAsync(userId, role, request.LockerId, cancellationToken);
+        if (!await dbContext.Lockers.AnyAsync(item => item.Id == request.LockerId, cancellationToken))
+            throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
         DateTimeOffset now = timeProvider.GetUtcNow();
         MaintenanceRequest entity = new()
         {
@@ -90,17 +107,35 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         dbContext.MaintenanceRequests.Add(entity);
         AddAudit(userId, "Maintenance.Created", entity.Id, entity.Description, now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        await PublishChangedAsync(entity, now, cancellationToken);
         return await LoadAsync(entity.Id, cancellationToken);
     }
 
     public async Task<MaintenanceResponse> UpdateAsync(Guid userId, string role, Guid id, UpdateMaintenanceRequest request, CancellationToken cancellationToken = default)
     {
+        if (!Enum.IsDefined(request.Status))
+            throw BadRequestException.For("status", "Maintenance status is invalid.");
+        // Read only the scope first, then acquire the parent lock before loading mutable state.
+        Guid lockerId = await Scope(userId, role).Where(item => item.Id == id)
+            .Select(item => (Guid?)item.LockerId).SingleOrDefaultAsync(cancellationToken)
+            ?? throw new NotFoundException(MaintenanceErrorCodes.NotFound, "Maintenance request not found.");
+        await using IDbContextTransaction? transaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        await LockerAvailability.LockScopeAsync(dbContext, lockerId, cancellationToken);
         MaintenanceRequest entity = await dbContext.MaintenanceRequests
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new NotFoundException(MaintenanceErrorCodes.NotFound, "Maintenance request not found.");
+        if (dbContext.Database.IsRelational()) await dbContext.Entry(entity).ReloadAsync(cancellationToken);
         await EnsureAccessAsync(userId, role, entity.LockerId, cancellationToken);
+        if (entity.Status == request.Status)
+            return await LoadAsync(id, cancellationToken);
+        if (entity.Status is MaintenanceStatus.Closed or MaintenanceStatus.Cancelled || request.Status == MaintenanceStatus.Open)
+            throw new ConflictException(MaintenanceErrorCodes.InvalidRequest, "The maintenance status transition is not allowed.");
         if (request.Status == MaintenanceStatus.Closed && string.IsNullOrWhiteSpace(request.ResolutionSummary))
             throw BadRequestException.For("result", "Maintenance result is required when closing a request.");
+        if (request.Status == MaintenanceStatus.Cancelled && string.IsNullOrWhiteSpace(request.Notes))
+            throw BadRequestException.For("notes", "A cancellation reason is required.");
         DateTimeOffset now = timeProvider.GetUtcNow();
         MaintenanceStatus previous = entity.Status;
         entity.Status = request.Status;
@@ -120,22 +155,28 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         });
         AddAudit(userId, "Maintenance.StatusChanged", id, $"{previous} -> {request.Status}", now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        await PublishChangedAsync(entity, now, cancellationToken);
         return await LoadAsync(id, cancellationToken);
     }
 
-    private IQueryable<MaintenanceRequest> Scope(Guid userId, string role) => role switch
+    private IQueryable<MaintenanceRequest> Scope(Guid userId, string role)
     {
-        nameof(UserRole.Administrator) => dbContext.MaintenanceRequests,
-        nameof(UserRole.LockerOperator) => dbContext.MaintenanceRequests.Where(item =>
-            dbContext.OperatorAssignments.Any(assignment =>
-                assignment.OperatorUserId == userId && assignment.LockerId == item.LockerId && assignment.RevokedAt == null)),
-        _ => throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.")
-    };
+        var assignments = dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow());
+        return role switch
+        {
+            nameof(UserRole.Administrator) => dbContext.MaintenanceRequests,
+            nameof(UserRole.LockerOperator) => dbContext.MaintenanceRequests.Where(item =>
+                assignments.Any(assignment =>
+                    assignment.OperatorUserId == userId && assignment.LockerId == item.LockerId && assignment.RevokedAt == null)),
+            _ => throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.")
+        };
+    }
 
     private async Task EnsureAccessAsync(Guid userId, string role, Guid lockerId, CancellationToken cancellationToken)
     {
         if (role == nameof(UserRole.Administrator)) return;
-        if (role != nameof(UserRole.LockerOperator) || !await dbContext.OperatorAssignments.AnyAsync(item =>
+        if (role != nameof(UserRole.LockerOperator) || !await dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow()).AnyAsync(item =>
             item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
             cancellationToken))
             throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.");
@@ -153,6 +194,14 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
             Details = details,
             OccurredAt = now
         });
+
+    private async Task PublishChangedAsync(MaintenanceRequest entity, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (realtimeNotifier is not null)
+            await realtimeNotifier.PublishToLockerAsync(entity.LockerId,
+                new RealtimeEvent("MaintenanceChanged", entity.Id, entity.LockerId, entity.Status.ToString(),
+                    "Maintenance changed; refresh locker and compartment availability.", now), cancellationToken);
+    }
 
     private async Task<MaintenanceResponse> LoadAsync(Guid id, CancellationToken cancellationToken) =>
         Map(await dbContext.MaintenanceRequests.Include(item => item.Locker)

@@ -6,6 +6,7 @@ using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
+using smart_locking_be.Infrastructure.Services;
 using System.Text.RegularExpressions;
 
 namespace smart_locking_be.Infrastructure.Auth;
@@ -23,9 +24,8 @@ public sealed class AuthService(
 
     public async Task<IReadOnlyCollection<RegistrationLockerResponse>> GetRegistrationLockersAsync(
         CancellationToken cancellationToken) =>
-        await dbContext.Lockers
+        await dbContext.OperationalLockers()
             .AsNoTracking()
-            .Where(locker => locker.OperationalStatus == LockerOperationalStatus.Operational)
             .OrderBy(locker => locker.Code)
             .Select(locker => new RegistrationLockerResponse(locker.Id, locker.Code, locker.Address))
             .ToListAsync(cancellationToken);
@@ -66,11 +66,12 @@ public sealed class AuthService(
         Locker locker = await dbContext.Lockers.SingleOrDefaultAsync(
             candidate => candidate.Id == request.RegisteredLockerId,
             cancellationToken) ?? throw new NotFoundException(LockerErrorCodes.NotFound, "Registered locker not found.");
-        if (locker.OperationalStatus != LockerOperationalStatus.Operational)
+        if (!await dbContext.OperationalLockers().AnyAsync(candidate => candidate.Id == locker.Id, cancellationToken))
         {
             throw new ConflictException(LockerErrorCodes.NotOperational, "Registered locker is not operational.");
         }
 
+        // Chỉ lấy mặc định của policy đang active khi tạo resident; không ghi đè lựa chọn của resident đã có.
         DeliveryApprovalMode defaultApprovalMode = await dbContext.SystemPolicies
             .Where(policy => policy.IsActive)
             .Select(policy => (DeliveryApprovalMode?)policy.DefaultApprovalMode)
@@ -79,6 +80,10 @@ public sealed class AuthService(
         await using IDbContextTransaction? transaction = dbContext.Database.IsRelational()
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
             : null;
+
+        await LockerAvailability.LockScopeAsync(dbContext, locker.Id, cancellationToken);
+        if (!await dbContext.OperationalLockers().AnyAsync(candidate => candidate.Id == locker.Id, cancellationToken))
+            throw new ConflictException(LockerErrorCodes.NotOperational, "Registered locker is not operational.");
 
         await otpService.VerifyAndConsumeAsync(
             phoneNumber,
@@ -156,11 +161,21 @@ public sealed class AuthService(
         CancellationToken cancellationToken)
     {
         User? user = await FindUserByIdentifierAsync(request.LoginIdentifier, cancellationToken);
+        await using var loginTransaction = user is not null && dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (loginTransaction is not null)
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"User\" WHERE \"Id\" = {user!.Id} FOR UPDATE", cancellationToken);
+            await dbContext.Entry(user!).ReloadAsync(cancellationToken);
+            string identifier = request.LoginIdentifier.Trim();
+            if (user!.PhoneNumber != identifier && user.Email != NormalizeEmail(identifier)) user = null;
+        }
         if (user is null || user.Status != UserStatus.Active ||
             !passwordHashService.VerifyPassword(request.Password, user.PasswordHash))
         {
             AddAuthAudit("Auth.LoginFailed", user?.Id, AuditLogResult.Failed, ipAddress);
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (loginTransaction is not null) await loginTransaction.CommitAsync(cancellationToken);
             throw new UnauthorizedException(AuthErrorCodes.InvalidCredentials, InvalidCredentialsMessage);
         }
 
@@ -171,6 +186,7 @@ public sealed class AuthService(
         (AuthTokenResponse response, _) = IssueTokens(user, ipAddress, now);
         AddAuthAudit("Auth.LoginSucceeded", user.Id, AuditLogResult.Succeeded, ipAddress);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (loginTransaction is not null) await loginTransaction.CommitAsync(cancellationToken);
 
         return response;
     }
@@ -189,10 +205,19 @@ public sealed class AuthService(
                 refreshToken.RevokedAt == null &&
                 refreshToken.ExpiresAt > now, cancellationToken);
 
-        if (token is null || token.User.Status != UserStatus.Active)
+        await using var refreshTransaction = token is not null && dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (refreshTransaction is not null)
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"User\" WHERE \"Id\" = {token!.UserId} FOR UPDATE", cancellationToken);
+            await dbContext.Entry(token!).ReloadAsync(cancellationToken);
+            await dbContext.Entry(token!.User).ReloadAsync(cancellationToken);
+        }
+        if (token is null || token.User.Status != UserStatus.Active || token.RevokedAt is not null || token.ExpiresAt <= DateTimeOffset.UtcNow)
         {
             AddAuthAudit("Auth.InvalidRefreshToken", token?.UserId, AuditLogResult.Failed, ipAddress);
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (refreshTransaction is not null) await refreshTransaction.CommitAsync(cancellationToken);
             throw new UnauthorizedException(AuthErrorCodes.InvalidRefreshToken, "Invalid refresh token.");
         }
 
@@ -202,6 +227,7 @@ public sealed class AuthService(
         token.ReplacedByTokenId = replacementToken.Id;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (refreshTransaction is not null) await refreshTransaction.CommitAsync(cancellationToken);
 
         return response;
     }

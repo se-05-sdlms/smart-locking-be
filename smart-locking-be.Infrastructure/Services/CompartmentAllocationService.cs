@@ -17,19 +17,21 @@ public sealed class CompartmentAllocationService(
         Guid? deliveryRequestId,
         Guid? returnRequestId,
         DateTimeOffset expiresAt,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool verifyDoorOnDevice = false)
     {
         ValidateOperation(deliveryRequestId, returnRequestId);
         DateTimeOffset now = timeProvider.GetUtcNow();
-        await using IDbContextTransaction? transaction = dbContext.Database.IsRelational()
-            ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+        await using IDbContextTransaction? transaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken)
             : null;
+        await LockerAvailability.LockScopeAsync(dbContext, lockerId, cancellationToken);
 
-        LockerCompartment? compartment = await dbContext.LockerCompartments
+        LockerCompartment? compartment = await dbContext.OperationalCompartments()
             .Where(item => item.LockerId == lockerId &&
                            item.Locker.OperationalStatus == LockerOperationalStatus.Operational &&
                            item.OperationalStatus == LockerCompartmentOperationalStatus.Operational &&
-                           item.DoorStatus == DoorStatus.Closed)
+                           (verifyDoorOnDevice || item.DoorStatus == DoorStatus.Closed))
             .Where(item => !dbContext.CompartmentReservations.Any(reservation =>
                 reservation.LockerCompartmentId == item.Id &&
                 reservation.ReleasedAt == null &&

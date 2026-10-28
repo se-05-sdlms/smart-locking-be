@@ -9,6 +9,7 @@ using smart_locking_be.Infrastructure.Options;
 using smart_locking_be.Infrastructure.Persistence;
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace smart_locking_be.Infrastructure.Services;
 
@@ -32,6 +33,10 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
             ?? throw new NotFoundException(PaymentErrorCodes.NotFound, "Overdue charge not found.");
         if (charge.Status != OverdueChargeStatus.Outstanding)
             throw new ConflictException(PaymentErrorCodes.InvalidRequest, "Overdue charge is already paid.");
+        if (await db.PaymentTransactions.AnyAsync(item => item.OverdueChargeId == chargeId &&
+            item.Status == PaymentTransactionStatus.Success, cancellationToken))
+            throw new ConflictException(PaymentErrorCodes.InvalidRequest,
+                "A received payment requires reconciliation. Do not create another payment order.");
         if (charge.Currency != "VND" || charge.Amount <= 0 || charge.Amount > int.MaxValue ||
             decimal.Truncate(charge.Amount) != charge.Amount)
             throw new BadRequestException(PaymentErrorCodes.InvalidRequest, "PayOS requires a positive whole VND amount.");
@@ -145,30 +150,44 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
             .Include(item => item.OverdueCharge).ThenInclude(item => item.Parcel)
                 .ThenInclude(item => item.DeliveryRequest).ThenInclude(item => item.ResidentProfile)
             .SingleAsync(item => item.ExternalOrderCode == orderCode, cancellationToken);
+        if (db.Database.IsRelational())
+        {
+            await db.Entry(payment).ReloadAsync(cancellationToken);
+            await db.Entry(payment.OverdueCharge).ReloadAsync(cancellationToken);
+        }
         if (payment.Amount != webhook.Amount || payment.Currency != webhook.Currency ||
             string.IsNullOrWhiteSpace(webhook.Reference) || webhook.Reference.Length > 150)
         {
             logger.LogWarning("Ignoring PayOS webhook with mismatched payment data for order {OrderCode}.", orderCode);
             return true;
         }
-        if (payment.Status != PaymentTransactionStatus.Pending) return true;
+        bool succeeded = webhook.Code == "00";
+        if (payment.Status == PaymentTransactionStatus.Success ||
+            (!succeeded && payment.Status != PaymentTransactionStatus.Pending)) return true;
 
         DateTimeOffset now = clock.GetUtcNow();
-        bool succeeded = webhook.Code == "00";
+        bool settlementConflict = succeeded && (payment.OverdueCharge.Status != OverdueChargeStatus.Outstanding ||
+            payment.Amount != payment.OverdueCharge.Amount || payment.Currency != payment.OverdueCharge.Currency ||
+            await db.PaymentTransactions.AnyAsync(other => other.OverdueChargeId == chargeId && other.Id != payment.Id &&
+                (other.Status == PaymentTransactionStatus.Pending || other.Status == PaymentTransactionStatus.Success), cancellationToken));
+        // A verified debit is a financial fact even when it cannot safely settle the shared
+        // charge (late cancelled order, replacement order, amount change or second debit).
         payment.Status = succeeded ? PaymentTransactionStatus.Success : PaymentTransactionStatus.Failed;
         payment.CompletedAt = now;
         payment.ExternalTransactionId = webhook.Reference;
-        if (succeeded)
+        payment.FailureReason = settlementConflict ? "Verified payment conflicts with the current charge or another order. Reconciliation required." : null;
+        if (succeeded && !settlementConflict)
         {
             payment.OverdueCharge.Status = OverdueChargeStatus.Paid;
             payment.OverdueCharge.PaidAt = now;
             payment.OverdueCharge.UpdatedAt = now;
         }
+        if (settlementConflict) await RecordConflictAsync(payment, webhook, now, cancellationToken);
         db.AuditLogs.Add(new AuditLog
         {
             Id = Guid.NewGuid(),
             ActorUserId = payment.OverdueCharge.Parcel.DeliveryRequest.ResidentProfile!.UserId,
-            Action = succeeded ? "OverduePayment.Succeeded" : "OverduePayment.Failed",
+            Action = settlementConflict ? "OverduePayment.SettlementConflict" : succeeded ? "OverduePayment.Succeeded" : "OverduePayment.Failed",
             EntityType = nameof(PaymentTransaction),
             EntityId = payment.Id,
             Result = succeeded ? AuditLogResult.Succeeded : AuditLogResult.Failed,
@@ -181,10 +200,11 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
             UserId = payment.OverdueCharge.Parcel.DeliveryRequest.ResidentProfile.UserId,
             PaymentTransactionId = payment.Id,
             ParcelId = payment.OverdueCharge.ParcelId,
-            Type = succeeded ? "OverduePaymentSucceeded" : "OverduePaymentFailed",
+            Type = settlementConflict ? "OverduePaymentConflict" : succeeded ? "OverduePaymentSucceeded" : "OverduePaymentFailed",
             Channel = NotificationChannel.InApp,
-            Title = succeeded ? "Overdue fee paid" : "Overdue fee payment failed",
-            Message = succeeded ? "Your overdue storage fee has been paid. You can collect your parcel."
+            Title = settlementConflict ? "Overdue payment needs review" : succeeded ? "Overdue fee paid" : "Overdue fee payment failed",
+            Message = settlementConflict ? "Your payment was received but conflicts with another order or the current charge. Do not pay again; contact support for reconciliation."
+                : succeeded ? "Your overdue storage fee has been paid. You can collect your parcel."
                 : "Your overdue storage fee payment failed. Please try again.",
             DeliveryStatus = NotificationDeliveryStatus.Sent,
             SentAt = now,
@@ -193,6 +213,49 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
         await db.SaveChangesAsync(cancellationToken);
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         return true;
+    }
+
+    private async Task RecordConflictAsync(PaymentTransaction payment, PayOSWebhookData webhook, DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        // All financial paths serialize on the charge, including reconciliation case creation.
+        PaymentReconciliation? item = await db.Set<PaymentReconciliation>().Include(row => row.Events)
+            .SingleOrDefaultAsync(row => row.PaymentTransactionId == payment.Id, cancellationToken);
+        if (item is not null && db.Database.IsRelational())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"PaymentReconciliation\" WHERE \"Id\" = {item.Id} FOR UPDATE", cancellationToken);
+            await db.Entry(item).ReloadAsync(cancellationToken);
+        }
+        if (item is null)
+        {
+            Guid id = Guid.NewGuid();
+            item = new PaymentReconciliation
+            {
+                Id = id,
+                Reference = $"REC-{id:N}",
+                PaymentTransactionId = payment.Id,
+                ResidentUserId = payment.OverdueCharge.Parcel.DeliveryRequest.ResidentProfile!.UserId,
+                Reason = "A verified payment could not safely settle the overdue charge.",
+                CreatedAt = now
+            };
+            db.Set<PaymentReconciliation>().Add(item);
+        }
+        item.Status = "Conflict";
+        item.Response = "Payment received. The current charge or another payment order conflicts; keep this reference and do not pay again while an administrator investigates.";
+        item.ProviderStatus = "PAID";
+        item.ProviderCheckedAt = now;
+        item.UpdatedAt = now;
+        item.Events.Add(new PaymentReconciliationEvent
+        {
+            Id = Guid.NewGuid(),
+            PaymentReconciliationId = item.Id,
+            ActorUserId = item.ResidentUserId,
+            Action = "PaymentConflict",
+            Status = item.Status,
+            Message = item.Response,
+            ProviderEvidence = JsonSerializer.Serialize(webhook),
+            CreatedAt = now
+        });
     }
 
     private static bool IsHttpUrl(string value) => Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)

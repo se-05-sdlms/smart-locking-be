@@ -29,11 +29,14 @@ public static class DependencyInjection
         services.AddScoped<IService, Service>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IOtpService, OtpService>();
+        services.AddHttpClient<ISmsSender, ConfiguredSmsSender>(client => client.Timeout = TimeSpan.FromSeconds(10))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddScoped<IEmailSender, SmtpEmailSender>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IPasswordHashService, Pbkdf2PasswordHashService>();
         services.AddScoped<ITokenHashService, Sha256TokenHashService>();
         services.AddScoped<IResidentService, ResidentService>();
+        services.AddScoped<IResidentAccountChangeService, ResidentAccountChangeService>();
         services.Configure<Options.PayOSOptions>(options =>
         {
             options.ClientId = configuration["PayOS:ClientId"] ?? string.Empty;
@@ -51,9 +54,20 @@ public static class DependencyInjection
                 !bool.TryParse(configuration[$"{ResidentSubscriptionOptions.SectionName}:EnforceParcelLimits"], out bool enforce) || enforce);
         services.AddScoped<IParcelQuotaService, ParcelQuotaService>();
         services.AddScoped<IOverduePaymentService, OverduePaymentService>();
+        services.AddScoped<IPaymentReconciliationService, PaymentReconciliationService>();
         services.AddScoped<IPaymentGatewayService, PayOSPaymentGatewayService>();
         services.AddScoped<ILockerService, LockerService>();
+        services.AddScoped<ILockerCommissioningService, LockerCommissioningService>();
+        services.AddOptions<LockerCommissioningOptions>().Bind(configuration.GetSection(LockerCommissioningOptions.SectionName));
         services.AddScoped<ILockerAccessService, LockerAccessService>();
+        services.AddScoped<ICompartmentResetStore, CompartmentResetStore>();
+        services.AddScoped<ICompartmentResetDispatcher, MqttLockerCommandDispatcher>();
+        services.AddScoped<IOfflinePinService, OfflinePinService>();
+        services.AddScoped<OfflinePinProvisioner>();
+        services.AddHostedService<OfflinePinNotificationWorker>();
+        services.AddSingleton<IBluetoothMessageCodec, BluetoothProtocol>();
+        services.AddSingleton<ICompartmentResetProtocol, BluetoothProtocol>();
+        services.AddScoped<IBluetoothWorkflowStore, BluetoothWorkflowStore>();
         services.AddScoped<ILockerCommandDispatcher, MqttLockerCommandDispatcher>();
         services.AddScoped<ICompartmentAllocationService, CompartmentAllocationService>();
         services.AddScoped<IDeliveryRequestService, DeliveryRequestService>();
@@ -126,7 +140,11 @@ public static class DependencyInjection
 
         services.AddScoped<IReportService, ReportService>();
 
+        services.AddScoped<IOperatorSupportService, OperatorSupportService>();
+        services.AddScoped<IOperatorTaskService, OperatorTaskService>();
         services.AddScoped<ISystemPolicyService, SystemPolicyService>();
+        services.AddScoped<IOperatorCoverageService, OperatorCoverageService>();
+        services.AddHostedService<OperatorCoverageWorker>();
 
         services.AddHostedService<MqttLockerListenerService>();
         services.AddHostedService<DoorOpenAlertWorker>();

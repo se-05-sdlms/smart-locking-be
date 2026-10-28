@@ -18,36 +18,18 @@ public sealed class ParcelPickupService(
         Guid parcelId,
         string? ipAddress,
         string? deviceContext,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, LockerAccessMethod accessMethod = LockerAccessMethod.RemoteApp)
     {
-        Parcel parcel = await dbContext.Parcels
-            .Include(item => item.OverdueCharge)
-            .Include(item => item.DeliveryRequest).ThenInclude(request => request.ResidentProfile)
-            .Include(item => item.DeliveryRequest).ThenInclude(request => request.SystemPolicy)
-            .Include(item => item.DeliveryRequest).ThenInclude(request => request.Locker)
-            .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
-            ?? throw new NotFoundException(ParcelErrorCodes.NotFound, "Parcel not found.");
-
-        if (parcel.DeliveryRequest.ResidentProfile?.UserId != residentUserId)
+        Parcel parcel = await ParcelRetrievalEligibility.LoadAsync(dbContext, residentUserId, parcelId, timeProvider.GetUtcNow(), cancellationToken);
+        bool allowed = accessMethod == LockerAccessMethod.Bluetooth
+            ? await dbContext.SystemPolicies.AnyAsync(x => x.IsActive && x.EnableBluetoothUnlock && x.EffectiveFrom <= timeProvider.GetUtcNow() &&
+                (!x.EffectiveTo.HasValue || x.EffectiveTo > timeProvider.GetUtcNow()), cancellationToken)
+            : parcel.DeliveryRequest.SystemPolicy.EnableRemoteUnlock;
+        if (!allowed)
         {
-            throw new ForbiddenException(ParcelErrorCodes.AccessDenied, "You cannot open this parcel's compartment.");
-        }
-        if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
-        {
-            throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel is not available for pickup.");
-        }
-        if (timeProvider.GetUtcNow() >= parcel.MaxStorageUntil)
-        {
-            throw new ConflictException(ParcelErrorCodes.StorageExpired,
-                $"Parcel has exceeded its maximum storage period. Contact the collection point at {parcel.DeliveryRequest.Locker.RecoveryAddress}.");
-        }
-        if (parcel.OverdueCharge?.Status == OverdueChargeStatus.Outstanding)
-        {
-            throw new ConflictException(ParcelErrorCodes.PaymentRequired, "Pay the overdue charge before collecting this parcel.");
-        }
-        if (!parcel.DeliveryRequest.SystemPolicy.EnableRemoteUnlock)
-        {
-            throw new ConflictException(ParcelErrorCodes.RemoteUnlockDisabled, "Current policy does not allow remote locker unlock.");
+            throw accessMethod == LockerAccessMethod.Bluetooth
+                ? new ConflictException(BluetoothErrorCodes.Disabled, "Current policy does not allow Bluetooth unlock.")
+                : new ConflictException(ParcelErrorCodes.RemoteUnlockDisabled, "Current policy does not allow remote locker unlock.");
         }
         if (!parcel.DeliveryRequest.AllocatedCompartmentId.HasValue)
         {
@@ -62,7 +44,7 @@ public sealed class ParcelPickupService(
             parcel.Id,
             null,
             LockerAccessType.ResidentPickup,
-            LockerAccessMethod.RemoteApp,
+            accessMethod,
             ipAddress,
             deviceContext), cancellationToken);
 
@@ -71,10 +53,11 @@ public sealed class ParcelPickupService(
             access.AccessEventId,
             access.Result,
             access.FailureReason,
-            access.OccurredAt);
+            access.OccurredAt, access.Bluetooth);
     }
 
     public async Task<PickupConfirmationResponse> ConfirmPickupAsync(
+        Guid residentUserId,
         Guid lockerAccessEventId,
         CancellationToken cancellationToken = default)
     {
@@ -89,7 +72,12 @@ public sealed class ParcelPickupService(
         {
             throw new ConflictException(ParcelErrorCodes.InvalidAccessEvent, "Unlock event is invalid for pickup confirmation.");
         }
+        if (accessEvent.UserId != residentUserId)
+        {
+            throw new ForbiddenException(ParcelErrorCodes.AccessDenied, "Bạn không có quyền xác nhận lượt lấy hàng này.");
+        }
 
+        await using var transaction = await ParcelTransitionLock.AcquireAsync(dbContext, accessEvent.ParcelId.Value, cancellationToken);
         Parcel parcel = await dbContext.Parcels
             .Include(item => item.DeliveryRequest)
             .SingleOrDefaultAsync(item => item.Id == accessEvent.ParcelId.Value, cancellationToken)
@@ -103,29 +91,7 @@ public sealed class ParcelPickupService(
         {
             return new PickupConfirmationResponse(parcel.Id, parcel.Status, parcel.RetrievedAt.Value);
         }
-        if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))
-        {
-            throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel cannot be confirmed as picked up in its current state.");
-        }
-
-        DateTimeOffset now = timeProvider.GetUtcNow();
-        ParcelStatus previousStatus = parcel.Status;
-        parcel.Status = ParcelStatus.Retrieved;
-        parcel.RetrievedAt = now;
-        parcel.UpdatedAt = now;
-        parcel.DeliveryRequest.CompartmentReleasedAt = now;
-        parcel.DeliveryRequest.UpdatedAt = now;
-        dbContext.ParcelStatusHistories.Add(new ParcelStatusHistory
-        {
-            Id = Guid.NewGuid(),
-            ParcelId = parcel.Id,
-            FromStatus = previousStatus,
-            ToStatus = ParcelStatus.Retrieved,
-            Reason = "Resident collected the parcel and closed the compartment door.",
-            ChangedByUserId = accessEvent.UserId,
-            ChangedAt = now,
-        });
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return new PickupConfirmationResponse(parcel.Id, parcel.Status, now);
+        throw new ConflictException(ParcelErrorCodes.InvalidState,
+            "Chưa có nhật ký hoàn tất nhận hàng từ ESP. Cần mở, lấy hàng và đóng cửa rồi đồng bộ kết quả.");
     }
 }

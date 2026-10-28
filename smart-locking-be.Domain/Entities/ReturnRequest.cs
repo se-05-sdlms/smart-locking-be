@@ -7,6 +7,8 @@ namespace smart_locking_be.Domain.Entities;
 /// </summary>
 public sealed class ReturnRequest
 {
+    public ReturnCancellationRequest? Cancellation { get; set; }
+
     /// <summary>
     /// Mã định danh duy nhất của yêu cầu trả hàng.
     /// </summary>

@@ -8,12 +8,17 @@ namespace smart_locking_be.Infrastructure.Persistence;
 public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<OfflineLockerPin> OfflineLockerPins => Set<OfflineLockerPin>();
+    public DbSet<OfflineLockerCursor> OfflineLockerCursors => Set<OfflineLockerCursor>();
+    public DbSet<OfflineLockerEvent> OfflineLockerEvents => Set<OfflineLockerEvent>();
     public DbSet<ResidentProfile> ResidentProfiles => Set<ResidentProfile>();
     public DbSet<ResidentBiometric> ResidentBiometrics => Set<ResidentBiometric>();
     public DbSet<OtpChallenge> OtpChallenges => Set<OtpChallenge>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Locker> Lockers => Set<Locker>();
     public DbSet<LockerCompartment> LockerCompartments => Set<LockerCompartment>();
+    public DbSet<OperatorAbsence> OperatorAbsences => Set<OperatorAbsence>();
+    public DbSet<TemporaryOperatorAssignment> TemporaryOperatorAssignments => Set<TemporaryOperatorAssignment>();
     public DbSet<OperatorAssignment> OperatorAssignments => Set<OperatorAssignment>();
     public DbSet<SystemPolicy> SystemPolicies => Set<SystemPolicy>();
     public DbSet<NotificationRule> NotificationRules => Set<NotificationRule>();
