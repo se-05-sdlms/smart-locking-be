@@ -6,6 +6,7 @@ using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
+using smart_locking_be.Infrastructure.Services;
 using System.Text.RegularExpressions;
 
 namespace smart_locking_be.Infrastructure.Auth;
@@ -23,9 +24,8 @@ public sealed class AuthService(
 
     public async Task<IReadOnlyCollection<RegistrationLockerResponse>> GetRegistrationLockersAsync(
         CancellationToken cancellationToken) =>
-        await dbContext.Lockers
+        await dbContext.OperationalLockers()
             .AsNoTracking()
-            .Where(locker => locker.OperationalStatus == LockerOperationalStatus.Operational)
             .OrderBy(locker => locker.Code)
             .Select(locker => new RegistrationLockerResponse(locker.Id, locker.Code, locker.Address))
             .ToListAsync(cancellationToken);
@@ -66,7 +66,7 @@ public sealed class AuthService(
         Locker locker = await dbContext.Lockers.SingleOrDefaultAsync(
             candidate => candidate.Id == request.RegisteredLockerId,
             cancellationToken) ?? throw new NotFoundException(LockerErrorCodes.NotFound, "Registered locker not found.");
-        if (locker.OperationalStatus != LockerOperationalStatus.Operational)
+        if (!await dbContext.OperationalLockers().AnyAsync(candidate => candidate.Id == locker.Id, cancellationToken))
         {
             throw new ConflictException(LockerErrorCodes.NotOperational, "Registered locker is not operational.");
         }
@@ -80,6 +80,10 @@ public sealed class AuthService(
         await using IDbContextTransaction? transaction = dbContext.Database.IsRelational()
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
             : null;
+
+        await LockerAvailability.LockScopeAsync(dbContext, locker.Id, cancellationToken);
+        if (!await dbContext.OperationalLockers().AnyAsync(candidate => candidate.Id == locker.Id, cancellationToken))
+            throw new ConflictException(LockerErrorCodes.NotOperational, "Registered locker is not operational.");
 
         await otpService.VerifyAndConsumeAsync(
             phoneNumber,

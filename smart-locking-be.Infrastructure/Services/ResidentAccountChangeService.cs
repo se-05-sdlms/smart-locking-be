@@ -49,7 +49,7 @@ public sealed class ResidentAccountChangeService(ApplicationDbContext db, IPassw
         Locker target = await db.Lockers.SingleOrDefaultAsync(l => l.Id == request.TargetLockerId, ct)
             ?? throw new NotFoundException(LockerErrorCodes.NotFound, "Target locker not found.");
         if (target.Id == profile.RegisteredLockerId) throw BadRequestException.For("targetLockerId", "Choose a different locker.");
-        if (target.OperationalStatus != LockerOperationalStatus.Operational)
+        if (!await db.OperationalLockers().AnyAsync(l => l.Id == target.Id, ct))
             throw new ConflictException(LockerErrorCodes.NotOperational, "Target locker is unavailable for registration.");
         ResidentAccountChange? existing = await Cases().SingleOrDefaultAsync(c => c.ResidentUserId == actorId && c.Kind == "Locker" && c.Status == "Submitted", ct);
         if (existing is not null)
@@ -205,26 +205,9 @@ public sealed class ResidentAccountChangeService(ApplicationDbContext db, IPassw
         var blockers = new List<AccountChangeBlocker>();
         DateTimeOffset now = clock.GetUtcNow();
         if (targetId == profile.RegisteredLockerId) blockers.Add(new("Locker", targetId, "Choose a different locker."));
-        if (!await db.Lockers.AsNoTracking().AnyAsync(l => l.Id == targetId && l.OperationalStatus == LockerOperationalStatus.Operational, ct))
+        if (!await db.OperationalLockers().AsNoTracking().AnyAsync(l => l.Id == targetId, ct))
             blockers.Add(new("Locker", targetId, "Target locker is unavailable for registration."));
-        var parcels = await db.Parcels.AsNoTracking().Where(p => p.DeliveryRequest.ResidentProfileId == profile.Id &&
-            (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue ||
-             (p.Status == ParcelStatus.Removed && (p.RemovedAt == null || p.RemovedByUserId == null)))).Select(p => new { p.Id, p.ParcelCode }).ToListAsync(ct);
-        blockers.AddRange(parcels.Select(p => new AccountChangeBlocker("Parcel", p.Id, $"Parcel {p.ParcelCode} must be collected or physically confirmed at the recovery address.")));
-        var deliveries = await db.DeliveryRequests.AsNoTracking().Where(d => d.ResidentProfileId == profile.Id &&
-            (d.Status == DeliveryRequestStatus.Started || d.Status == DeliveryRequestStatus.PendingApproval || d.Status == DeliveryRequestStatus.Approved ||
-             d.Status == DeliveryRequestStatus.Allocated || (d.AllocatedCompartmentId != null && d.CompartmentReleasedAt == null &&
-                (d.Parcel == null || d.Parcel.Status != ParcelStatus.Removed || d.Parcel.RemovedAt == null || d.Parcel.RemovedByUserId == null))))
-            .Select(d => d.Id).ToListAsync(ct);
-        blockers.AddRange(deliveries.Select(id => new AccountChangeBlocker("Delivery", id, "Delivery approval, allocation or compartment access has not finished.")));
-        var returns = await db.ReturnRequests.AsNoTracking().Where(r => r.ResidentProfileId == profile.Id &&
-            (r.Status == ReturnRequestStatus.Created || r.Status == ReturnRequestStatus.Allocated || r.Status == ReturnRequestStatus.Deposited ||
-             (r.AllocatedCompartmentId != null && r.CompartmentReleasedAt == null))).Select(r => r.Id).ToListAsync(ct);
-        blockers.AddRange(returns.Select(id => new AccountChangeBlocker("Return", id, "Return delivery, pickup or compartment access has not finished.")));
-        var reservations = await db.CompartmentReservations.AsNoTracking().Where(r => r.ReleasedAt == null &&
-            ((r.DeliveryRequest != null && r.DeliveryRequest.ResidentProfileId == profile.Id) ||
-             (r.ReturnRequest != null && r.ReturnRequest.ResidentProfileId == profile.Id))).Select(r => new { r.Id, r.DeliveryRequestId, r.ReturnRequestId }).ToListAsync(ct);
-        blockers.AddRange(reservations.Select(r => new AccountChangeBlocker(r.ReturnRequestId.HasValue ? "Return" : "Delivery", r.ReturnRequestId ?? r.DeliveryRequestId ?? r.Id, "A compartment reservation or access session still needs release confirmation.")));
+        blockers.AddRange(await FulfillmentBlockersAsync(profile, ct));
         var charges = await db.OverdueCharges.AsNoTracking().Where(c => c.Parcel.DeliveryRequest.ResidentProfileId == profile.Id && c.Status == OverdueChargeStatus.Outstanding && c.Amount > 0)
             .Select(c => c.ParcelId).ToListAsync(ct);
         blockers.AddRange(charges.Select(id => new AccountChangeBlocker("Parcel", id, "An overdue charge is outstanding.")));
@@ -246,11 +229,66 @@ public sealed class ResidentAccountChangeService(ApplicationDbContext db, IPassw
         return blockers;
     }
 
+    private async Task<List<AccountChangeBlocker>> FulfillmentBlockersAsync(ResidentProfile profile, CancellationToken ct)
+    {
+        var blockers = new List<AccountChangeBlocker>();
+        var parcels = await db.Parcels.AsNoTracking().Where(p => p.DeliveryRequest.ResidentProfileId == profile.Id &&
+            (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue ||
+             (p.Status == ParcelStatus.Removed && (p.RemovedAt == null || p.RemovedByUserId == null)))).Select(p => new { p.Id, p.ParcelCode }).ToListAsync(ct);
+        blockers.AddRange(parcels.Select(p => new AccountChangeBlocker("Parcel", p.Id, $"Parcel {p.ParcelCode} must be collected or physically confirmed at the recovery address.")));
+        var deliveries = await db.DeliveryRequests.AsNoTracking().Where(d => d.ResidentProfileId == profile.Id &&
+            (d.Status == DeliveryRequestStatus.Started || d.Status == DeliveryRequestStatus.PendingApproval || d.Status == DeliveryRequestStatus.Approved ||
+             d.Status == DeliveryRequestStatus.Allocated || (d.AllocatedCompartmentId != null && d.CompartmentReleasedAt == null &&
+                (d.Parcel == null || d.Parcel.Status != ParcelStatus.Removed || d.Parcel.RemovedAt == null || d.Parcel.RemovedByUserId == null))))
+            .Select(d => d.Id).ToListAsync(ct);
+        blockers.AddRange(deliveries.Select(id => new AccountChangeBlocker("Delivery", id, "Delivery approval, allocation or compartment access has not finished.")));
+        var returns = await db.ReturnRequests.AsNoTracking().Where(r => r.ResidentProfileId == profile.Id &&
+            (r.Status == ReturnRequestStatus.Created || r.Status == ReturnRequestStatus.Allocated || r.Status == ReturnRequestStatus.Deposited ||
+             (r.AllocatedCompartmentId != null && r.CompartmentReleasedAt == null) ||
+             (r.Cancellation != null && r.Cancellation.Status == "PendingVerification"))).Select(r => r.Id).ToListAsync(ct);
+        blockers.AddRange(returns.Select(id => new AccountChangeBlocker("Return", id, "Return delivery, pickup or compartment access has not finished.")));
+        var reservations = await db.CompartmentReservations.AsNoTracking().Where(r => r.ReleasedAt == null &&
+            ((r.DeliveryRequest != null && r.DeliveryRequest.ResidentProfileId == profile.Id) ||
+             (r.ReturnRequest != null && r.ReturnRequest.ResidentProfileId == profile.Id))).Select(r => new { r.Id, r.DeliveryRequestId, r.ReturnRequestId }).ToListAsync(ct);
+        blockers.AddRange(reservations.Select(r => new AccountChangeBlocker(r.ReturnRequestId.HasValue ? "Return" : "Delivery", r.ReturnRequestId ?? r.DeliveryRequestId ?? r.Id, "A compartment reservation or access session still needs release confirmation.")));
+        blockers.AddRange(await OfflineAccessBlockersAsync(profile, ct));
+        return blockers;
+    }
+
+    private async Task<List<AccountChangeBlocker>> OfflineAccessBlockersAsync(ResidentProfile profile, CancellationToken ct)
+    {
+        var blockers = new List<AccountChangeBlocker>();
+        var pins = await db.OfflineLockerPins.AsNoTracking().Where(pin => pin.ConsumedAt == null &&
+            db.Parcels.Any(parcel => parcel.Id == pin.ParcelId && parcel.DeliveryRequest.ResidentProfileId == profile.Id))
+            .Select(pin => pin.ParcelId).ToListAsync(ct);
+        blockers.AddRange(pins.Select(id => new AccountChangeBlocker("Parcel", id,
+            "An offline pickup credential still needs confirmed consumption or revocation.")));
+        // A later verified closure resolves the old session even if somebody else
+        // subsequently opens the same compartment; do not revive historical sessions.
+        var sessions = await db.LockerAccessEvents.AsNoTracking().Where(access => access.Result == LockerAccessResult.Succeeded &&
+            ((access.Parcel != null && access.Parcel.DeliveryRequest.ResidentProfileId == profile.Id) ||
+             (access.ReturnRequest != null && access.ReturnRequest.ResidentProfileId == profile.Id) ||
+             (access.DeliveryRequest != null && access.DeliveryRequest.ResidentProfileId == profile.Id)) &&
+            (access.LockerCompartment.DoorStatus != DoorStatus.Closed || access.LockerCompartment.DoorStatusObservedAt == null ||
+             access.OccurredAt >= access.LockerCompartment.DoorStatusObservedAt) &&
+            !db.LockerEvents.Any(observation => observation.LockerCompartmentId == access.LockerCompartmentId &&
+                observation.EventType == LockerEventType.DoorChanged && observation.NewValue == "Closed" && observation.OccurredAt > access.OccurredAt) &&
+            !db.OfflineLockerEvents.Any(observation => observation.Status == "Applied" && observation.ClosedAt > access.OccurredAt &&
+                observation.DeviceIdentifier == access.Locker.DeviceIdentifier && observation.HardwareChannel == access.LockerCompartment.HardwareChannel &&
+                (observation.DeliveryId == access.DeliveryRequestId || observation.DeliveryId == access.ReturnRequestId ||
+                 (access.Parcel != null && observation.DeliveryId == access.Parcel.DeliveryRequestId))))
+            .Select(access => access.Id).ToListAsync(ct);
+        blockers.AddRange(sessions.Select(id => new AccountChangeBlocker("AccessSession", id,
+            "A locker access session still needs a newer confirmed closed-door observation.")));
+        return blockers;
+    }
+
     private async Task<List<AccountChangeBlocker>> PhoneBlockersAsync(ResidentAccountChange item, User resident, CancellationToken ct)
     {
         var blockers = new List<AccountChangeBlocker>();
         if (item.PhoneVerificationExpiresAt is null || item.PhoneVerificationExpiresAt <= clock.GetUtcNow()) blockers.Add(new("PhoneVerification", item.Id, "New phone verification expired. Verify a new OTP and resubmit this request."));
         if (resident.PhoneNumber != item.OriginalPhoneNumber) blockers.Add(new("Account", item.Id, "The account phone changed after submission. Cancel and create a new request."));
+        blockers.AddRange(await FulfillmentBlockersAsync(await ProfileAsync(resident.Id, ct), ct));
         if (await db.Users.AsNoTracking().AnyAsync(u => u.Id != resident.Id && u.PhoneNumber == item.NewPhoneNumber, ct))
             blockers.Add(new("PhoneVerification", item.Id, "The new phone number is already in use."));
         return blockers;
