@@ -187,13 +187,12 @@ public sealed class ParcelService(ApplicationDbContext dbContext, IPushNotificat
         if (string.IsNullOrWhiteSpace(parcel.DeliveryRequest.Locker.RecoveryAddress))
             throw new ConflictException(ParcelErrorCodes.InvalidState, "Locker recovery address is not configured.");
 
-        // A dispatched pickup must be reconciled before an Operator can take ownership of its outcome.
-        DateTimeOffset? doorObservedAt = parcel.DeliveryRequest.AllocatedCompartment?.DoorStatusObservedAt;
-        bool doorClosed = parcel.DeliveryRequest.AllocatedCompartment?.DoorStatus == DoorStatus.Closed;
+        // A door sample is not pickup completion: OPEN telemetry can be missed and a later
+        // CLOSED sample alone must not let an Operator overwrite the unresolved pickup.
+        // Finalized pickup changes the parcel to Retrieved, which is already ineligible above.
         if (await dbContext.LockerAccessEvents.AnyAsync(item => item.ParcelId == parcel.Id &&
-            item.AccessType == LockerAccessType.ResidentPickup && item.Result == LockerAccessResult.Succeeded &&
-            (!doorClosed || !doorObservedAt.HasValue || item.OccurredAt >= doorObservedAt.Value), cancellationToken))
-            throw new ConflictException(ParcelErrorCodes.InvalidState, "A pickup unlock is awaiting door confirmation. Reconcile it before confirming transfer.");
+            item.AccessType == LockerAccessType.ResidentPickup && item.Result == LockerAccessResult.Succeeded, cancellationToken))
+            throw new ConflictException(ParcelErrorCodes.InvalidState, "A pickup unlock has not been finalized. Reconcile it before confirming transfer.");
 
         ResidentProfile resident = parcel.DeliveryRequest.ResidentProfile
             ?? throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel has no recipient resident.");
