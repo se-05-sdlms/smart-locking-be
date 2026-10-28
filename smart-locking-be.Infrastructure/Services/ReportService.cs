@@ -181,15 +181,15 @@ public sealed class ReportService(ApplicationDbContext dbContext, TimeProvider t
                 .Select(item => new { item.Id, item.LockerId, item.CreatedAt, item.OperationalStatus }).ToListAsync(ct);
             var parcels = await dbContext.Parcels.AsNoTracking()
                 .Where(item => ids.Contains(item.DeliveryRequest.LockerId) && item.DeliveryRequest.AllocatedCompartmentId != null &&
-                    item.StoredAt < observedUntil && (item.DeliveryRequest.CompartmentReleasedAt ?? item.RetrievedAt ?? item.RemovedAt ?? observedUntil) > from)
+                    item.StoredAt < observedUntil && (item.RetrievedAt ?? item.RemovedAt ?? observedUntil) > from)
                 .Select(item => new OccupancyInterval(item.DeliveryRequest.AllocatedCompartmentId!.Value, item.StoredAt,
-                    item.DeliveryRequest.CompartmentReleasedAt ?? item.RetrievedAt ?? item.RemovedAt,
+                    item.RetrievedAt ?? item.RemovedAt,
                     item.Status == ParcelStatus.Stored || item.Status == ParcelStatus.Overdue)).ToListAsync(ct);
             var returns = await dbContext.ReturnRequests.AsNoTracking()
                 .Where(item => ids.Contains(item.LockerId) && item.AllocatedCompartmentId != null && item.ResidentDepositedAt != null &&
-                    item.ResidentDepositedAt < observedUntil && (item.CompartmentReleasedAt ?? item.ShipperPickedUpAt ?? observedUntil) > from)
+                    item.ResidentDepositedAt < observedUntil && (item.ShipperPickedUpAt ?? item.CompartmentReleasedAt ?? observedUntil) > from)
                 .Select(item => new OccupancyInterval(item.AllocatedCompartmentId!.Value, item.ResidentDepositedAt!.Value,
-                    item.CompartmentReleasedAt ?? item.ShipperPickedUpAt, item.Status == ReturnRequestStatus.Deposited)).ToListAsync(ct);
+                    item.ShipperPickedUpAt ?? item.CompartmentReleasedAt, item.Status == ReturnRequestStatus.Deposited)).ToListAsync(ct);
             var history = parcels.Concat(returns).ToLookup(item => item.CompartmentId);
             // Snapshot columns are explicitly current and include deposited returns.
             var occupiedParcels = dbContext.Parcels.Where(item => ids.Contains(item.DeliveryRequest.LockerId) &&
