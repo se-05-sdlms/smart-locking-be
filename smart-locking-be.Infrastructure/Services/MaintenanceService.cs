@@ -54,6 +54,8 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
     public async Task<MaintenanceResponse> CreateAsync(Guid userId, string role, CreateMaintenanceRequest request, CancellationToken cancellationToken = default)
     {
         await EnsureAccessAsync(userId, role, request.LockerId, cancellationToken);
+        await using var transaction = await LockerCommissioningGuard.LockAsync(dbContext, request.LockerId, cancellationToken);
+        await EnsureAccessAsync(userId, role, request.LockerId, cancellationToken);
         if (string.IsNullOrWhiteSpace(request.Description))
             throw BadRequestException.For("description", "Maintenance description is required.");
         if (request.CompartmentId.HasValue && !await dbContext.LockerCompartments.AnyAsync(
@@ -90,14 +92,22 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         dbContext.MaintenanceRequests.Add(entity);
         AddAudit(userId, "Maintenance.Created", entity.Id, entity.Description, now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         return await LoadAsync(entity.Id, cancellationToken);
     }
 
     public async Task<MaintenanceResponse> UpdateAsync(Guid userId, string role, Guid id, UpdateMaintenanceRequest request, CancellationToken cancellationToken = default)
     {
+        Guid lockerId = await dbContext.MaintenanceRequests.AsNoTracking()
+            .Where(item => item.Id == id).Select(item => (Guid?)item.LockerId)
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new NotFoundException(MaintenanceErrorCodes.NotFound, "Maintenance request not found.");
+        await EnsureAccessAsync(userId, role, lockerId, cancellationToken);
+        await using var transaction = await LockerCommissioningGuard.LockAsync(dbContext, lockerId, cancellationToken);
         MaintenanceRequest entity = await dbContext.MaintenanceRequests
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new NotFoundException(MaintenanceErrorCodes.NotFound, "Maintenance request not found.");
+        if (dbContext.Database.IsRelational()) await dbContext.Entry(entity).ReloadAsync(cancellationToken);
         await EnsureAccessAsync(userId, role, entity.LockerId, cancellationToken);
         if (request.Status == MaintenanceStatus.Closed && string.IsNullOrWhiteSpace(request.ResolutionSummary))
             throw BadRequestException.For("result", "Maintenance result is required when closing a request.");
@@ -120,6 +130,7 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         });
         AddAudit(userId, "Maintenance.StatusChanged", id, $"{previous} -> {request.Status}", now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         return await LoadAsync(id, cancellationToken);
     }
 
