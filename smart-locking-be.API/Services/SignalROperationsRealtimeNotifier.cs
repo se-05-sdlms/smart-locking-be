@@ -19,14 +19,15 @@ public sealed class SignalROperationsRealtimeNotifier(
             () => hubContext.Clients.Group(OperationsHub.UserGroup(userId)).SendAsync("operationUpdated", message, cancellationToken),
             $"user:{userId}");
 
-    public async Task PublishToLockerAsync(Guid lockerId, RealtimeEvent message, CancellationToken cancellationToken = default)
-    {
-        var operators = dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow())
-            .Where(x => x.LockerId == lockerId).Select(x => x.OperatorUserId);
-        var admins = dbContext.Users.Where(x => x.Role == UserRole.Administrator && x.Status == UserStatus.Active).Select(x => x.Id);
-        var recipients = await operators.Union(admins).ToListAsync(cancellationToken);
-        foreach (Guid userId in recipients) await PublishToUserAsync(userId, message, cancellationToken);
-    }
+    public Task PublishToLockerAsync(Guid lockerId, RealtimeEvent message, CancellationToken cancellationToken = default) =>
+        PublishAsync(async () =>
+        {
+            var operators = dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow())
+                .Where(x => x.LockerId == lockerId).Select(x => x.OperatorUserId);
+            var admins = dbContext.Users.Where(x => x.Role == UserRole.Administrator && x.Status == UserStatus.Active).Select(x => x.Id);
+            var recipients = await operators.Union(admins).ToListAsync(cancellationToken);
+            foreach (Guid userId in recipients) await PublishToUserAsync(userId, message, cancellationToken);
+        }, $"locker:{lockerId}");
 
     private async Task PublishAsync(Func<Task> publish, string target)
     {
