@@ -72,7 +72,8 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
                     l.Address,
                     operatorName,
                     l.ConnectionStatus,
-                    l.OperationalStatus,
+                    l.OperationalStatus == LockerOperationalStatus.Operational && !availableLockerIds.Contains(l.Id)
+                        ? LockerOperationalStatus.OutOfService : l.OperationalStatus,
                     l.UpdatedAt
                 );
             })
@@ -100,7 +101,8 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
             .ToListAsync(cancellationToken);
 
         int totalCompartments = compartments.Count;
-        int maintenanceCompartments = compartments.Count(c => c.OperationalStatus == LockerCompartmentOperationalStatus.OutOfService);
+        int maintenanceCompartments = compartments.Count(c =>
+            c.OperationalStatus != LockerCompartmentOperationalStatus.Inactive && !availableCompartmentIds.Contains(c.Id));
         int disabledCompartments = compartments.Count(c => c.OperationalStatus == LockerCompartmentOperationalStatus.Inactive);
         int overdueCompartments = compartments.Count(c => overdueCompartmentIds.Contains(c.Id));
         int occupiedCompartments = compartments.Count(c => occupiedCompartmentIds.Contains(c.Id) && !overdueCompartmentIds.Contains(c.Id));
@@ -245,7 +247,7 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
         int operatorCount = await dbContext.Users.CountAsync(u => u.Role == UserRole.LockerOperator, cancellationToken);
 
         int totalLockers = await dbContext.Lockers.CountAsync(cancellationToken);
-        int activeLockers = await dbContext.Lockers.CountAsync(l => l.OperationalStatus == LockerOperationalStatus.Operational, cancellationToken);
+        int activeLockers = await dbContext.OperationalLockers().CountAsync(cancellationToken);
         int offlineLockers = await dbContext.Lockers.CountAsync(l => l.ConnectionStatus == LockerConnectionStatus.Offline, cancellationToken);
 
         int totalCompartments = await dbContext.LockerCompartments.CountAsync(cancellationToken);
@@ -265,8 +267,8 @@ public sealed class AdminService(ApplicationDbContext dbContext) : IAdminService
             .ToHashSet();
 
         int occupiedCompartments = occupiedCompartmentIds.Count;
-        int availableCompartments = await dbContext.LockerCompartments
-            .CountAsync(c => c.OperationalStatus == LockerCompartmentOperationalStatus.Operational && !occupiedCompartmentIds.Contains(c.Id), cancellationToken);
+        int availableCompartments = await dbContext.OperationalCompartments()
+            .CountAsync(c => !occupiedCompartmentIds.Contains(c.Id), cancellationToken);
 
         int newParcelsTodayCount = await dbContext.Parcels
             .AsNoTracking()
