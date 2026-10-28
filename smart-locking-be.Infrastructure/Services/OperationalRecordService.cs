@@ -212,12 +212,16 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
         return result;
     }
 
-    private IQueryable<Locker> ScopeLockers(Guid userId, string role) => role switch
+    private IQueryable<Locker> ScopeLockers(Guid userId, string role)
     {
-        nameof(UserRole.Administrator) => dbContext.Lockers,
-        nameof(UserRole.LockerOperator) => dbContext.Lockers.Where(locker =>
-            dbContext.OperatorAssignments.Any(assignment =>
-                assignment.OperatorUserId == userId && assignment.LockerId == locker.Id && assignment.RevokedAt == null)),
-        _ => throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.")
-    };
+        var assignments = dbContext.EffectiveOperatorAssignments(DateTimeOffset.UtcNow);
+        return role switch
+        {
+            nameof(UserRole.Administrator) => dbContext.Lockers,
+            nameof(UserRole.LockerOperator) => dbContext.Lockers.Where(locker =>
+                assignments.Any(assignment =>
+                    assignment.OperatorUserId == userId && assignment.LockerId == locker.Id && assignment.RevokedAt == null)),
+            _ => throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.")
+        };
+    }
 }

@@ -7,6 +7,11 @@ namespace smart_locking_be.Domain.Entities;
 /// </summary>
 public sealed class SystemPolicy
 {
+    public double? OperatorReplacementRadiusKm { get; set; }
+    public int? OperatorReplacementMaxLoad { get; set; }
+    public string[]? OperatorReplacementAreas { get; set; }
+    public Guid[]? OperatorReplacementEligibleUserIds { get; set; }
+
     /// <summary>
     /// Mã định danh của phiên bản chính sách.
     /// </summary>
@@ -96,6 +101,15 @@ public sealed class SystemPolicy
     /// Cho phép mở ngăn qua Bluetooth từ ứng dụng di động.
     /// </summary>
     public bool EnableBluetoothUnlock { get; set; }
+
+    public int IncidentCriticalAcknowledgeMinutes { get; set; } = 15;
+    public int IncidentCriticalResolveMinutes { get; set; } = 60;
+    public int IncidentHighAcknowledgeMinutes { get; set; } = 30;
+    public int IncidentHighResolveMinutes { get; set; } = 240;
+    public int IncidentMediumAcknowledgeMinutes { get; set; } = 120;
+    public int IncidentMediumResolveMinutes { get; set; } = 1440;
+    public int IncidentLowAcknowledgeMinutes { get; set; } = 480;
+    public int IncidentLowResolveMinutes { get; set; } = 4320;
 
     /// <summary>
     /// Thời điểm chính sách bắt đầu có hiệu lực.

@@ -22,18 +22,23 @@ public sealed class ParcelQuotaService(
 
         DateTimeOffset now = timeProvider.GetUtcNow();
         // Stacked future periods do not count yet; only the period in effect now grants capacity.
-        int? maxActiveParcels = await dbContext.ResidentSubscriptions
+        var entitlements = await dbContext.ResidentSubscriptions
             .AsNoTracking()
             .Where(item => item.ResidentProfileId == residentProfileId &&
                            item.Status == SubscriptionStatus.Active &&
                            item.StartDate <= now &&
                            item.EndDate > now)
-            .Select(item => (int?)item.SubscriptionPlan.MaxActiveParcels)
-            .MaxAsync(cancellationToken);
+            .Select(item => new { item.MaxActiveParcelsSnapshot, item.BenefitsSnapshotRecordedAt })
+            .ToListAsync(cancellationToken);
+
+        int? maxActiveParcels = entitlements
+            .Where(item => item.BenefitsSnapshotRecordedAt.HasValue && item.MaxActiveParcelsSnapshot > 0)
+            .Select(item => item.MaxActiveParcelsSnapshot).DefaultIfEmpty().Max();
 
         if (maxActiveParcels is null)
         {
-            return new ParcelQuotaResult(ParcelQuotaDecision.NoActiveSubscription, 0, null);
+            return new ParcelQuotaResult(entitlements.Count > 0
+                ? ParcelQuotaDecision.BenefitsReconciliationRequired : ParcelQuotaDecision.NoActiveSubscription, 0, null);
         }
 
         // Parcels already in a locker plus requests that will become parcels (approved or waiting for approval).
