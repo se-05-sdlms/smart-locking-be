@@ -337,6 +337,8 @@ public sealed class DeliveryRequestService(
         await using IDbContextTransaction? transaction = await LockDecisionAsync(id, cancellationToken);
         DeliveryRequest request = await FindValidSessionAsync(id, guestSessionToken, cancellationToken);
         if (request.Status == DeliveryRequestStatus.Cancelled) return MapSummary(request);
+        if (request.Status == DeliveryRequestStatus.Expired && request.FailureCode == DeliveryRequestFailureCode.ApprovalExpired)
+            throw new GoneException(DeliveryErrorCodes.ApprovalExpired, "Delivery request approval period has expired.");
         if (request.Status != DeliveryRequestStatus.PendingApproval)
         {
             throw new ConflictException(DeliveryErrorCodes.InvalidState,
@@ -846,6 +848,8 @@ public sealed class DeliveryRequestService(
             deliveryRequest.FailureCode = DeliveryRequestFailureCode.SessionExpired;
             deliveryRequest.UpdatedAt = now;
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (dbContext.Database.CurrentTransaction is { } transaction)
+                await transaction.CommitAsync(cancellationToken);
             throw new GoneException(DeliveryErrorCodes.SessionExpired, "Delivery session has expired.");
         }
 
