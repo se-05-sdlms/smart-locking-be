@@ -26,8 +26,12 @@ public sealed class ReturnRequestService(
         await using var residentTransaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
         if (dbContext.Database.IsRelational())
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT 1 FROM \"User\" WHERE \"Id\" = {residentUserId} FOR UPDATE", cancellationToken);
             await dbContext.Database.ExecuteSqlInterpolatedAsync(
                 $"SELECT 1 FROM \"ResidentProfile\" WHERE \"UserId\" = {residentUserId} FOR UPDATE", cancellationToken);
+        }
         ResidentProfile? trackedResident = dbContext.ResidentProfiles.Local.FirstOrDefault(item => item.UserId == residentUserId);
         if (trackedResident is not null) await dbContext.Entry(trackedResident).ReloadAsync(cancellationToken);
         ResidentProfile resident = await dbContext.ResidentProfiles
