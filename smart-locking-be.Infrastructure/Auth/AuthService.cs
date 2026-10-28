@@ -175,6 +175,7 @@ public sealed class AuthService(
         {
             AddAuthAudit("Auth.LoginFailed", user?.Id, AuditLogResult.Failed, ipAddress);
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (loginTransaction is not null) await loginTransaction.CommitAsync(cancellationToken);
             throw new UnauthorizedException(AuthErrorCodes.InvalidCredentials, InvalidCredentialsMessage);
         }
 
@@ -216,6 +217,7 @@ public sealed class AuthService(
         {
             AddAuthAudit("Auth.InvalidRefreshToken", token?.UserId, AuditLogResult.Failed, ipAddress);
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (refreshTransaction is not null) await refreshTransaction.CommitAsync(cancellationToken);
             throw new UnauthorizedException(AuthErrorCodes.InvalidRefreshToken, "Invalid refresh token.");
         }
 
