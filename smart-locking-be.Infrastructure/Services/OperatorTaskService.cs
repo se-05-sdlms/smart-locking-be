@@ -40,7 +40,7 @@ public sealed class OperatorTaskService(ApplicationDbContext db, TimeProvider cl
             return new OperatorTaskResponse("incident", x.Id, x.LockerId, x.LockerCode, x.Title, priority.ToString(), x.Status.ToString(), due, x.CreatedAt, $"/api/incidents/{x.Id}");
         }).Concat(maintenance.Select(x => new OperatorTaskResponse("maintenance", x.Id, x.LockerId, x.LockerCode, x.Description,
             x.Priority == MaintenancePriority.Normal ? "Medium" : x.Priority.ToString(), x.Status.ToString(), null, x.CreatedAt, $"/api/maintenance-requests/{x.Id}")))
-        .Concat(parcels.Select(x => new OperatorTaskResponse("recovery", x.Id, x.LockerId, x.LockerCode, $"Chuyển kiện {x.ParcelCode} tới điểm tập kết", "High", x.Status.ToString(), x.MaxStorageUntil, x.CreatedAt, $"/api/parcels/{x.Id}")))
+        .Concat(parcels.Select(x => new OperatorTaskResponse("recovery", x.Id, x.LockerId, x.LockerCode, $"Chuyển kiện {x.ParcelCode} tới địa chỉ thu hồi của tủ", "High", x.Status.ToString(), x.MaxStorageUntil, x.CreatedAt, $"/api/parcels/{x.Id}")))
         .OrderBy(x => Rank(x.Priority)).ThenBy(x => x.CreatedAt).ThenBy(x => x.Id).ThenBy(x => x.Kind, StringComparer.Ordinal).ToList();
         return new(items.Skip(offset).Take(limit).ToList(), offset, limit, items.Count > offset + limit);
     }
