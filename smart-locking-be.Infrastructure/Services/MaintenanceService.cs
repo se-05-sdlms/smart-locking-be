@@ -125,6 +125,7 @@ public sealed class MaintenanceService(ApplicationDbContext dbContext, TimeProvi
         MaintenanceRequest entity = await dbContext.MaintenanceRequests
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new NotFoundException(MaintenanceErrorCodes.NotFound, "Maintenance request not found.");
+        if (dbContext.Database.IsRelational()) await dbContext.Entry(entity).ReloadAsync(cancellationToken);
         await EnsureAccessAsync(userId, role, entity.LockerId, cancellationToken);
         if (entity.Status == request.Status)
             return await LoadAsync(id, cancellationToken);
