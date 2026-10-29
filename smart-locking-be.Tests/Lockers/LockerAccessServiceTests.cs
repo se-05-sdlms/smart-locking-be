@@ -364,6 +364,55 @@ public sealed class LockerAccessServiceTests
         return (locker, compartment);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PublicStatus_ReadsMqttSnapshotWithoutBluetooth_AndDoesNotInventDoorObservation(bool observed)
+    {
+        await using var db = CreateDbContext(); var (locker, slot) = await SeedLockerAsync(db);
+        locker.LastSeenAt = Now;
+        slot.DoorStatusObservedAt = observed ? Now : null;
+        await db.SaveChangesAsync();
+        var result = await new LockerService(db).GetPublicLockerStatusAsync(locker.Code);
+        Assert.Equal(locker.DeviceIdentifier, result.DeviceIdentifier);
+        Assert.Equal("Online", result.ConnectionStatus); Assert.Equal(Now, result.LastSeenAt);
+        var row = Assert.Single(result.Compartments);
+        Assert.Equal(1, row.Channel); Assert.Equal(observed ? "Closed" : "Unknown", row.DoorStatus);
+        Assert.Equal(observed ? Now : (DateTimeOffset?)null, row.ObservedAt); Assert.Equal("EMPTY", row.Usage);
+        Assert.Empty(db.LockerAccessEvents); Assert.Empty(db.AuditLogs);
+    }
+
+    [Fact]
+    public async Task PublicStatus_OnlyExposesConfiguredChannelsAndUsage_NoPersonalDataOrPin()
+    {
+        await using var db = CreateDbContext(); var (locker, slot) = await SeedLockerAsync(db);
+        var request = new ReturnRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            AllocatedCompartmentId = slot.Id,
+            ReturnCode = "654321",
+            Status = ReturnRequestStatus.Deposited
+        };
+        db.Add(request); await db.SaveChangesAsync();
+        var result = await new LockerService(db).GetPublicLockerStatusAsync(locker.Code);
+        Assert.Equal("OCCUPIED", Assert.Single(result.Compartments).Usage);
+        string json = System.Text.Json.JsonSerializer.Serialize(result);
+        Assert.DoesNotContain(request.Id.ToString(), json); Assert.DoesNotContain(request.ReturnCode, json);
+        Assert.DoesNotContain("Resident", json); Assert.DoesNotContain("Phone", json);
+        Assert.Empty(db.LockerAccessEvents);
+    }
+
+    [Fact]
+    public async Task PublicStatus_ShowsMaintenanceAndRejectsUnknownCode()
+    {
+        await using var db = CreateDbContext(); var (locker, slot) = await SeedLockerAsync(db);
+        db.Add(new MaintenanceRequest { Id = Guid.NewGuid(), LockerId = locker.Id, LockerCompartmentId = slot.Id, Status = MaintenanceStatus.Open });
+        await db.SaveChangesAsync(); var service = new LockerService(db);
+        Assert.Equal("BLOCKED", Assert.Single((await service.GetPublicLockerStatusAsync(locker.Code)).Compartments).Usage);
+        await Assert.ThrowsAsync<NotFoundException>(() => service.GetPublicLockerStatusAsync("missing"));
+    }
+
     private sealed class RecordingDispatcher : ILockerCommandDispatcher
     {
         public List<LockerUnlockCommand> Commands { get; } = [];

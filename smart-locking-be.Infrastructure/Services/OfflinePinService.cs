@@ -11,7 +11,8 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoothMessageCodec protocol, TimeProvider clock, IDeliveryRequestService? deliveries = null) : IOfflinePinService
+public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoothMessageCodec protocol, TimeProvider clock,
+    IDeliveryRequestService? deliveries = null, IOperationsRealtimeNotifier? realtime = null) : IOfflinePinService
 {
     // JWT xác thực người dùng, không xác thực nguồn ESP. o1 chưa có MAC/chữ ký nên HTTP
     // không được lưu/áp dụng hoặc ACK, kể cả khi người chuyển tiếp đã đăng nhập.
@@ -135,6 +136,12 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
         }
         await db.SaveChangesAsync(ct);
         if (transaction is not null) await transaction.CommitAsync(ct);
+        if (realtime is not null)
+        {
+            Guid? lockerId = await db.Lockers.Where(x => x.DeviceIdentifier == device).Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
+            if (lockerId.HasValue) await realtime.PublishToLockerAsync(lockerId.Value,
+                new("LockerUsageChanged", null, lockerId, item.Status, null, now), ct);
+        }
         return Result(item);
     }
 

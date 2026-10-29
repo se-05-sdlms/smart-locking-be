@@ -11,7 +11,7 @@ namespace smart_locking_be.Application.Services;
 
 /// <summary>Điều phối nghiệp vụ đặt lại ngăn qua các cổng lưu trữ và gửi lệnh.</summary>
 public sealed class CompartmentResetService(ICompartmentResetStore store, ICompartmentResetDispatcher dispatcher, ICompartmentResetProtocol protocol, TimeProvider clock,
-    IBluetoothCommandSigner? commandSigner = null) : ICompartmentResetService
+    IBluetoothCommandSigner? commandSigner = null, IOperationsRealtimeNotifier? realtime = null) : ICompartmentResetService
 {
     // Chặn hai adapter áp dụng cùng ACK đồng thời trong một process BE.
     // Transaction/lưu event cùng commandId vẫn là lớp bảo vệ nhất quán dữ liệu.
@@ -202,6 +202,8 @@ public sealed class CompartmentResetService(ICompartmentResetStore store, ICompa
         // Khôi phục trạng thái trước yêu cầu, không tự bật lại ngăn vốn đang bảo trì/hỏng.
         slot.OperationalStatus = data.PreviousStatus;
         slot.DoorStatus = receipt.DoorStatus;
+        // z2 không mang giờ đo của ESP; đây là lúc BE nhận xác nhận cửa, không phải suy từ nút reset.
+        slot.DoorStatusObservedAt = now;
         slot.UpdatedAt = now;
         store.Add(new LockerEvent()
         {
@@ -220,6 +222,8 @@ public sealed class CompartmentResetService(ICompartmentResetStore store, ICompa
         });
         await store.SaveChangesAsync(ct);
         if (tx is not null) await tx.CommitAsync(ct);
+        if (realtime is not null) await realtime.PublishToLockerAsync(slot.LockerId,
+            new("LockerResetApplied", slot.Id, slot.LockerId, "Applied", null, now), ct);
     }
     public async Task<DTOs.Parcels.OverdueTransferResponse> RequestTransferAsync(Guid userId, string role, Guid parcelId, CancellationToken ct = default)
     {

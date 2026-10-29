@@ -12,6 +12,26 @@ namespace smart_locking_be.Tests.Lockers;
 
 public sealed class CompartmentResetTests
 {
+    [Fact]
+    public async Task ResetReceipt_RecordsDoorObservation_ForStatusReaders_WithoutCompletingGoods()
+    {
+        var x = Setup(); await using var db = x.Db;
+        var response = await x.Service.RequestAsync(Guid.NewGuid(), "Administrator", x.Slot.LockerId, x.Slot.Id,
+            new(x.Request.Id, true, "Checked empty"));
+        var receivedAfter = DateTimeOffset.UtcNow;
+        string proof = $"z2|{response.CommandId:N}|LKR-B|1|{x.Request.Id:N}|CLOSED|OK";
+        await x.Service.ReceiveAsync("LKR-B", proof);
+        var snapshot = await new LockerService(db).GetPublicLockerStatusAsync("B");
+        var row = Assert.Single(snapshot.Compartments);
+        Assert.Equal("Closed", row.DoorStatus);
+        Assert.NotNull(row.ObservedAt);
+        Assert.InRange(row.ObservedAt.Value, receivedAfter, DateTimeOffset.UtcNow);
+        Assert.Equal(ReturnRequestStatus.Deposited, x.Request.Status);
+        Assert.Null(x.Request.CompartmentReleasedAt);
+        await x.Service.ReceiveAsync("LKR-B", proof);
+        Assert.Equal(row.ObservedAt, x.Slot.DoorStatusObservedAt);
+    }
+
     [Theory]
     [InlineData("Pending")]
     [InlineData("Applied")]

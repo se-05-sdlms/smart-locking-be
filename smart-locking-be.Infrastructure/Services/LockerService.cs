@@ -98,6 +98,35 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         return new PublicLockerResponse(locker.Code, locker.Address, true);
     }
 
+    public async Task<PublicLockerStatusResponse> GetPublicLockerStatusAsync(string code, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(code)) throw BadRequestException.For(nameof(code), "Locker code is required.");
+        var locker = await dbContext.Lockers.AsNoTracking().SingleOrDefaultAsync(x => x.Code == code.Trim(), cancellationToken)
+            ?? throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
+        var now = DateTimeOffset.UtcNow;
+        var available = (await dbContext.OperationalCompartments().Where(x => x.LockerId == locker.Id)
+            .Select(x => x.Id).ToListAsync(cancellationToken)).ToHashSet();
+        var slots = await dbContext.LockerCompartments.AsNoTracking().Where(x => x.LockerId == locker.Id)
+            .OrderBy(x => x.HardwareChannel).Select(x => new
+            {
+                x.Id,
+                x.HardwareChannel,
+                x.DoorStatus,
+                x.DoorStatusObservedAt,
+                Occupied = dbContext.Parcels.Any(p => p.DeliveryRequest.AllocatedCompartmentId == x.Id &&
+                    (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue)) ||
+                    dbContext.ReturnRequests.Any(r => r.AllocatedCompartmentId == x.Id && r.Status == ReturnRequestStatus.Deposited),
+                Allocated = dbContext.ReturnRequests.Any(r => r.AllocatedCompartmentId == x.Id && r.Status == ReturnRequestStatus.Allocated) ||
+                    dbContext.DeliveryRequests.Any(r => r.AllocatedCompartmentId == x.Id && r.Status == DeliveryRequestStatus.Allocated) ||
+                    dbContext.CompartmentReservations.Any(r => r.LockerCompartmentId == x.Id && r.ReleasedAt == null && r.ExpiresAt > now)
+            }).ToListAsync(cancellationToken);
+        // Không coi giá trị Closed mặc định trong DB là một lần đọc công tắc thực tế.
+        return new(locker.Code, locker.DeviceIdentifier, locker.ConnectionStatus.ToString(), locker.LastSeenAt, now,
+            slots.Select(x => new PublicCompartmentStatusResponse(x.HardwareChannel,
+                x.DoorStatusObservedAt.HasValue ? x.DoorStatus.ToString() : nameof(DoorStatus.Unknown), x.DoorStatusObservedAt,
+                x.Occupied ? "OCCUPIED" : x.Allocated ? "DEPOSITING" : !available.Contains(x.Id) ? "BLOCKED" : "EMPTY")).ToArray());
+    }
+
     public async Task<IReadOnlyCollection<LockerSummaryResponse>> GetLockersAsync(
         Guid userId,
         string userRole,

@@ -1,6 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Http.Timeouts;
+using System.Text.Json;
+using smart_locking_be.API.Services;
 using smart_locking_be.API.Constants;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
@@ -18,6 +22,54 @@ public class LockersController(ILockerService lockerService) : ControllerBase
     [EnableRateLimiting(RateLimitPolicyNames.PublicApi)]
     public async Task<IActionResult> GetPublicLocker(string code, CancellationToken cancellationToken) =>
         Ok(await lockerService.GetPublicLockerAsync(code, cancellationToken));
+
+    /// <summary>Trạng thái BE nhận qua MQTT, có thời điểm quan sát; không phát lệnh xuống tủ.</summary>
+    [HttpGet("public/by-code/{code}/status"), AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicyNames.PublicApi)]
+    public async Task<IActionResult> GetPublicStatus(string code, CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return Ok(await lockerService.GetPublicLockerStatusAsync(code, cancellationToken));
+    }
+
+    /// <summary>Đẩy snapshot ngay khi BE đã lưu thay đổi MQTT. Keepalive chỉ giữ kết nối, không polling DB.</summary>
+    [HttpGet("public/by-code/{code}/status/events"), AllowAnonymous, DisableRequestTimeout]
+    [EnableRateLimiting(RateLimitPolicyNames.PublicApi)]
+    public async Task StreamPublicStatus(string code, [FromServices] LockerStatusStream stream, CancellationToken ct)
+    {
+        var first = await lockerService.GetPublicLockerStatusAsync(code, ct);
+        using var subscription = stream.Subscribe(first.DeviceIdentifier);
+        Response.ContentType = "text/event-stream";
+        Response.Headers.CacheControl = "no-cache, no-store";
+        Response.Headers["X-Accel-Buffering"] = "no";
+        HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        async Task WriteSnapshot()
+        {
+            var snapshot = await lockerService.GetPublicLockerStatusAsync(code, ct);
+            await Response.WriteAsync("event: status\ndata: " + JsonSerializer.Serialize(snapshot, json) + "\n\n", ct);
+            await Response.Body.FlushAsync(ct);
+        }
+        try
+        {
+            // Subscribe trước lần đọc đầu để không bỏ mất thay đổi giữa lúc đọc và đăng ký.
+            await WriteSnapshot();
+            while (!ct.IsCancellationRequested)
+            {
+                using var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                heartbeat.CancelAfter(TimeSpan.FromSeconds(15));
+                try { await subscription.WaitAsync(heartbeat.Token); }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    await Response.WriteAsync(": keepalive\n\n", ct);
+                    await Response.Body.FlushAsync(ct);
+                    continue;
+                }
+                await WriteSnapshot();
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
 
     /// <summary>
     /// Lấy danh sách tủ Locker (Admin xem tất cả, LockerOperator xem danh sách được phân công).
