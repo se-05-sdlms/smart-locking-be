@@ -1,0 +1,443 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using smart_locking_be.Application.Errors;
+using smart_locking_be.Application.Exceptions;
+using smart_locking_be.Application.DTOs.Lockers;
+using smart_locking_be.Application.Interfaces.Services;
+using smart_locking_be.Domain.Entities;
+using smart_locking_be.Domain.Enums;
+using smart_locking_be.Infrastructure.Persistence;
+using smart_locking_be.Infrastructure.Services;
+
+namespace smart_locking_be.Tests.Lockers;
+
+public sealed class LockerAccessServiceTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 9, 30, 8, 0, 0, TimeSpan.Zero);
+
+    [Theory]
+    [InlineData("Administrator", false, false, true)]
+    [InlineData("LockerOperator", true, false, true)]
+    [InlineData("LockerOperator", false, false, false)]
+    [InlineData("LockerOperator", true, true, false)]
+    [InlineData("Resident", true, false, false)]
+    public async Task UpdateLockerStatus_EnforcesScopeAndRecordsActor(string role, bool assigned, bool revoked, bool allowed)
+    {
+        await using var db = CreateDbContext();
+        var (locker, slot) = await SeedLockerAsync(db);
+        slot.OperationalStatus = LockerCompartmentOperationalStatus.OutOfService;
+        var actor = Guid.NewGuid();
+        db.Add(new User { Id = actor, PhoneNumber = "0900000099", Role = UserRole.LockerOperator, Status = UserStatus.Active });
+        if (assigned)
+            db.Add(new OperatorAssignment { Id = Guid.NewGuid(), OperatorUserId = actor, LockerId = locker.Id, RevokedAt = revoked ? Now : null });
+        await db.SaveChangesAsync();
+        int initialAuditCount = await db.AuditLogs.CountAsync();
+        var service = new LockerService(db);
+
+        if (!allowed)
+        {
+            await Assert.ThrowsAsync<ForbiddenException>(() => service.UpdateLockerStatusAsync(actor, role,
+                locker.Id, new(LockerOperationalStatus.OutOfService, "Kiểm tra tủ")));
+            Assert.Equal(LockerOperationalStatus.Operational, locker.OperationalStatus);
+            Assert.Equal(initialAuditCount, await db.AuditLogs.CountAsync());
+            Assert.Empty(db.LockerEvents);
+            return;
+        }
+
+        await service.UpdateLockerStatusAsync(actor, role, locker.Id, new(LockerOperationalStatus.OutOfService, "  Kiểm tra tủ  "));
+        var audit = await db.AuditLogs.SingleAsync(item => item.Action == "Locker.StatusChanged" && item.ActorUserId == actor);
+        var change = await db.LockerEvents.SingleAsync();
+        Assert.Equal(actor, audit.ActorUserId);
+        Assert.Equal(actor, change.ActorUserId);
+        Assert.Equal("Kiểm tra tủ", change.Reason);
+        Assert.Equal(nameof(LockerOperationalStatus.Operational), change.PreviousValue);
+        Assert.Equal(nameof(LockerOperationalStatus.OutOfService), change.NewValue);
+        Assert.Equal(LockerCompartmentOperationalStatus.OutOfService, slot.OperationalStatus);
+        Assert.Equal(DoorStatus.Closed, slot.DoorStatus);
+    }
+
+    [Theory]
+    [InlineData(LockerOperationalStatus.OutOfService, " ")]
+    [InlineData((LockerOperationalStatus)999, "Kiểm tra tủ")]
+    [InlineData(LockerOperationalStatus.Inactive, "Kiểm tra tủ")]
+    public async Task UpdateLockerStatus_RejectsInvalidInputWithoutChanges(LockerOperationalStatus status, string reason)
+    {
+        await using var db = CreateDbContext();
+        var (locker, _) = await SeedLockerAsync(db);
+
+        await Assert.ThrowsAsync<BadRequestException>(() => new LockerService(db).UpdateLockerStatusAsync(
+            Guid.NewGuid(), "Administrator", locker.Id, new(status, reason)));
+
+        Assert.Equal(LockerOperationalStatus.Operational, locker.OperationalStatus);
+        Assert.Empty(db.AuditLogs);
+        Assert.Empty(db.LockerEvents);
+    }
+
+    [Theory]
+    [InlineData("parcel", "lockerStatus")]
+    [InlineData("return", "lockerStatus")]
+    [InlineData("reservation", "lockerStatus")]
+    [InlineData("parcel", "lockerEdit")]
+    [InlineData("return", "lockerEdit")]
+    [InlineData("reservation", "lockerEdit")]
+    [InlineData("parcel", "lockerDelete")]
+    [InlineData("return", "lockerDelete")]
+    [InlineData("reservation", "lockerDelete")]
+    [InlineData("parcel", "slotStatus")]
+    [InlineData("return", "slotStatus")]
+    [InlineData("reservation", "slotStatus")]
+    [InlineData("parcel", "slotMapping")]
+    [InlineData("return", "slotMapping")]
+    [InlineData("reservation", "slotMapping")]
+    public async Task CanonicalLockerMutations_BlockActiveOperations(string activeKind, string operation)
+    {
+        await using var db = CreateDbContext();
+        var (locker, slot) = await SeedLockerAsync(db);
+        if (activeKind == "parcel")
+        {
+            var delivery = new DeliveryRequest
+            {
+                Id = Guid.NewGuid(),
+                LockerId = locker.Id,
+                Locker = locker,
+                AllocatedCompartmentId = slot.Id,
+                AllocatedCompartment = slot,
+                Status = DeliveryRequestStatus.Deposited
+            };
+            db.Add(new Parcel { Id = Guid.NewGuid(), DeliveryRequestId = delivery.Id, DeliveryRequest = delivery, ParcelCode = "P-1", Status = ParcelStatus.Stored });
+        }
+        else if (activeKind == "return")
+            db.Add(new ReturnRequest { Id = Guid.NewGuid(), LockerId = locker.Id, AllocatedCompartmentId = slot.Id, ReturnCode = "123456", Status = ReturnRequestStatus.Deposited });
+        else
+            db.Add(new CompartmentReservation { Id = Guid.NewGuid(), LockerCompartmentId = slot.Id, LockerCompartment = slot, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5) });
+        await db.SaveChangesAsync();
+        int auditCount = await db.AuditLogs.CountAsync();
+        var service = new LockerService(db);
+        var actor = Guid.NewGuid();
+
+        await Assert.ThrowsAsync<ConflictException>(async () =>
+        {
+            switch (operation)
+            {
+                case "lockerStatus": await service.UpdateLockerStatusAsync(actor, "Administrator", locker.Id, new(LockerOperationalStatus.OutOfService, "Maintenance")); break;
+                case "lockerEdit": await service.UpdateLockerAsync(actor, locker.Id, new(locker.Code, locker.Address, locker.RecoveryAddress, locker.DeviceIdentifier, LockerOperationalStatus.Inactive)); break;
+                case "lockerDelete": await service.SoftDeleteLockerAsync(actor, locker.Id); break;
+                case "slotStatus": await service.UpdateCompartmentStatusAsync(actor, "Administrator", locker.Id, slot.Id, new(LockerCompartmentOperationalStatus.OutOfService)); break;
+                case "slotMapping": await service.UpdateCompartmentAsync(actor, locker.Id, slot.Id, new(slot.Code, slot.HardwareCode, 2)); break;
+            }
+        });
+
+        Assert.Equal(LockerOperationalStatus.Operational, locker.OperationalStatus);
+        Assert.Equal(LockerCompartmentOperationalStatus.Operational, slot.OperationalStatus);
+        Assert.Equal(1, slot.HardwareChannel);
+        Assert.Equal(auditCount, await db.AuditLogs.CountAsync());
+        Assert.Empty(db.LockerEvents);
+    }
+
+    [Fact]
+    public async Task LockerStatus_DoesNotRestoreInactiveLocker()
+    {
+        await using var db = CreateDbContext();
+        var (locker, _) = await SeedLockerAsync(db);
+        locker.OperationalStatus = LockerOperationalStatus.Inactive;
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<ConflictException>(() => new LockerService(db).UpdateLockerStatusAsync(
+            Guid.NewGuid(), "Administrator", locker.Id, new(LockerOperationalStatus.Operational, "Restore")));
+
+        Assert.Equal(LockerOperationalStatus.Inactive, locker.OperationalStatus);
+    }
+
+    [Theory]
+    [InlineData("short")]
+    [InlineData("         ")]
+    public async Task EmergencyUnlock_RejectsShortReasonBeforeDispatch(string reason)
+    {
+        await using var db = CreateDbContext();
+        var (locker, slot) = await SeedLockerAsync(db);
+        var dispatcher = new RecordingDispatcher();
+        var service = new EmergencyUnlockService(db,
+            new LockerAccessService(db, dispatcher, TimeProvider.System), TimeProvider.System);
+
+        await Assert.ThrowsAsync<BadRequestException>(() => service.CreateAsync(Guid.NewGuid(), "Administrator",
+            new(locker.Id, slot.Id, null, reason)));
+
+        Assert.Empty(dispatcher.Commands);
+        Assert.Empty(db.EmergencyUnlocks);
+    }
+
+    [Fact]
+    public async Task OpenAsync_OperationalLocker_DispatchesAndRecordsSuccess()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        (Locker locker, LockerCompartment compartment) = await SeedLockerAsync(dbContext);
+        var dispatcher = new RecordingDispatcher();
+        var service = new LockerAccessService(dbContext, dispatcher, new FixedTimeProvider(Now));
+        Guid userId = Guid.NewGuid();
+        Guid parcelId = Guid.NewGuid();
+
+        var delivery = new DeliveryRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            AllocatedCompartmentId = compartment.Id
+        };
+        dbContext.Add(new Parcel
+        {
+            Id = parcelId,
+            DeliveryRequest = delivery,
+            DeliveryRequestId = delivery.Id,
+            ParcelCode = "TEST-PICKUP",
+            Status = ParcelStatus.Stored,
+            StoredAt = Now.AddMinutes(-5),
+            PickupDueAt = Now.AddHours(1),
+            MaxStorageUntil = Now.AddDays(1)
+        });
+        await dbContext.SaveChangesAsync();
+
+        OpenLockerResponse response = await service.OpenAsync(new OpenLockerRequest(
+            locker.Id,
+            compartment.Id,
+            userId,
+            null,
+            parcelId,
+            null,
+            LockerAccessType.ResidentPickup,
+            LockerAccessMethod.RemoteApp,
+            " 127.0.0.1 ",
+            " resident-mobile "));
+
+        LockerAccessEvent accessEvent = await dbContext.LockerAccessEvents.SingleAsync();
+        Assert.Equal(LockerAccessResult.Succeeded, response.Result);
+        Assert.Equal(Now, response.OccurredAt);
+        Assert.Equal("127.0.0.1", accessEvent.IpAddress);
+        Assert.Equal("resident-mobile", accessEvent.DeviceContext);
+        Assert.Equal(
+            new LockerUnlockCommand(accessEvent.Id, locker.DeviceIdentifier, compartment.HardwareChannel, delivery.Id),
+            Assert.Single(dispatcher.Commands));
+    }
+
+    [Fact]
+    public async Task OpenAsync_OfflineLocker_BlocksWithoutDispatching()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        (Locker locker, LockerCompartment compartment) = await SeedLockerAsync(
+            dbContext,
+            LockerConnectionStatus.Offline);
+        var dispatcher = new RecordingDispatcher();
+        var service = new LockerAccessService(dbContext, dispatcher, TimeProvider.System,
+            configuration: MonitoringConfiguration());
+
+        var exception = await Assert.ThrowsAsync<ConflictException>(() =>
+            service.OpenAsync(MaintenanceRequest(locker, compartment)));
+
+        Assert.Equal(LockerErrorCodes.Offline, exception.ErrorCode);
+        Assert.Empty(dispatcher.Commands);
+    }
+
+    [Fact]
+    public async Task OpenAsync_MonitoringDisabled_DoesNotBlockLegacyLocker()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        var (locker, slot) = await SeedLockerAsync(db, LockerConnectionStatus.Offline);
+        var dispatcher = new RecordingDispatcher();
+        var service = new LockerAccessService(db, dispatcher, TimeProvider.System);
+
+        var response = await service.OpenAsync(MaintenanceRequest(locker, slot));
+
+        Assert.Equal(LockerAccessResult.Succeeded, response.Result);
+        Assert.Single(dispatcher.Commands);
+    }
+
+    [Fact]
+    public async Task OpenAsync_OfflineLockerWithMonitoring_AllowsBluetoothWithoutMqttDispatch()
+    {
+        await using ApplicationDbContext db = CreateDbContext();
+        var (locker, slot) = await SeedLockerAsync(db, LockerConnectionStatus.Offline);
+        var resident = new ResidentProfile
+        {
+            Id = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            FullName = "Resident",
+            User = new User { Id = Guid.NewGuid(), PhoneNumber = "0900000001" }
+        };
+        resident.UserId = resident.User.Id;
+        var request = new ReturnRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            ResidentProfile = resident,
+            ResidentProfileId = resident.Id,
+            ReturnCode = "123456",
+            AllocatedCompartmentId = slot.Id,
+            Status = ReturnRequestStatus.Allocated
+        };
+        db.Add(request);
+        await db.SaveChangesAsync();
+        var dispatcher = new RecordingDispatcher();
+        var service = new LockerAccessService(db, dispatcher, new FixedTimeProvider(Now),
+            new BluetoothProtocol(), MonitoringConfiguration(), new HmacBluetoothCommandSigner(new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { [$"Bluetooth:CommandSigningKeys:{locker.DeviceIdentifier}"] = new string('1', 64) }).Build()));
+
+        var response = await service.OpenAsync(new OpenLockerRequest(locker.Id, slot.Id,
+            resident.UserId, null, null, request.Id, LockerAccessType.ResidentReturnDropOff,
+            LockerAccessMethod.Bluetooth, null, null));
+
+        Assert.Equal(LockerAccessResult.Succeeded, response.Result);
+        Assert.NotNull(response.Bluetooth);
+        Assert.StartsWith("b2|", response.Bluetooth.Command);
+        Assert.Empty(dispatcher.Commands);
+        request.Cancellation = new ReturnCancellationRequest { ReturnRequestId = request.Id, ResidentUserId = resident.UserId, Status = "PendingVerification", RequestedAt = Now };
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<ConflictException>(() => service.OpenAsync(new OpenLockerRequest(locker.Id, slot.Id,
+            resident.UserId, null, null, request.Id, LockerAccessType.ResidentReturnDropOff,
+            LockerAccessMethod.Bluetooth, null, null)));
+        Assert.Single(db.LockerAccessEvents);
+        Assert.Empty(dispatcher.Commands);
+    }
+
+    private static IConfiguration MonitoringConfiguration() => new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?> { ["LockerMonitoring:Enabled"] = "true" })
+        .Build();
+
+    [Fact]
+    public async Task OpenAsync_DispatchFailure_RecordsFailure()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        (Locker locker, LockerCompartment compartment) = await SeedLockerAsync(dbContext);
+        var service = new LockerAccessService(dbContext, new FailingDispatcher(), TimeProvider.System);
+
+        OpenLockerResponse response = await service.OpenAsync(MaintenanceRequest(locker, compartment));
+
+        Assert.Equal(LockerAccessResult.Failed, response.Result);
+        Assert.Equal(response.FailureReason, (await dbContext.LockerAccessEvents.SingleAsync()).FailureReason);
+    }
+
+    private static OpenLockerRequest MaintenanceRequest(Locker locker, LockerCompartment compartment) => new(
+        locker.Id,
+        compartment.Id,
+        null,
+        null,
+        null,
+        null,
+        LockerAccessType.Maintenance,
+        LockerAccessMethod.SystemAuthorization,
+        null,
+        null);
+
+    private static ApplicationDbContext CreateDbContext() => new(
+        new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options);
+
+    private static async Task<(Locker Locker, LockerCompartment Compartment)> SeedLockerAsync(
+        ApplicationDbContext dbContext,
+        LockerConnectionStatus connectionStatus = LockerConnectionStatus.Online)
+    {
+        Locker locker = new()
+        {
+            Id = Guid.NewGuid(),
+            Code = "L-01",
+            Address = "Tòa A",
+            RecoveryAddress = "Quầy lễ tân",
+            DeviceIdentifier = "esp32-l01",
+            OperationalStatus = LockerOperationalStatus.Operational,
+            ConnectionStatus = connectionStatus,
+            CreatedAt = Now,
+            UpdatedAt = Now,
+        };
+        LockerCompartment compartment = new()
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            Locker = locker,
+            Code = "A01",
+            HardwareCode = "relay-01",
+            HardwareChannel = 1,
+            OperationalStatus = LockerCompartmentOperationalStatus.Operational,
+            DoorStatus = DoorStatus.Closed,
+            CreatedAt = Now,
+            UpdatedAt = Now,
+        };
+        dbContext.AddRange(locker, compartment);
+        await dbContext.SaveChangesAsync();
+        return (locker, compartment);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PublicStatus_ReadsMqttSnapshotWithoutBluetooth_AndDoesNotInventDoorObservation(bool observed)
+    {
+        await using var db = CreateDbContext(); var (locker, slot) = await SeedLockerAsync(db);
+        locker.LastSeenAt = Now;
+        slot.DoorStatusObservedAt = observed ? Now : null;
+        await db.SaveChangesAsync();
+        var result = await new LockerService(db).GetPublicLockerStatusAsync(locker.Code);
+        Assert.Equal(locker.DeviceIdentifier, result.DeviceIdentifier);
+        Assert.Equal("Online", result.ConnectionStatus); Assert.Equal(Now, result.LastSeenAt);
+        var row = Assert.Single(result.Compartments);
+        Assert.Equal(1, row.Channel); Assert.Equal(observed ? "Closed" : "Unknown", row.DoorStatus);
+        Assert.Equal(observed ? Now : (DateTimeOffset?)null, row.ObservedAt); Assert.Equal("EMPTY", row.Usage);
+        Assert.Empty(db.LockerAccessEvents); Assert.Empty(db.AuditLogs);
+    }
+
+    [Fact]
+    public async Task PublicStatus_OnlyExposesConfiguredChannelsAndUsage_NoPersonalDataOrPin()
+    {
+        await using var db = CreateDbContext(); var (locker, slot) = await SeedLockerAsync(db);
+        var request = new ReturnRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            AllocatedCompartmentId = slot.Id,
+            ReturnCode = "654321",
+            Status = ReturnRequestStatus.Deposited
+        };
+        db.Add(request); await db.SaveChangesAsync();
+        var result = await new LockerService(db).GetPublicLockerStatusAsync(locker.Code);
+        Assert.Equal("OCCUPIED", Assert.Single(result.Compartments).Usage);
+        string json = System.Text.Json.JsonSerializer.Serialize(result);
+        Assert.DoesNotContain(request.Id.ToString(), json); Assert.DoesNotContain(request.ReturnCode, json);
+        Assert.DoesNotContain("Resident", json); Assert.DoesNotContain("Phone", json);
+        Assert.Empty(db.LockerAccessEvents);
+    }
+
+    [Fact]
+    public async Task PublicStatus_ShowsMaintenanceAndRejectsUnknownCode()
+    {
+        await using var db = CreateDbContext(); var (locker, slot) = await SeedLockerAsync(db);
+        db.Add(new MaintenanceRequest { Id = Guid.NewGuid(), LockerId = locker.Id, LockerCompartmentId = slot.Id, Status = MaintenanceStatus.Open });
+        await db.SaveChangesAsync(); var service = new LockerService(db);
+        Assert.Equal("BLOCKED", Assert.Single((await service.GetPublicLockerStatusAsync(locker.Code)).Compartments).Usage);
+        await Assert.ThrowsAsync<NotFoundException>(() => service.GetPublicLockerStatusAsync("missing"));
+    }
+
+    private sealed class RecordingDispatcher : ILockerCommandDispatcher
+    {
+        public List<LockerUnlockCommand> Commands { get; } = [];
+
+        public Task DispatchUnlockAsync(
+            LockerUnlockCommand command,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command);
+            return Task.CompletedTask;
+        }
+
+    }
+
+    private sealed class FailingDispatcher : ILockerCommandDispatcher
+    {
+        public Task DispatchUnlockAsync(
+            LockerUnlockCommand command,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Broker unavailable");
+
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+}

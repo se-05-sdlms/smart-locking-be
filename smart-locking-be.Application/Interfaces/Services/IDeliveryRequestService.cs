@@ -1,3 +1,4 @@
+using smart_locking_be.Domain.Enums;
 using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.DeliveryRequests;
 
@@ -67,7 +68,7 @@ public interface IDeliveryRequestService
     Task<CompartmentReservationResponse> OpenCompartmentAsync(
         Guid requestId,
         string guestSessionToken,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default, LockerAccessMethod accessMethod = LockerAccessMethod.GuestSession);
 
     Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default);
 

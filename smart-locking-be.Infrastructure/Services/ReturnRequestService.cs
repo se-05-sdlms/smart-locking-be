@@ -37,19 +37,21 @@ public sealed class ReturnRequestService(
         ResidentProfile resident = await dbContext.ResidentProfiles
             .Include(item => item.User).Include(item => item.RegisteredLocker)
             .SingleOrDefaultAsync(item => item.UserId == residentUserId, cancellationToken)
-            ?? throw new NotFoundException(UserErrorCodes.NotFound, "Resident profile not found.");
+            ?? throw new NotFoundException(UserErrorCodes.NotFound, "Không tìm thấy hồ sơ cư dân.");
         if (dbContext.Database.IsRelational()) await dbContext.Entry(resident.User).ReloadAsync(cancellationToken);
-        if (resident.User.Status != UserStatus.Active) throw new ConflictException(ReturnErrorCodes.InvalidState, "Resident account is inactive.");
-        if (resident.RegisteredLocker is null ||
-            !await dbContext.OperationalLockers().AnyAsync(item => item.Id == resident.RegisteredLockerId, cancellationToken))
-            throw new ConflictException(LockerErrorCodes.NotOperational, "Registered locker is unavailable.");
+        if (resident.User.Status != UserStatus.Active) throw new ConflictException(ReturnErrorCodes.InvalidState, "Tài khoản cư dân không hoạt động.");
+        // Client truyền tủ đang kết nối; giữ cách gọi cũ cho app chưa cập nhật.
+        Locker? locker = string.IsNullOrWhiteSpace(request.DeviceIdentifier) ? resident.RegisteredLocker :
+            await dbContext.Lockers.SingleOrDefaultAsync(x => x.DeviceIdentifier == request.DeviceIdentifier, cancellationToken);
+        if (locker is null || !await dbContext.OperationalLockers().AnyAsync(item => item.Id == locker.Id, cancellationToken))
+            throw new ConflictException(LockerErrorCodes.NotOperational, "Chọn hoặc kết nối một tủ đang hoạt động trước khi gửi đồ.");
 
         DateTimeOffset now = timeProvider.GetUtcNow();
         ReturnRequest entity = new()
         {
             Id = Guid.NewGuid(),
             ResidentProfileId = resident.Id,
-            LockerId = resident.RegisteredLocker.Id,
+            LockerId = locker.Id,
             ReturnCode = await GeneratePickupCodeAsync(cancellationToken),
             ReturnReason = request.Note?.Trim(),
             ReturnImageUrl = request.ImageUrl.Trim(),
@@ -60,7 +62,7 @@ public sealed class ReturnRequestService(
         dbContext.ReturnRequests.Add(entity);
         AddAudit(residentUserId, "ReturnRequest.Created", nameof(ReturnRequest), entity.Id, "Resident created a return request.", now);
         await dbContext.SaveChangesAsync(cancellationToken);
-        entity.Locker = resident.RegisteredLocker;
+        entity.Locker = locker;
         if (residentTransaction is not null) await residentTransaction.CommitAsync(cancellationToken);
         return Map(entity);
     }
@@ -86,7 +88,7 @@ public sealed class ReturnRequestService(
         Map(await ResidentQuery(residentUserId).SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new NotFoundException(ReturnErrorCodes.NotFound, "Return request not found."));
 
-    public async Task<ReturnUnlockResponse> OpenCompartmentAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default)
+    public async Task<ReturnUnlockResponse> OpenCompartmentAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default, LockerAccessMethod accessMethod = LockerAccessMethod.RemoteApp)
     {
         await using var transition = await ReturnTransitionLock.AcquireAsync(dbContext, id, cancellationToken);
         ReturnRequest entity = await ResidentQuery(residentUserId).SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
@@ -101,8 +103,9 @@ public sealed class ReturnRequestService(
             null,
             entity.Id,
             expiresAt,
-            cancellationToken);
-        if (reservation is null) throw new ConflictException(LockerErrorCodes.NoAvailableCompartment, "No compartment is available in this locker.");
+            cancellationToken,
+            verifyDoorOnDevice: accessMethod == LockerAccessMethod.Bluetooth);
+        if (reservation is null) throw new ConflictException(LockerErrorCodes.NoAvailableCompartment, "Tủ hiện không còn ngăn trống.");
         LockerCompartment compartment = reservation.LockerCompartment;
         entity.AllocatedCompartmentId = compartment.Id;
         entity.AllocatedAt = now;
@@ -113,7 +116,7 @@ public sealed class ReturnRequestService(
 
         OpenLockerResponse opened = await lockerAccessService.OpenAsync(new OpenLockerRequest(
             entity.LockerId, compartment.Id, residentUserId, null, null, entity.Id,
-            LockerAccessType.ResidentReturnDropOff, LockerAccessMethod.RemoteApp, null, "Resident Mobile"), cancellationToken);
+            LockerAccessType.ResidentReturnDropOff, accessMethod, null, "Resident Mobile"), cancellationToken);
         if (opened.Result != LockerAccessResult.Succeeded)
         {
             await compartmentAllocationService.ReleaseAsync(null, entity.Id, now, cancellationToken);
@@ -129,7 +132,7 @@ public sealed class ReturnRequestService(
         await dbContext.SaveChangesAsync(cancellationToken);
         if (transition is not null) await transition.CommitAsync(cancellationToken);
         await PublishAsync(entity, cancellationToken);
-        return new ReturnUnlockResponse(entity.Id, compartment.Code, opened.AccessEventId, expiresAt);
+        return new ReturnUnlockResponse(entity.Id, compartment.Code, opened.AccessEventId, expiresAt, opened.Bluetooth);
     }
 
     public async Task FinalizeDepositAsync(Guid id, DateTimeOffset completedAt, CancellationToken cancellationToken = default)
@@ -174,7 +177,7 @@ public sealed class ReturnRequestService(
         entity.UpdatedAt = now;
         await dbContext.SaveChangesAsync(cancellationToken);
         if (transition is not null) await transition.CommitAsync(cancellationToken);
-        return new ReturnPickupSessionResponse(entity.Id, token, entity.Locker.Code, entity.AllocatedCompartment.Code, entity.ReturnImageUrl!, now.AddMinutes(policy.GuestSessionTimeoutMinutes));
+        return new ReturnPickupSessionResponse(entity.Id, token, entity.Locker.Code, entity.AllocatedCompartment.Code, entity.ReturnImageUrl ?? string.Empty, now.AddMinutes(policy.GuestSessionTimeoutMinutes));
     }
 
     public async Task<ReturnPickupSessionResponse> GetAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default)
@@ -191,24 +194,21 @@ public sealed class ReturnRequestService(
         ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         if (transition is not null) await transition.CommitAsync(cancellationToken);
-        return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl!, entity.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes));
+        return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl ?? string.Empty, entity.UpdatedAt.AddMinutes(policy.GuestSessionTimeoutMinutes));
     }
 
-    public async Task<ReturnPickupSessionResponse> OpenCompartmentAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default)
+    public async Task<ReturnPickupSessionResponse> OpenCompartmentAsync(Guid id, string guestSessionToken, CancellationToken cancellationToken = default, LockerAccessMethod accessMethod = LockerAccessMethod.GuestSession)
     {
         await using var transition = await ReturnTransitionLock.AcquireAsync(dbContext, id, cancellationToken);
         ReturnRequest entity = await GetValidGuestReturnAsync(id, guestSessionToken, cancellationToken);
         OpenLockerResponse opened = await lockerAccessService.OpenAsync(new OpenLockerRequest(
             entity.LockerId, entity.AllocatedCompartmentId!.Value, null, null, null, entity.Id,
-            LockerAccessType.ShipperReturnPickup, LockerAccessMethod.GuestSession, null, "Shipper Guest Web"), cancellationToken);
-        if (opened.Result != LockerAccessResult.Succeeded)
-            throw opened.Result == LockerAccessResult.Failed
-                ? new ServiceUnavailableException(LockerErrorCodes.OpenFailed, "The locker compartment could not be opened.")
-                : new ConflictException(LockerErrorCodes.OpenFailed, "The locker compartment could not be opened.");
+            LockerAccessType.ShipperReturnPickup, accessMethod, null, "Shipper Guest Web"), cancellationToken);
+        if (opened.Result != LockerAccessResult.Succeeded) throw new ConflictException(LockerErrorCodes.OpenFailed, opened.FailureReason ?? "Không thể mở ngăn tủ.");
         SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         if (transition is not null) await transition.CommitAsync(cancellationToken);
-        return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl!, timeProvider.GetUtcNow().AddMinutes(policy.GuestSessionTimeoutMinutes));
+        return new ReturnPickupSessionResponse(entity.Id, guestSessionToken, entity.Locker.Code, entity.AllocatedCompartment!.Code, entity.ReturnImageUrl!, timeProvider.GetUtcNow().AddMinutes(policy.GuestSessionTimeoutMinutes), Bluetooth: opened.Bluetooth);
     }
 
     public async Task FinalizePickupAsync(Guid id, DateTimeOffset completedAt, CancellationToken cancellationToken = default)
@@ -358,7 +358,7 @@ public sealed class ReturnRequestService(
 
     private static ReturnRequestResponse Map(ReturnRequest item) => new(
         item.Id, item.Cancellation is not null || item.Status != ReturnRequestStatus.Deposited ? string.Empty : item.ReturnCode,
-        item.ReturnImageUrl!, item.ReturnReason, item.Status, item.Locker.Code, item.Locker.Address,
+        item.ReturnImageUrl ?? string.Empty, item.ReturnReason, item.Status, item.Locker.Code, item.Locker.Address,
         item.AllocatedCompartment?.Code, item.CreatedAt, item.ReservationExpiresAt, item.ResidentDepositedAt, item.ShipperPickedUpAt,
         item.Cancellation is null && item.Status is ReturnRequestStatus.Created or ReturnRequestStatus.Allocated or ReturnRequestStatus.Deposited,
         item.Cancellation is null ? null : new ReturnCancellationResponse(item.Cancellation.Status, item.Cancellation.RequestedAt,

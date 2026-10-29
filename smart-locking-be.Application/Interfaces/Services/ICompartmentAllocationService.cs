@@ -9,7 +9,8 @@ public interface ICompartmentAllocationService
         Guid? deliveryRequestId,
         Guid? returnRequestId,
         DateTimeOffset expiresAt,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool verifyDoorOnDevice = false);
 
     Task ReleaseAsync(
         Guid? deliveryRequestId,

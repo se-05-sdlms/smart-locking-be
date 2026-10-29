@@ -11,7 +11,8 @@ internal static class ParcelTransitionLock
         ApplicationDbContext dbContext, Guid parcelId, CancellationToken cancellationToken)
     {
         if (!dbContext.Database.IsRelational()) return null;
-        var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        var transaction = dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
         try
         {
             await dbContext.Database.ExecuteSqlInterpolatedAsync(
@@ -22,7 +23,7 @@ internal static class ParcelTransitionLock
         }
         catch
         {
-            await transaction.DisposeAsync();
+            if (transaction is not null) await transaction.DisposeAsync();
             throw;
         }
     }

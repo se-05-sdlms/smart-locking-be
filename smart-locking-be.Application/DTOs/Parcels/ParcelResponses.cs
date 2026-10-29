@@ -64,4 +64,10 @@ public sealed record OverdueTransferResponse(
     Guid ParcelId,
     string ParcelCode,
     string CollectionAddress,
-    string Status);
+    string Status,
+    Guid? ResetCommandId = null,
+    string? ResetStatus = null)
+{
+    // ResetApplied chưa có nghĩa hàng đã tới điểm tập kết.
+    public bool ArrivalConfirmed => ResetStatus == "Applied" && Status == nameof(ParcelStatus.Removed);
+}

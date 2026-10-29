@@ -1,11 +1,12 @@
+using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Domain.Enums;
 
 namespace smart_locking_be.Application.DTOs.Returns;
 
-public sealed record CreateReturnRequest(string ImageUrl, string? Note);
-public sealed record ReturnUnlockResponse(Guid ReturnRequestId, string CompartmentCode, Guid AccessEventId, DateTimeOffset ReservationExpiresAt);
+public sealed record CreateReturnRequest(string ImageUrl, string? Note, string? DeviceIdentifier = null);
+public sealed record ReturnUnlockResponse(Guid ReturnRequestId, string CompartmentCode, Guid AccessEventId, DateTimeOffset ReservationExpiresAt, BluetoothCommandResponse? Bluetooth = null);
 public sealed record ValidateReturnPickupRequest(string LockerCode, string PickupCode);
-public sealed record ReturnPickupSessionResponse(Guid ReturnRequestId, string GuestSessionToken, string LockerCode, string CompartmentCode, string ImageUrl, DateTimeOffset ExpiresAt, bool Completed = false);
+public sealed record ReturnPickupSessionResponse(Guid ReturnRequestId, string GuestSessionToken, string LockerCode, string CompartmentCode, string ImageUrl, DateTimeOffset ExpiresAt, bool Completed = false, BluetoothCommandResponse? Bluetooth = null);
 public sealed record ReturnRequestResponse(
     Guid Id,
     string PickupCode,

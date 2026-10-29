@@ -22,9 +22,13 @@ public sealed record OpenLockerResponse(
     int HardwareChannel,
     LockerAccessResult Result,
     string? FailureReason,
-    DateTimeOffset OccurredAt);
+    DateTimeOffset OccurredAt,
+    BluetoothCommandResponse? Bluetooth = null);
 
 public sealed record LockerUnlockCommand(
     Guid CommandId,
     string DeviceIdentifier,
-    int HardwareChannel);
+    int HardwareChannel,
+    Guid? DeliveryId = null,
+    bool OperatorOverride = false,
+    string? WorkflowCommand = null);
