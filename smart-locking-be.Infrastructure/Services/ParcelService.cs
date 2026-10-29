@@ -147,6 +147,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, TimeProvider t
     private IQueryable<Parcel> ScopeToUser(Guid userId, string role)
     {
         IQueryable<Parcel> query = dbContext.Parcels.AsNoTracking();
+        if (role == nameof(UserRole.Administrator)) return query;
         if (role == nameof(UserRole.Resident))
         {
             return query.Where(parcel => parcel.DeliveryRequest.ResidentProfile!.UserId == userId);
@@ -154,7 +155,8 @@ public sealed class ParcelService(ApplicationDbContext dbContext, TimeProvider t
 
         if (role == nameof(UserRole.LockerOperator))
         {
-            return query.Where(parcel => dbContext.OperatorAssignments.Any(assignment =>
+            var assignments = dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow());
+            return query.Where(parcel => assignments.Any(assignment =>
                 assignment.OperatorUserId == userId &&
                 assignment.LockerId == parcel.DeliveryRequest.LockerId &&
                 assignment.RevokedAt == null));
@@ -162,15 +164,18 @@ public sealed class ParcelService(ApplicationDbContext dbContext, TimeProvider t
 
         throw new ForbiddenException(ParcelErrorCodes.AccessDenied, "Role cannot access parcels.");
     }
-    // Dùng chung use case với đường /operations để không có đường bỏ qua bước thu hồi PIN trên ESP.
+    // Dùng chung use case reset để chuyển hàng không bỏ qua bước thu hồi PIN trên ESP.
     public Task<OverdueTransferResponse> TransferOverdueAsync(Guid userId, string role, Guid parcelId, CancellationToken cancellationToken = default)
         => compartmentResets.RequestTransferAsync(userId, role, parcelId, cancellationToken);
+
+    private static OverdueTransferResponse TransferResponse(Parcel parcel) => new(
+        parcel.Id, parcel.ParcelCode, parcel.DeliveryRequest.Locker.RecoveryAddress, parcel.Status.ToString());
 
     private async Task EnsureOperationalAccessAsync(Guid userId, string role, Guid lockerId, CancellationToken cancellationToken)
     {
         if (role == nameof(UserRole.Administrator)) return;
         if (role != nameof(UserRole.LockerOperator) ||
-            !await dbContext.OperatorAssignments.AnyAsync(item =>
+            !await dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow()).AnyAsync(item =>
                 item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
                 cancellationToken))
             throw new ForbiddenException(LockerErrorCodes.AccessDenied, "Locker is outside your operational scope.");
@@ -189,6 +194,7 @@ public sealed class ParcelService(ApplicationDbContext dbContext, TimeProvider t
             .SingleOrDefaultAsync(item => item.Id == parcelId, cancellationToken)
             ?? throw new NotFoundException(ParcelErrorCodes.NotFound, "Parcel not found.");
 
+        // Late door telemetry must not replace an Operator-confirmed transfer with resident pickup.
         if (parcel.Status is ParcelStatus.Retrieved or ParcelStatus.Removed)
             return;
         if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue))

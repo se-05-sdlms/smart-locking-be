@@ -32,6 +32,15 @@ public sealed class IncidentSlaService(
         _ => IncidentPriority.Medium
     };
 
+    public static SlaTargets TargetsFor(IncidentPriority priority, SystemPolicy? policy, IncidentSlaOptions defaults) =>
+        policy is null ? defaults.For(priority) : priority switch
+        {
+            IncidentPriority.Critical => new() { AcknowledgeMinutes = policy.IncidentCriticalAcknowledgeMinutes, ResolveMinutes = policy.IncidentCriticalResolveMinutes },
+            IncidentPriority.High => new() { AcknowledgeMinutes = policy.IncidentHighAcknowledgeMinutes, ResolveMinutes = policy.IncidentHighResolveMinutes },
+            IncidentPriority.Low => new() { AcknowledgeMinutes = policy.IncidentLowAcknowledgeMinutes, ResolveMinutes = policy.IncidentLowResolveMinutes },
+            _ => new() { AcknowledgeMinutes = policy.IncidentMediumAcknowledgeMinutes, ResolveMinutes = policy.IncidentMediumResolveMinutes }
+        };
+
     public async Task<IncidentSlaRunResult> RunAsync(CancellationToken cancellationToken = default)
     {
         IncidentSlaOptions settings = options.Value;
@@ -41,6 +50,8 @@ public sealed class IncidentSlaService(
         }
 
         DateTimeOffset now = timeProvider.GetUtcNow();
+        SystemPolicy? policy = await dbContext.SystemPolicies.AsNoTracking().SingleOrDefaultAsync(item => item.IsActive &&
+            item.EffectiveFrom <= now && (item.EffectiveTo == null || now < item.EffectiveTo), cancellationToken);
         double warningFraction = Math.Clamp(settings.WarningPercent, 1, 99) / 100d;
         List<Incident> open = await dbContext.Incidents
             .Where(incident => incident.Status == IncidentStatus.Open || incident.Status == IncidentStatus.Investigating)
@@ -51,7 +62,7 @@ public sealed class IncidentSlaService(
         foreach (Incident incident in open)
         {
             IncidentPriority priority = GetPriority(incident.Type);
-            SlaTargets targets = settings.For(priority);
+            SlaTargets targets = TargetsFor(priority, policy, settings);
             TimeSpan sinceCreated = now - incident.CreatedAt;
             TimeSpan acknowledgeLimit = TimeSpan.FromMinutes(targets.AcknowledgeMinutes);
             TimeSpan resolveLimit = TimeSpan.FromMinutes(targets.ResolveMinutes);
@@ -146,15 +157,10 @@ public sealed class IncidentSlaService(
         }
 
         List<Guid> recipients = [];
-        if (incident.AssignedOperatorUserId.HasValue)
+        if (incident.LockerId.HasValue)
         {
-            recipients.Add(incident.AssignedOperatorUserId.Value);
-        }
-        else if (incident.LockerId.HasValue)
-        {
-            recipients = await dbContext.OperatorAssignments
-                .Where(assignment => assignment.LockerId == incident.LockerId && assignment.RevokedAt == null &&
-                                     assignment.OperatorUser.Status == UserStatus.Active)
+            recipients = await dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow())
+                .Where(assignment => assignment.LockerId == incident.LockerId && assignment.RevokedAt == null)
                 .Select(assignment => assignment.OperatorUserId)
                 .Distinct()
                 .ToListAsync(cancellationToken);

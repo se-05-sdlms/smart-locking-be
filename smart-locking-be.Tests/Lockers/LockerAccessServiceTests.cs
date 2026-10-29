@@ -27,6 +27,7 @@ public sealed class LockerAccessServiceTests
         var (locker, slot) = await SeedLockerAsync(db);
         slot.OperationalStatus = LockerCompartmentOperationalStatus.OutOfService;
         var actor = Guid.NewGuid();
+        db.Add(new User { Id = actor, PhoneNumber = "0900000099", Role = UserRole.LockerOperator, Status = UserStatus.Active });
         if (assigned)
             db.Add(new OperatorAssignment { Id = Guid.NewGuid(), OperatorUserId = actor, LockerId = locker.Id, RevokedAt = revoked ? Now : null });
         await db.SaveChangesAsync();
@@ -267,7 +268,9 @@ public sealed class LockerAccessServiceTests
             LockerId = locker.Id,
             ResidentProfile = resident,
             ResidentProfileId = resident.Id,
-            ReturnCode = "123456"
+            ReturnCode = "123456",
+            AllocatedCompartmentId = slot.Id,
+            Status = ReturnRequestStatus.Allocated
         };
         db.Add(request);
         await db.SaveChangesAsync();
@@ -283,6 +286,13 @@ public sealed class LockerAccessServiceTests
         Assert.Equal(LockerAccessResult.Succeeded, response.Result);
         Assert.NotNull(response.Bluetooth);
         Assert.StartsWith("b2|", response.Bluetooth.Command);
+        Assert.Empty(dispatcher.Commands);
+        request.Cancellation = new ReturnCancellationRequest { ReturnRequestId = request.Id, ResidentUserId = resident.UserId, Status = "PendingVerification", RequestedAt = Now };
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<ConflictException>(() => service.OpenAsync(new OpenLockerRequest(locker.Id, slot.Id,
+            resident.UserId, null, null, request.Id, LockerAccessType.ResidentReturnDropOff,
+            LockerAccessMethod.Bluetooth, null, null)));
+        Assert.Single(db.LockerAccessEvents);
         Assert.Empty(dispatcher.Commands);
     }
 

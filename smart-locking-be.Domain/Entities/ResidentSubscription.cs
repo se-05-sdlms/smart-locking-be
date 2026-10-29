@@ -42,6 +42,13 @@ public sealed class ResidentSubscription
     /// </summary>
     public decimal PriceSnapshot { get; set; }
 
+    // Null means the historical benefit was not recorded; never infer it from today's catalogue.
+    public string? PlanCodeSnapshot { get; set; }
+    public string? PlanNameSnapshot { get; set; }
+    public int? DurationDaysSnapshot { get; set; }
+    public int? MaxActiveParcelsSnapshot { get; set; }
+    public DateTimeOffset? BenefitsSnapshotRecordedAt { get; set; }
+
     /// <summary>
     /// Mã đơn hàng trên cổng thanh toán bên thứ ba (PayOS orderCode).
     /// </summary>

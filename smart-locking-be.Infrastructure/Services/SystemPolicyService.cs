@@ -60,6 +60,8 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
     {
         await using IDbContextTransaction? transaction = dbContext.Database.IsRelational()
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (dbContext.Database.IsNpgsql())
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({EffectiveOperatorAssignmentQueries.AllocationLock})", cancellationToken);
         SystemPolicy target = await dbContext.SystemPolicies.SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new NotFoundException(PolicyErrorCodes.NotFound, "System policy not found.");
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -68,6 +70,31 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
         {
             policy.IsActive = false;
             policy.EffectiveTo = now;
+        }
+        var obsoleteCoverage = await dbContext.TemporaryOperatorAssignments.Include(x => x.Absence)
+            .Where(x => x.PolicyId != id && (x.Status == TemporaryAssignmentStatus.Approved || x.Status == TemporaryAssignmentStatus.Active))
+            .ToListAsync(cancellationToken);
+        var adminIds = await dbContext.Users.Where(x => x.Role == UserRole.Administrator && x.Status == UserStatus.Active)
+            .Select(x => x.Id).ToListAsync(cancellationToken);
+        foreach (var coverage in obsoleteCoverage)
+        {
+            coverage.Status = TemporaryAssignmentStatus.NeedsApproval;
+            coverage.ActivatedAt = null;
+            coverage.StatusReason = "System policy changed. Explicit Admin reapproval is required.";
+            AddAudit(adminUserId, "OperatorReplacement.ReapprovalRequired", coverage.Id, coverage.StatusReason, now);
+            foreach (Guid recipient in adminIds.Concat(coverage.OperatorUserId is { } substitute ? new[] { substitute } : Array.Empty<Guid>()).Distinct())
+                dbContext.Notifications.Add(new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = recipient,
+                    Type = "OperatorReplacement",
+                    Channel = NotificationChannel.InApp,
+                    Title = "Operator coverage requires reapproval",
+                    Message = $"Locker {coverage.LockerId}; {coverage.StatusReason}",
+                    DeliveryStatus = NotificationDeliveryStatus.Sent,
+                    CreatedAt = now,
+                    SentAt = now
+                });
         }
         target.IsActive = true;
         target.EffectiveFrom = now;
@@ -80,6 +107,14 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
 
     private static void Validate(SaveSystemPolicyRequest request)
     {
+        bool anyCoverage = request.OperatorReplacementRadiusKm.HasValue || request.OperatorReplacementMaxLoad.HasValue ||
+            request.OperatorReplacementAreas is not null || request.OperatorReplacementEligibleUserIds is not null;
+        if (anyCoverage && (request.OperatorReplacementRadiusKm is not > 0 ||
+            !double.IsFinite(request.OperatorReplacementRadiusKm.Value) || request.OperatorReplacementMaxLoad is not > 0 ||
+            request.OperatorReplacementAreas is not { Length: > 0 } || request.OperatorReplacementAreas.Any(string.IsNullOrWhiteSpace) ||
+            request.OperatorReplacementAreas.Any(x => x.Trim().Length > 100) ||
+            request.OperatorReplacementEligibleUserIds is not { Length: > 0 } || request.OperatorReplacementEligibleUserIds.Contains(Guid.Empty)))
+            throw BadRequestException.For("operatorReplacement", "Provide a positive radius and load, service areas and eligible operator IDs together.");
         if (request.GuestSessionTimeoutMinutes <= 0 || request.ManualApprovalTimeoutMinutes <= 0 || request.CompartmentReservationMinutes <= 0)
             throw BadRequestException.For("timeout", "Timeout values must be positive.");
         if (request.OverdueStartAfterHours != 7 * 24 || request.MaxStorageHours != 14 * 24)
@@ -90,10 +125,20 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
             throw BadRequestException.For("fee", "Fee or currency is invalid.");
         if (request.OtpMaxAttempts <= 0 || request.OtpLockoutMinutes <= 0)
             throw BadRequestException.For("otpPolicy", "OTP policy is invalid.");
+        IncidentSlaPolicy sla = request.IncidentSla ?? new();
+        (int Acknowledge, int Resolve)[] limits = [(sla.CriticalAcknowledgeMinutes, sla.CriticalResolveMinutes),
+            (sla.HighAcknowledgeMinutes, sla.HighResolveMinutes), (sla.MediumAcknowledgeMinutes, sla.MediumResolveMinutes),
+            (sla.LowAcknowledgeMinutes, sla.LowResolveMinutes)];
+        if (limits.Any(limit => limit.Acknowledge <= 0 || limit.Resolve < limit.Acknowledge))
+            throw BadRequestException.For("incidentSla", "SLA targets must be positive; resolution must not precede acknowledgement.");
     }
 
     private static void Apply(SystemPolicy policy, SaveSystemPolicyRequest request)
     {
+        policy.OperatorReplacementRadiusKm = request.OperatorReplacementRadiusKm;
+        policy.OperatorReplacementMaxLoad = request.OperatorReplacementMaxLoad;
+        policy.OperatorReplacementAreas = request.OperatorReplacementAreas?.Select(x => x.Trim()).Distinct().Order().ToArray();
+        policy.OperatorReplacementEligibleUserIds = request.OperatorReplacementEligibleUserIds?.Distinct().Order().ToArray();
         policy.DefaultApprovalMode = request.DefaultApprovalMode;
         policy.GuestSessionTimeoutMinutes = request.GuestSessionTimeoutMinutes;
         policy.ManualApprovalTimeoutMinutes = request.ManualApprovalTimeoutMinutes;
@@ -111,6 +156,15 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
         policy.EnableRemoteUnlock = request.EnableRemoteUnlock;
         policy.EnableBluetoothUnlock = request.EnableBluetoothUnlock;
         policy.EffectiveFrom = request.EffectiveFrom;
+        IncidentSlaPolicy sla = request.IncidentSla ?? new();
+        policy.IncidentCriticalAcknowledgeMinutes = sla.CriticalAcknowledgeMinutes;
+        policy.IncidentCriticalResolveMinutes = sla.CriticalResolveMinutes;
+        policy.IncidentHighAcknowledgeMinutes = sla.HighAcknowledgeMinutes;
+        policy.IncidentHighResolveMinutes = sla.HighResolveMinutes;
+        policy.IncidentMediumAcknowledgeMinutes = sla.MediumAcknowledgeMinutes;
+        policy.IncidentMediumResolveMinutes = sla.MediumResolveMinutes;
+        policy.IncidentLowAcknowledgeMinutes = sla.LowAcknowledgeMinutes;
+        policy.IncidentLowResolveMinutes = sla.LowResolveMinutes;
     }
 
     private void AddAudit(Guid actor, string action, Guid id, string details, DateTimeOffset now) =>
@@ -132,5 +186,10 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
         item.OverdueStartAfterHours, item.OverdueFeePerHour, item.Currency, item.MaxStorageHours,
         item.ClearanceEligibilityAfterHours, item.ClearanceNoticeBeforeHours, item.PickupReminderStartDay,
         item.OtpMaxAttempts, item.OtpLockoutMinutes, item.EnableOtp, item.EnableRemoteUnlock,
-        item.EnableBluetoothUnlock, item.EffectiveFrom, item.EffectiveTo, item.IsActive, item.CreatedAt);
+        item.EnableBluetoothUnlock, item.EffectiveFrom, item.EffectiveTo, item.IsActive, item.CreatedAt,
+        item.OperatorReplacementRadiusKm, item.OperatorReplacementMaxLoad, item.OperatorReplacementAreas, item.OperatorReplacementEligibleUserIds,
+        new IncidentSlaPolicy(item.IncidentCriticalAcknowledgeMinutes, item.IncidentCriticalResolveMinutes,
+            item.IncidentHighAcknowledgeMinutes, item.IncidentHighResolveMinutes,
+            item.IncidentMediumAcknowledgeMinutes, item.IncidentMediumResolveMinutes,
+            item.IncidentLowAcknowledgeMinutes, item.IncidentLowResolveMinutes));
 }

@@ -10,6 +10,8 @@ public sealed class ResidentSubscriptionConfiguration() : BaseConfiguration<Resi
     {
         EnumAsString(builder.Property(e => e.Status)).IsRequired();
         builder.Property(e => e.PriceSnapshot).HasPrecision(18, 2);
+        Varchar(builder.Property(e => e.PlanCodeSnapshot)).HasMaxLength(50);
+        Varchar(builder.Property(e => e.PlanNameSnapshot)).HasMaxLength(200);
         Varchar(builder.Property(e => e.ExternalOrderCode)).HasMaxLength(100);
         Varchar(builder.Property(e => e.ExternalTransactionId)).HasMaxLength(200);
 

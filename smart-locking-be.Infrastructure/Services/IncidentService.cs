@@ -137,11 +137,10 @@ public sealed class IncidentService(
             throw new NotFoundException(LockerErrorCodes.InvalidCompartment, "Locker compartment not found.");
         }
 
-        Guid? assignedOperatorUserId = await dbContext.OperatorAssignments
+        Guid? assignedOperatorUserId = await dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow())
             .Where(assignment =>
                 assignment.LockerId == lockerId &&
-                assignment.RevokedAt == null &&
-                assignment.OperatorUser.Status == UserStatus.Active)
+                assignment.RevokedAt == null)
             .Select(assignment => (Guid?)assignment.OperatorUserId)
             .SingleOrDefaultAsync(cancellationToken);
         DateTimeOffset now = timeProvider.GetUtcNow();
@@ -352,17 +351,21 @@ public sealed class IncidentService(
         return await LoadDetailAsync(incidentId, cancellationToken);
     }
 
-    private IQueryable<Incident> ScopeOperational(Guid userId, string role) => role switch
+    private IQueryable<Incident> ScopeOperational(Guid userId, string role)
     {
-        nameof(UserRole.Administrator) => dbContext.Incidents,
-        nameof(UserRole.LockerOperator) => dbContext.Incidents.Where(incident =>
-            incident.LockerId.HasValue &&
-            dbContext.OperatorAssignments.Any(assignment =>
-                assignment.OperatorUserId == userId &&
-                assignment.LockerId == incident.LockerId &&
-                assignment.RevokedAt == null)),
-        _ => throw new ForbiddenException(IncidentErrorCodes.AccessDenied, "Role cannot access operational incidents.")
-    };
+        var assignments = dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow());
+        return role switch
+        {
+            nameof(UserRole.Administrator) => dbContext.Incidents,
+            nameof(UserRole.LockerOperator) => dbContext.Incidents.Where(incident =>
+                incident.LockerId.HasValue &&
+                assignments.Any(assignment =>
+                    assignment.OperatorUserId == userId &&
+                    assignment.LockerId == incident.LockerId &&
+                    assignment.RevokedAt == null)),
+            _ => throw new ForbiddenException(IncidentErrorCodes.AccessDenied, "Role cannot access operational incidents.")
+        };
+    }
 
     private async Task<Incident> FindOperationalIncidentAsync(
         Guid userId,
@@ -587,8 +590,8 @@ public sealed class IncidentService(
             item => item.Id == compartmentId && item.LockerId == locker.Id, cancellationToken))
             throw new NotFoundException(LockerErrorCodes.InvalidCompartment, "Locker compartment not found.");
 
-        Guid? assignedOperatorUserId = await dbContext.OperatorAssignments
-            .Where(item => item.LockerId == locker.Id && item.RevokedAt == null && item.OperatorUser.Status == UserStatus.Active)
+        Guid? assignedOperatorUserId = await dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow())
+            .Where(item => item.LockerId == locker.Id && item.RevokedAt == null)
             .Select(item => (Guid?)item.OperatorUserId)
             .SingleOrDefaultAsync(cancellationToken);
         DateTimeOffset now = timeProvider.GetUtcNow();

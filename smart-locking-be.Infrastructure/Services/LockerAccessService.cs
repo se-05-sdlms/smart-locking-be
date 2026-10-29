@@ -21,13 +21,33 @@ public sealed class LockerAccessService(
         CancellationToken cancellationToken = default)
     {
         ValidateContext(request);
-        await using var pickupTransaction = request.AccessType == LockerAccessType.ResidentPickup && request.ParcelId.HasValue
-            ? await ParcelTransitionLock.AcquireAsync(dbContext, request.ParcelId.Value, cancellationToken) : null;
-        if (request.AccessType == LockerAccessType.ResidentPickup && request.ParcelId.HasValue &&
-            !await dbContext.Parcels.AnyAsync(item => item.Id == request.ParcelId.Value &&
-                item.DeliveryRequest.LockerId == request.LockerId && item.DeliveryRequest.AllocatedCompartmentId == request.LockerCompartmentId &&
-                (item.Status == ParcelStatus.Stored || item.Status == ParcelStatus.Overdue) && item.MaxStorageUntil > timeProvider.GetUtcNow(), cancellationToken))
-            throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel is no longer available for resident pickup.");
+        await using var parcelTransaction = request.AccessType == LockerAccessType.ResidentPickup
+            ? await ParcelTransitionLock.AcquireAsync(dbContext, request.ParcelId!.Value, cancellationToken)
+            : null;
+        if (request.AccessType == LockerAccessType.ResidentPickup)
+        {
+            bool available = await dbContext.Parcels.AnyAsync(item => item.Id == request.ParcelId &&
+                item.DeliveryRequest.LockerId == request.LockerId &&
+                item.DeliveryRequest.AllocatedCompartmentId == request.LockerCompartmentId &&
+                (item.Status == ParcelStatus.Stored || item.Status == ParcelStatus.Overdue) &&
+                item.MaxStorageUntil > timeProvider.GetUtcNow(), cancellationToken);
+            if (!available)
+                throw new ConflictException(ParcelErrorCodes.InvalidState, "Parcel is no longer available for pickup.");
+        }
+        await using var returnTransition = request.ReturnRequestId.HasValue
+            ? await ReturnTransitionLock.AcquireAsync(dbContext, request.ReturnRequestId.Value, cancellationToken) : null;
+        if (request.AccessType is LockerAccessType.ResidentReturnDropOff or LockerAccessType.ShipperReturnPickup)
+        {
+            ReturnRequest? returnRequest = await dbContext.ReturnRequests.Include(item => item.Cancellation)
+                .Include(item => item.ResidentProfile).SingleOrDefaultAsync(item => item.Id == request.ReturnRequestId, cancellationToken);
+            bool dropOff = request.AccessType == LockerAccessType.ResidentReturnDropOff;
+            if (returnRequest is null || returnRequest.Cancellation is not null || returnRequest.LockerId != request.LockerId
+                || returnRequest.AllocatedCompartmentId != request.LockerCompartmentId
+                || (dropOff ? returnRequest.Status != ReturnRequestStatus.Allocated || returnRequest.ResidentProfile.UserId != request.UserId
+                    : returnRequest.Status != ReturnRequestStatus.Deposited || string.IsNullOrWhiteSpace(returnRequest.ShipperSessionTokenHash)))
+                throw new ConflictException(ReturnErrorCodes.InvalidState, "Return access is revoked or no longer available.");
+        }
+
         bool useBluetooth = request.AccessMethod == LockerAccessMethod.Bluetooth;
         BluetoothCommandResponse? bluetoothCommand = null;
 
@@ -70,6 +90,9 @@ public sealed class LockerAccessService(
         };
 
         string? blockedReason = GetBlockedReason(compartment, useBluetooth, monitoringEnabled);
+        if (blockedReason is null && request.AccessType != LockerAccessType.OperatorEmergency &&
+            !await dbContext.OperationalCompartments().AnyAsync(item => item.Id == compartment.Id, cancellationToken))
+            blockedReason = "Locker or compartment is blocked by maintenance or an unresolved equipment incident.";
         if (blockedReason is not null)
         {
             accessEvent.Result = LockerAccessResult.Blocked;
@@ -117,7 +140,8 @@ public sealed class LockerAccessService(
             OccurredAt = now
         });
         await dbContext.SaveChangesAsync(cancellationToken);
-        if (pickupTransaction is not null) await pickupTransaction.CommitAsync(cancellationToken);
+        if (parcelTransaction is not null) await parcelTransaction.CommitAsync(cancellationToken);
+        if (returnTransition is not null) await returnTransition.CommitAsync(cancellationToken);
         return Map(accessEvent, compartment, bluetoothCommand);
     }
 

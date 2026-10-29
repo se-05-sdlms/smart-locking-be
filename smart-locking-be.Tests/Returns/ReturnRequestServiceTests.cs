@@ -115,8 +115,10 @@ public sealed class ReturnRequestServiceTests
         Assert.Equal(registered.Id, resident.RegisteredLockerId);
     }
 
-    [Fact]
-    public async Task FullReturnFlow_UsesSixDigitCodeAndCompletesOnce()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FullReturnFlow_UsesSixDigitCodeAndCompletesOnce(bool cancellationRequested)
     {
         await using ApplicationDbContext db = CreateDb();
         Guid userId = Guid.NewGuid(); Guid lockerId = Guid.NewGuid(); Guid compartmentId = Guid.NewGuid(); DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -134,13 +136,41 @@ public sealed class ReturnRequestServiceTests
         ReturnRequestResponse deposited = await service.GetAsync(userId, created.Id);
         ReturnPickupSessionResponse session = await service.CreateAsync(new ValidateReturnPickupRequest("LK-01", deposited.PickupCode));
         await service.OpenCompartmentAsync(created.Id, session.GuestSessionToken);
+        if (cancellationRequested)
+        {
+            var cancelled = await service.CancelAsync(userId, created.Id);
+            Assert.Equal("PendingVerification", cancelled.Cancellation!.Status);
+            Assert.Empty(cancelled.PickupCode);
+            Assert.Null((await db.ReturnRequests.SingleAsync()).CompartmentReleasedAt);
+            await Assert.ThrowsAsync<ConflictException>(() => service.OpenCompartmentAsync(created.Id, session.GuestSessionToken,
+                accessMethod: LockerAccessMethod.Bluetooth));
+        }
         await service.FinalizePickupAsync(created.Id, now);
         ReturnRequestResponse completed = await service.GetAsync(userId, created.Id);
 
         Assert.Matches("^[0-9]{6}$", deposited.PickupCode);
         Assert.Equal("A01", opened.CompartmentCode);
         Assert.Equal(ReturnRequestStatus.Completed, completed.Status);
+        Assert.Empty(completed.PickupCode);
+        if (cancellationRequested) Assert.Equal("AlreadyCollected", completed.Cancellation!.Status);
+        else Assert.True((await service.GetAsync(created.Id, session.GuestSessionToken)).Completed);
         await Assert.ThrowsAsync<ConflictException>(() => service.CreateAsync(new ValidateReturnPickupRequest("LK-01", deposited.PickupCode)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BluetoothAllocation_RespectsIndependentOperationalBlocks(bool incident)
+    {
+        await using var db = CreateDb();
+        var locker = new Locker { Id = Guid.NewGuid(), Code = "B", DeviceIdentifier = "LKR-B", Address = "B", RecoveryAddress = "B", OperationalStatus = LockerOperationalStatus.Operational };
+        var slot = new LockerCompartment { Id = Guid.NewGuid(), Locker = locker, LockerId = locker.Id, Code = "B-01", HardwareCode = "CH1", HardwareChannel = 1, OperationalStatus = LockerCompartmentOperationalStatus.Operational, DoorStatus = DoorStatus.Closed };
+        db.AddRange(locker, slot);
+        if (incident) db.Add(new Incident { Id = Guid.NewGuid(), LockerId = locker.Id, LockerCompartmentId = slot.Id, Type = "compartment", Status = IncidentStatus.Open });
+        else db.Add(new MaintenanceRequest { Id = Guid.NewGuid(), LockerId = locker.Id, LockerCompartmentId = slot.Id, Status = MaintenanceStatus.Open });
+        await db.SaveChangesAsync();
+        Assert.Null(await new CompartmentAllocationService(db, TimeProvider.System).ReserveAvailableAsync(locker.Id, null, Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(10), verifyDoorOnDevice: true));
+        Assert.Empty(db.CompartmentReservations);
     }
 
     private static ApplicationDbContext CreateDb() => new(new DbContextOptionsBuilder<ApplicationDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);

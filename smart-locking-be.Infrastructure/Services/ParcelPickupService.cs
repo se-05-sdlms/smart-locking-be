@@ -77,6 +77,7 @@ public sealed class ParcelPickupService(
             throw new ForbiddenException(ParcelErrorCodes.AccessDenied, "Bạn không có quyền xác nhận lượt lấy hàng này.");
         }
 
+        await using var transaction = await ParcelTransitionLock.AcquireAsync(dbContext, accessEvent.ParcelId.Value, cancellationToken);
         Parcel parcel = await dbContext.Parcels
             .Include(item => item.DeliveryRequest)
             .SingleOrDefaultAsync(item => item.Id == accessEvent.ParcelId.Value, cancellationToken)

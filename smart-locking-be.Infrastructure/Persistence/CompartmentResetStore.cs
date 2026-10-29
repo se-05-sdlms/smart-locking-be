@@ -13,8 +13,7 @@ namespace smart_locking_be.Infrastructure.Persistence;
 public sealed class CompartmentResetStore(ApplicationDbContext db) : ICompartmentResetStore
 {
     public Task<bool> IsOperatorAssignedAsync(Guid actorId, Guid lockerId, DateTimeOffset now, CancellationToken ct) =>
-        db.OperatorAssignments.AnyAsync(x => x.OperatorUserId == actorId && x.LockerId == lockerId &&
-            x.AssignedAt <= now && x.RevokedAt == null, ct);
+        db.EffectiveOperatorAssignments(now).AnyAsync(x => x.OperatorUserId == actorId && x.LockerId == lockerId, ct);
 
     public Task<LockerCompartment?> FindSlotAsync(Guid? lockerId, Guid slotId, CancellationToken ct) =>
         db.LockerCompartments.Include(x => x.Locker)
@@ -102,12 +101,9 @@ public sealed class CompartmentResetStore(ApplicationDbContext db) : ICompartmen
         if (await db.OfflineLockerEvents.AnyAsync(item => item.DeliveryId == parcel.DeliveryRequestId &&
             item.Kind == "P" && item.Status == "NeedsReview", ct))
             throw new ConflictException(BluetoothErrorCodes.InvalidState, "A device pickup outcome still requires reconciliation.");
-        var slot = parcel.DeliveryRequest.AllocatedCompartment;
-        DateTimeOffset? observed = slot?.DoorStatusObservedAt;
-        bool closed = slot?.DoorStatus == DoorStatus.Closed;
+        // CLOSED telemetry alone cannot settle an earlier pickup command (dev business guard).
         if (await db.LockerAccessEvents.AnyAsync(item => item.ParcelId == parcel.Id &&
-            item.AccessType == LockerAccessType.ResidentPickup && item.Result == LockerAccessResult.Succeeded &&
-            (!closed || !observed.HasValue || item.OccurredAt >= observed.Value), ct))
+            item.AccessType == LockerAccessType.ResidentPickup && item.Result == LockerAccessResult.Succeeded, ct))
             throw new ConflictException(BluetoothErrorCodes.InvalidState, "A pickup unlock still awaits reconciliation.");
         ParcelStatus previous = parcel.Status;
         parcel.Status = ParcelStatus.Removed;

@@ -8,7 +8,7 @@ using System.Security.Claims;
 namespace smart_locking_be.API.Hubs;
 
 [Authorize]
-public sealed class OperationsHub(ApplicationDbContext dbContext) : Hub
+public sealed class OperationsHub(ApplicationDbContext dbContext, TimeProvider timeProvider) : Hub
 {
     public override async Task OnConnectedAsync()
     {
@@ -23,11 +23,11 @@ public sealed class OperationsHub(ApplicationDbContext dbContext) : Hub
             throw new HubException("Unauthorized.");
         string? role = Context.User?.FindFirstValue(ClaimTypes.Role);
         bool allowed = role == nameof(UserRole.Administrator) ||
-            role == nameof(UserRole.LockerOperator) && await dbContext.OperatorAssignments.AnyAsync(item =>
+            role == nameof(UserRole.LockerOperator) && await dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow()).AnyAsync(item =>
                 item.OperatorUserId == userId && item.LockerId == lockerId && item.RevokedAt == null,
                 Context.ConnectionAborted);
         if (!allowed) throw new HubException("Locker is outside the assigned scope.");
-        await Groups.AddToGroupAsync(Context.ConnectionId, LockerGroup(lockerId));
+        // Authorized subscription acknowledgement; broadcasts route through current user groups.
     }
 
     public static string UserGroup(Guid userId) => $"user:{userId:N}";

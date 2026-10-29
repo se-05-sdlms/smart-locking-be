@@ -11,7 +11,9 @@ public sealed partial class OfflinePinService
     {
         var compartment = await FindCompartment(item, ct);
         if (compartment is null) { Review(item, "Unknown return compartment.", null); return; }
-        var request = await db.ReturnRequests.Include(x => x.ResidentProfile).ThenInclude(x => x.User)
+        // Share the same return row lock as cancellation and online guest access.
+        await using var transition = await ReturnTransitionLock.AcquireAsync(db, item.DeliveryId, ct);
+        var request = await db.ReturnRequests.Include(x => x.Cancellation).Include(x => x.ResidentProfile).ThenInclude(x => x.User)
             .SingleOrDefaultAsync(x => x.Id == item.DeliveryId, ct);
         var occurred = item.ClosedAt ?? item.ReceivedAt;
         bool notify = request is null || (item.Kind == "R" ? request.Status == ReturnRequestStatus.Allocated : request.Status == ReturnRequestStatus.Deposited);
@@ -55,7 +57,13 @@ public sealed partial class OfflinePinService
             request.Status = ReturnRequestStatus.Completed;
             request.ShipperPickedUpAt ??= occurred;
             request.CompartmentReleasedAt ??= occurred;
-            request.ShipperSessionTokenHash = null;
+            // Keep the session for authenticated completion reads; Completed still prevents unlocking.
+            if (request.Cancellation is not null)
+            {
+                request.Cancellation.Status = "AlreadyCollected";
+                request.Cancellation.CompletedAt = occurred;
+                request.ShipperSessionTokenHash = null;
+            }
             request.UpdatedAt = item.ReceivedAt;
         }
         compartment.DoorStatus = DoorStatus.Closed;
@@ -95,7 +103,10 @@ public sealed partial class OfflinePinService
                     Type = item.Kind == "R" ? "ReturnDeposited" : "ReturnPickedUp",
                     Channel = notificationChannel,
                     Title = item.Kind == "R" ? "Da gui do vao tu" : "Guest da lay do",
-                    Message = item.Kind == "R" ? $"Do da o ngan {compartment.Code}. Mo app de chia se ma lay do." : $"Do tai ngan {compartment.Code} da duoc lay.",
+                    Message = item.Kind == "R"
+                        ? request.Cancellation is null ? $"Do da o ngan {compartment.Code}. Mo app de chia se ma lay do."
+                            : "Cancellation is pending verification. Do not share the previous pickup code or retrieve the parcel. Contact the locker operator."
+                        : $"Do tai ngan {compartment.Code} da duoc lay.",
                     DeliveryStatus = notificationChannel == NotificationChannel.InApp ? NotificationDeliveryStatus.Sent : NotificationDeliveryStatus.Pending,
                     SentAt = notificationChannel == NotificationChannel.InApp ? item.ReceivedAt : null,
                     CreatedAt = item.ReceivedAt

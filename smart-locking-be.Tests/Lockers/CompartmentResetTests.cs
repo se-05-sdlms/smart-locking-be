@@ -302,6 +302,88 @@ public sealed class CompartmentResetTests
         await service.ReceiveAsync(device, proof);
         Assert.Equal(initialAudits, await db.AuditLogs.CountAsync()); Assert.Single(db.Incidents);
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Reset_RejectsInactiveOrAbsentOperatorDespitePermanentAssignment(bool absent)
+    {
+        var x = Setup(); await using var db = x.Db; var actor = Guid.NewGuid(); var now = DateTimeOffset.UtcNow;
+        db.Users.Add(new User
+        {
+            Id = actor,
+            PhoneNumber = "0900000099",
+            Role = UserRole.LockerOperator,
+            Status = absent ? UserStatus.Active : UserStatus.Disabled
+        });
+        db.OperatorAssignments.Add(new OperatorAssignment { Id = Guid.NewGuid(), OperatorUserId = actor, LockerId = x.Slot.LockerId, AssignedAt = now.AddDays(-1) });
+        if (absent) db.OperatorAbsences.Add(new OperatorAbsence
+        {
+            Id = Guid.NewGuid(),
+            OperatorUserId = actor,
+            CreatedByUserId = actor,
+            StartsAt = now.AddHours(-1),
+            EndsAt = now.AddHours(1),
+            Reason = "Absent"
+        });
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<ForbiddenException>(() => x.Service.RequestAsync(actor, "LockerOperator", x.Slot.LockerId,
+            x.Slot.Id, new(x.Request.Id, true, "Checked empty")));
+        Assert.Null(x.Transport.Command); Assert.Empty(db.AuditLogs);
+    }
+
+    [Fact]
+    public async Task RecoveryArrival_ClosedSampleAfterUnlock_DoesNotSettleUnresolvedPickup()
+    {
+        var x = Setup(); await using var db = x.Db; var parcel = SeedTransfer(db, x.Slot, x.Request);
+        var response = await x.Service.RequestTransferAsync(Guid.NewGuid(), "Administrator", parcel.Id);
+        await x.Service.ReceiveAsync("LKR-B", $"z2|{response.ResetCommandId:N}|LKR-B|1|{parcel.DeliveryRequestId:N}|CLOSED|OK");
+        db.Add(new LockerAccessEvent
+        {
+            Id = Guid.NewGuid(),
+            LockerId = x.Slot.LockerId,
+            LockerCompartmentId = x.Slot.Id,
+            ParcelId = parcel.Id,
+            AccessType = LockerAccessType.ResidentPickup,
+            Result = LockerAccessResult.Succeeded,
+            OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+        });
+        x.Slot.DoorStatus = DoorStatus.Closed; x.Slot.DoorStatusObservedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<ConflictException>(() => x.Service.ConfirmTransferArrivalAsync(Guid.NewGuid(), "Administrator", parcel.Id,
+            new(response.ResetCommandId!.Value, true)));
+        Assert.Equal(ParcelStatus.Overdue, parcel.Status); Assert.Empty(db.ParcelStatusHistories); Assert.Empty(db.Notifications);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MqttGuestCompletion_PreservesCancellationOutcomeAndIsIdempotent(bool cancelled)
+    {
+        var x = Setup(); await using var db = x.Db; long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var user = new User { Id = Guid.NewGuid(), PhoneNumber = "0900000001", Role = UserRole.Resident, Status = UserStatus.Active };
+        var resident = new ResidentProfile { Id = Guid.NewGuid(), User = user, UserId = user.Id, FullName = "Resident" };
+        db.AddRange(user, resident);
+        x.Request.ResidentProfile = resident; x.Request.ResidentProfileId = resident.Id;
+        x.Request.ResidentDepositedAt = DateTimeOffset.FromUnixTimeSeconds(now - 20);
+        x.Request.ShipperSessionTokenHash = "authenticated-session";
+        if (cancelled) x.Request.Cancellation = new ReturnCancellationRequest
+        {
+            ReturnRequestId = x.Request.Id,
+            ResidentUserId = user.Id,
+            Status = "PendingVerification",
+            RequestedAt = DateTimeOffset.UtcNow
+        };
+        await db.SaveChangesAsync();
+        var service = new OfflinePinService(db, new BluetoothProtocol(), TimeProvider.System);
+        var proof = $"o1|{Guid.NewGuid():N}|{x.Request.Id:N}|LKR-B|1|G|0900000001|-|{now - 2}|{now}|2000|1";
+        Assert.Equal("Applied", (await service.ReceiveAsync("LKR-B", proof)).Status);
+        Assert.Equal(ReturnRequestStatus.Completed, x.Request.Status);
+        if (cancelled) { Assert.Equal("AlreadyCollected", x.Request.Cancellation!.Status); Assert.Null(x.Request.ShipperSessionTokenHash); }
+        else Assert.Equal("authenticated-session", x.Request.ShipperSessionTokenHash);
+        int count = await db.Notifications.CountAsync(); await service.ReceiveAsync("LKR-B", proof);
+        Assert.Equal(count, await db.Notifications.CountAsync()); Assert.Single(db.LockerAccessEvents);
+    }
+
     private static (ApplicationDbContext Db, Dispatcher Transport, CompartmentResetService Service, LockerCompartment Slot, ReturnRequest Request) Setup()
     {
         var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
@@ -339,6 +421,7 @@ public sealed class CompartmentResetTests
     public async Task AssignedOperator_CanRequest_ButCannotCompleteBeforeReceipt()
     {
         var x = Setup(); await using var db = x.Db; var actor = Guid.NewGuid();
+        db.Users.Add(new User { Id = actor, PhoneNumber = "0900000099", Role = UserRole.LockerOperator, Status = UserStatus.Active });
         db.OperatorAssignments.Add(new() { Id = Guid.NewGuid(), LockerId = x.Slot.LockerId, OperatorUserId = actor }); await db.SaveChangesAsync();
         var response = await x.Service.RequestAsync(actor, "LockerOperator", x.Slot.LockerId, x.Slot.Id, new(x.Request.Id, true, "Ngăn trống"));
         Assert.Equal("Pending", response.Status); Assert.StartsWith("z1|", x.Transport.Command);

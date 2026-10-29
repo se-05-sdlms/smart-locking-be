@@ -21,10 +21,10 @@ endpoint `page` (default 1) and `pageSize` (default 50, maximum 200). `status` i
 | --- | --- | --- | --- |
 | `parcels` | Parcels | `StoredAt` | `ParcelStatus` |
 | `returns` | Return requests | `CreatedAt` | `ReturnRequestStatus` |
-| `locker-utilization` | One row per locker: compartments total, usable, occupied, utilization % | none (current snapshot) | `LockerOperationalStatus` |
+| `locker-utilization` | One row per locker: current compartment counts and historical occupied/capacity minutes, utilization % | Occupancy intervals intersecting `[from, min(to, generatedAt))` | Current `LockerOperationalStatus` |
 | `incidents` | Incidents (read-only) | `CreatedAt` | `IncidentStatus` |
 | `maintenance` | Maintenance requests | `CreatedAt` | `MaintenanceStatus` |
-| `overdue-transfers` | Parcels an operator removed from a locker (overdue parcels moved to the collection point) | `RemovedAt` | `Removed` only |
+| `overdue-transfers` | Parcels an operator confirmed delivered to `Locker.RecoveryAddress`; processing ends there | `RemovedAt` | `Removed` only |
 | `overdue-fees` | Overdue charges | `CreatedAt` | `OverdueChargeStatus` |
 | `payments` | Overdue-fee payment transactions (PayOS). Resident package purchases are not included. | `RequestedAt` | `PaymentTransactionStatus` |
 | `operational-activities` | Locker events (connection, door, status, alerts) | `OccurredAt` | `LockerEventSeverity` |
@@ -41,6 +41,16 @@ endpoint `page` (default 1) and `pageSize` (default 50, maximum 200). `status` i
 ```
 
 Labels are Vietnamese and ready to render as table headers. Rows are ordered newest first.
+
+### Utilization and time filtering
+
+`utilizationPercent` is the occupied **compartment time** divided by total physical compartment time in the requested interval, multiplied by 100. Parcel occupancy starts at `StoredAt`; return occupancy starts at `ResidentDepositedAt`. The recorded compartment release, resident retrieval/operator removal or Shipper pickup ends occupancy. Open occupancy is capped at `observedUntil` (the earlier of `to` and generation time); future time is never counted. Compartment capacity begins at the later of `from` and its `CreatedAt`. Overlapping parcel/return intervals in one compartment are unioned, so invalid duplicate occupancy cannot inflate usage over 100%.
+
+`occupiedMinutes`, `capacityMinutes`, `observedUntil` and `unresolvedIntervals` are included in the same JSON/CSV contract. A terminal record lacking an ending timestamp contributes to `unresolvedIntervals`, and its locker percentage is `null` rather than guessing when the goods left. The known occupied minutes remain available as a lower bound. An interval without observed capacity also has a `null` percentage.
+
+Physical capacity includes compartments currently inactive or under maintenance: historical operational capacity cannot be reconstructed from their current status. `totalCompartments`, `usableCompartments`, `occupiedCompartments`, locker status and connection are explicitly **current** context, not historical availability. Current occupied counts include both parcels and deposited returns. Lockers created on/after `to` are excluded; sorting is locker code then ID. Historical records must retain their compartment reference. No schema or backfill is introduced.
+
+FE consumers of the utilization report should render the supplied column labels and allow a blank percentage when historical timestamps are incomplete. This changes the previous snapshot meaning of `utilizationPercent`; the report range and this denominator must accompany the number.
 
 ## CSV export
 
