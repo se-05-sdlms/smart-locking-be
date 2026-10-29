@@ -175,6 +175,25 @@ public sealed class LockerAccessServiceTests
         Guid userId = Guid.NewGuid();
         Guid parcelId = Guid.NewGuid();
 
+        var delivery = new DeliveryRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            AllocatedCompartmentId = compartment.Id
+        };
+        dbContext.Add(new Parcel
+        {
+            Id = parcelId,
+            DeliveryRequest = delivery,
+            DeliveryRequestId = delivery.Id,
+            ParcelCode = "TEST-PICKUP",
+            Status = ParcelStatus.Stored,
+            StoredAt = Now.AddMinutes(-5),
+            PickupDueAt = Now.AddHours(1),
+            MaxStorageUntil = Now.AddDays(1)
+        });
+        await dbContext.SaveChangesAsync();
+
         OpenLockerResponse response = await service.OpenAsync(new OpenLockerRequest(
             locker.Id,
             compartment.Id,
@@ -193,7 +212,7 @@ public sealed class LockerAccessServiceTests
         Assert.Equal("127.0.0.1", accessEvent.IpAddress);
         Assert.Equal("resident-mobile", accessEvent.DeviceContext);
         Assert.Equal(
-            new LockerUnlockCommand(accessEvent.Id, locker.DeviceIdentifier, compartment.HardwareChannel),
+            new LockerUnlockCommand(accessEvent.Id, locker.DeviceIdentifier, compartment.HardwareChannel, delivery.Id),
             Assert.Single(dispatcher.Commands));
     }
 
@@ -254,7 +273,8 @@ public sealed class LockerAccessServiceTests
         await db.SaveChangesAsync();
         var dispatcher = new RecordingDispatcher();
         var service = new LockerAccessService(db, dispatcher, new FixedTimeProvider(Now),
-            new BluetoothProtocol(), MonitoringConfiguration());
+            new BluetoothProtocol(), MonitoringConfiguration(), new HmacBluetoothCommandSigner(new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { [$"Bluetooth:CommandSigningKeys:{locker.DeviceIdentifier}"] = new string('1', 64) }).Build()));
 
         var response = await service.OpenAsync(new OpenLockerRequest(locker.Id, slot.Id,
             resident.UserId, null, null, request.Id, LockerAccessType.ResidentReturnDropOff,
@@ -262,7 +282,7 @@ public sealed class LockerAccessServiceTests
 
         Assert.Equal(LockerAccessResult.Succeeded, response.Result);
         Assert.NotNull(response.Bluetooth);
-        Assert.StartsWith("c1|", response.Bluetooth.Command);
+        Assert.StartsWith("b2|", response.Bluetooth.Command);
         Assert.Empty(dispatcher.Commands);
     }
 

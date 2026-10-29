@@ -18,16 +18,12 @@ public sealed class BluetoothWorkflowController(IBluetoothWorkflowService servic
 {
     /// <summary>
     /// Chuẩn bị lệnh để client chuyển xuống tủ. Cho phép anonymous để hỗ trợ guest,
-    /// nhưng D/G vẫn cần session hợp lệ; P/R/N cần JWT resident qua kiểm tra tại service.
+    /// nhưng D/G vẫn cần session hợp lệ; P/R cần JWT resident qua kiểm tra tại service.
     /// Trả lệnh thành công không có nghĩa cửa đã mở hoặc hàng đã được đặt/lấy xong.
     /// </summary>
     [HttpPost("prepare"), AllowAnonymous]
     public Task<BluetoothCommandResponse> Prepare(BluetoothPrepareRequest request, CancellationToken ct) =>
         service.PrepareAsync(User.IsInRole("Resident") && Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null, request, ct);
-
-    /// <summary>Cấp permit cư dân có hạn để chuẩn bị thao tác offline khi chính sách đang bật.</summary>
-    [HttpGet("resident-permit"), Authorize(Roles = "Resident")]
-    public Task<ResidentBluetoothPermitResponse> Permit(CancellationToken ct) => service.GetPermitAsync(UserId(), ct);
 
     /// <summary>
     /// Gắn URL ảnh đã upload cho yêu cầu của chính resident, hỗ trợ bổ sung bằng chứng sau khi có mạng.

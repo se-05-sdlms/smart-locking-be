@@ -18,6 +18,27 @@ namespace smart_locking_be.Tests.API;
 
 public sealed class ProblemDetailsTests
 {
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    [InlineData(101, false)]
+    public void OfflineSync_RecordValidation_UsesConstructorMetadata(int count, bool valid)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddControllers();
+        using var provider = services.BuildServiceProvider();
+        var context = new ActionContext(new DefaultHttpContext { RequestServices = provider },
+            new RouteData(), new ActionDescriptor(), new ModelStateDictionary());
+        var request = new smart_locking_be.Application.DTOs.Lockers.OfflinePinSyncRequest(
+            Enumerable.Repeat("event", count).ToList());
+
+        provider.GetRequiredService<Microsoft.AspNetCore.Mvc.ModelBinding.Validation.IObjectModelValidator>()
+            .Validate(context, null, "", request);
+
+        Assert.Equal(valid, context.ModelState.IsValid);
+    }
+
     [Fact]
     public void PublicRoutes_UseCanonicalOperationsAndImageEndpoints()
     {
@@ -37,6 +58,8 @@ public sealed class ProblemDetailsTests
         Assert.Contains("api/emergency-unlocks", routes);
         Assert.Contains("api/lockers/{id:guid}/status", routes);
         Assert.Contains("api/parcels/{id:guid}:transfertocollectionpoint", routes);
+        Assert.Contains("api/parcels/{id:guid}:confirmcollectionpointarrival", routes);
+        Assert.DoesNotContain("api/bluetooth/workflow/resident-permit", routes);
     }
 
     [Theory]

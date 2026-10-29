@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using smart_locking_be.Application.Exceptions;
 using Microsoft.EntityFrameworkCore;
 using smart_locking_be.Application.DTOs.Lockers;
@@ -11,6 +12,46 @@ namespace smart_locking_be.Tests.Lockers;
 
 public sealed class CompartmentResetTests
 {
+    [Theory]
+    [InlineData("Pending")]
+    [InlineData("Applied")]
+    [InlineData("NeedsReview")]
+    public async Task Reconcile_OnlyReturnsPersistedEventsOwnedByResident_WithoutApplyingBusiness(string status)
+    {
+        var x = Setup(); await using var db = x.Db;
+        Guid userId = Guid.NewGuid(), eventId = Guid.NewGuid(), unknownId = Guid.NewGuid();
+        var profile = new ResidentProfile { Id = Guid.NewGuid(), UserId = userId, FullName = "Owner" };
+        x.Request.ResidentProfile = profile; x.Request.ResidentProfileId = profile.Id;
+        db.Add(profile);
+        db.Add(new OfflineLockerEvent
+        {
+            Id = eventId,
+            DeliveryId = x.Request.Id,
+            DeviceIdentifier = "LKR-B",
+            HardwareChannel = 1,
+            Kind = "R",
+            Sequence = 1,
+            Status = status,
+            PinCode = "123456",
+            PayloadHash = "verified-mqtt"
+        });
+        await db.SaveChangesAsync();
+        var service = new OfflinePinService(db, new BluetoothProtocol(), TimeProvider.System);
+
+        Assert.Empty((await service.ReconcileAsync(Guid.NewGuid(), new([eventId, unknownId]))).Acknowledged);
+        Assert.Empty((await service.ReconcileAsync(userId, new([unknownId]))).Acknowledged);
+        var result = await service.ReconcileAsync(userId, new([eventId, eventId, unknownId]));
+
+        var receipt = Assert.Single(result.Acknowledged);
+        Assert.Equal(eventId, receipt.EventId); Assert.Equal(status, receipt.Status);
+        Assert.StartsWith("k1|", receipt.Acknowledgment);
+        Assert.Equal(ReturnRequestStatus.Deposited, x.Request.Status);
+        Assert.Single(db.OfflineLockerEvents); Assert.Empty(db.LockerAccessEvents);
+        Assert.Empty(db.AuditLogs); Assert.Empty(db.OfflineLockerCursors);
+        Assert.Equal("123456", (await db.OfflineLockerEvents.SingleAsync()).PinCode);
+        await Assert.ThrowsAsync<ForbiddenException>(() => service.ReconcileAsync(Guid.Empty, new([eventId])));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -89,7 +130,7 @@ public sealed class CompartmentResetTests
     }
 
     [Fact]
-    public async Task OverdueTransfer_WaitsForReceipt_ThenRevokesAndNotifiesOnlyOnce()
+    public async Task OverdueTransfer_ResetRevokesOnly_ExplicitArrivalReleasesAndNotifiesOnce()
     {
         var x = Setup(); await using var db = x.Db; var actor = Guid.NewGuid();
         var parcel = SeedTransfer(db, x.Slot, x.Request);
@@ -108,15 +149,23 @@ public sealed class CompartmentResetTests
         Assert.Equal(first.ResetCommandId, ble.CommandId);
         var proof = $"z2|{ble.CommandId:N}|LKR-B|1|{parcel.DeliveryRequestId:N}|OPEN|OK";
         await x.Service.ReceiveAsync("LKR-B", proof);
-        Assert.Equal(ParcelStatus.Removed, parcel.Status);
+        Assert.Equal(ParcelStatus.Overdue, parcel.Status);
         Assert.Equal(DoorStatus.Open, x.Slot.DoorStatus); // Không giả cửa đóng để hiển thị Ready.
         var pin = await db.OfflineLockerPins.SingleAsync(); Assert.NotNull(pin.ConsumedAt); Assert.Empty(pin.PinCode);
-        Assert.NotNull(parcel.DeliveryRequest.CompartmentReleasedAt);
+        Assert.Null(parcel.DeliveryRequest.CompartmentReleasedAt);
+        Assert.Empty(db.ParcelStatusHistories); Assert.Empty(db.Notifications);
+        // Niềm tin ACK reset không được chuyển thành bằng chứng hàng đã đến điểm tập kết.
+        var statusOnly = await x.Service.RequestTransferAsync(actor, "Administrator", parcel.Id);
+        Assert.Equal("Applied", statusOnly.ResetStatus); Assert.Equal("Overdue", statusOnly.Status);
+        Assert.Equal(ParcelStatus.Overdue, parcel.Status); Assert.Empty(db.Notifications);
+        var arrived = await x.Service.ConfirmTransferArrivalAsync(actor, "Administrator", parcel.Id, new(ble.CommandId, true));
+        Assert.Equal("Removed", arrived.Status); Assert.NotNull(parcel.DeliveryRequest.CompartmentReleasedAt);
         Assert.Single(db.ParcelStatusHistories);
         Assert.Equal(2, await db.Notifications.CountAsync(n => n.Type == "ParcelTransferred"));
         Assert.Single(db.AuditLogs.Where(a => a.Action == "Parcel.Transferred"));
         await x.Service.ReceiveAsync("LKR-B", proof);
         var final = await x.Service.RequestTransferAsync(actor, "Administrator", parcel.Id);
+        await x.Service.ConfirmTransferArrivalAsync(actor, "Administrator", parcel.Id, new(ble.CommandId, true));
         Assert.Equal("Applied", final.ResetStatus); Assert.Single(db.ParcelStatusHistories);
         Assert.Equal(2, await db.Notifications.CountAsync());
     }
@@ -172,17 +221,44 @@ public sealed class CompartmentResetTests
         Assert.Null((await db.OfflineLockerPins.SingleAsync()).ConsumedAt); Assert.Null(x.Transport.Command);
     }
 
-    [Fact]
-    public async Task LatePickupAfterTransfer_IsReviewedWithoutRevertingRemoved()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LatePickupDuringRecovery_IsReviewedWithoutInventingPhysicalOutcome(bool arrivalConfirmed)
     {
         var x = Setup(); await using var db = x.Db; var parcel = SeedTransfer(db, x.Slot, x.Request);
         var result = await x.Service.RequestTransferAsync(Guid.NewGuid(), "Administrator", parcel.Id);
         await x.Service.ReceiveAsync("LKR-B", $"z2|{result.ResetCommandId:N}|LKR-B|1|{parcel.DeliveryRequestId:N}|CLOSED|OK");
+        if (arrivalConfirmed)
+            await x.Service.ConfirmTransferArrivalAsync(Guid.NewGuid(), "Administrator", parcel.Id, new(result.ResetCommandId!.Value, true));
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var offline = new OfflinePinService(db, new BluetoothProtocol(), TimeProvider.System);
         var late = await offline.ReceiveAsync("LKR-B", $"o1|{Guid.NewGuid():N}|{parcel.DeliveryRequestId:N}|LKR-B|1|P|0900000001|-|{now - 2}|{now}|2000|1");
-        Assert.Equal("NeedsReview", late.Status); Assert.Equal(ParcelStatus.Removed, parcel.Status);
-        Assert.Single(db.ParcelStatusHistories); Assert.Empty(db.LockerAccessEvents.Where(x => x.Result == LockerAccessResult.Succeeded));
+        Assert.Equal("NeedsReview", late.Status);
+        Assert.Equal(arrivalConfirmed ? ParcelStatus.Removed : ParcelStatus.Overdue, parcel.Status);
+        Assert.Equal(arrivalConfirmed ? 1 : 0, await db.ParcelStatusHistories.CountAsync());
+        Assert.Empty(db.LockerAccessEvents.Where(x => x.Result == LockerAccessResult.Succeeded));
+        if (!arrivalConfirmed)
+            await Assert.ThrowsAsync<ConflictException>(() => x.Service.ConfirmTransferArrivalAsync(Guid.NewGuid(), "Administrator",
+                parcel.Id, new(result.ResetCommandId!.Value, true)));
+    }
+
+    [Fact]
+    public async Task RecoveryArrival_RequiresExplicitConfirmation_AppliedReset_AndAssignedOperator()
+    {
+        var x = Setup(); await using var db = x.Db;
+        var parcel = SeedTransfer(db, x.Slot, x.Request);
+        var response = await x.Service.RequestTransferAsync(Guid.NewGuid(), "Administrator", parcel.Id);
+        var resetId = response.ResetCommandId!.Value;
+        await Assert.ThrowsAsync<BadRequestException>(() => x.Service.ConfirmTransferArrivalAsync(Guid.NewGuid(), "Administrator", parcel.Id, new(resetId, false)));
+        await Assert.ThrowsAsync<ConflictException>(() => x.Service.ConfirmTransferArrivalAsync(Guid.NewGuid(), "Administrator", parcel.Id, new(resetId, true)));
+        await x.Service.ReceiveAsync("LKR-B", $"z2|{resetId:N}|LKR-B|1|{parcel.DeliveryRequestId:N}|CLOSED|OK");
+        await Assert.ThrowsAsync<ForbiddenException>(() => x.Service.ConfirmTransferArrivalAsync(Guid.NewGuid(), "LockerOperator", parcel.Id, new(resetId, true)));
+        Assert.Equal(ParcelStatus.Overdue, parcel.Status); Assert.Empty(db.Notifications);
+        Assert.Null(parcel.DeliveryRequest.CompartmentReleasedAt);
+        var confirmed = await new ParcelService(db, TimeProvider.System, x.Service)
+            .ConfirmOverdueArrivalAsync(Guid.NewGuid(), "Administrator", parcel.Id, new(resetId, true));
+        Assert.True(confirmed.ArrivalConfirmed); Assert.Equal(ParcelStatus.Removed, parcel.Status);
     }
 
     [Fact]
@@ -243,7 +319,11 @@ public sealed class CompartmentResetTests
         };
         var request = new ReturnRequest { Id = Guid.NewGuid(), LockerId = locker.Id, AllocatedCompartmentId = slot.Id, ReturnCode = "123456", Status = ReturnRequestStatus.Deposited };
         db.AddRange(locker, slot, request); db.SaveChanges();
-        var transport = new Dispatcher(); return (db, transport, new(new CompartmentResetStore(db), transport, new BluetoothProtocol(), TimeProvider.System), slot, request);
+        var transport = new Dispatcher();
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Bluetooth:CommandSigningKeys:LKR-B"] = new string('1', 64) }).Build();
+        return (db, transport, new(new CompartmentResetStore(db), transport, new BluetoothProtocol(), TimeProvider.System,
+            new HmacBluetoothCommandSigner(configuration)), slot, request);
     }
     [Theory]
     [InlineData("Resident")]
@@ -273,7 +353,8 @@ public sealed class CompartmentResetTests
         Assert.Empty(db.LockerEvents);
         // Chỉ adapter MQTT tin cậy mới được áp dụng ACK. Chuỗi z2 từ HTTP không phải bằng chứng ESP.
         await x.Service.ReceiveAsync("LKR-B", proof);
-        Assert.Equal(ReturnRequestStatus.Cancelled, x.Request.Status);
+        Assert.Equal(ReturnRequestStatus.Deposited, x.Request.Status);
+        Assert.Null(x.Request.CompartmentReleasedAt); Assert.Empty(db.ParcelStatusHistories);
         Assert.Equal(DoorStatus.Open, x.Slot.DoorStatus);
         Assert.Equal(LockerCompartmentOperationalStatus.Operational, x.Slot.OperationalStatus);
         Assert.Equal("Applied", (await x.Service.GetAsync(actor, "LockerOperator", response.CommandId)).Status);
@@ -344,7 +425,8 @@ public sealed class CompartmentResetTests
         var response = await x.Service.RequestAsync(actor, "Administrator", x.Slot.LockerId, x.Slot.Id, new(x.Request.Id, true, "Đã lấy hết hàng", true));
         string proof = $"z2|{response.CommandId:N}|LKR-B|1|{x.Request.Id:N}|CLOSED|OK";
         await Task.WhenAll(x.Service.ReceiveAsync("LKR-B", proof), x.Service.ReceiveAsync("LKR-B", proof));
-        Assert.Single(db.LockerEvents); Assert.Equal(ReturnRequestStatus.Cancelled, x.Request.Status);
+        Assert.Single(db.LockerEvents); Assert.Equal(ReturnRequestStatus.Deposited, x.Request.Status);
+        Assert.Null(x.Request.CompartmentReleasedAt);
     }
 
 }

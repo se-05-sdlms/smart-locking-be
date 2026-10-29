@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using smart_locking_be.API.Constants;
+using smart_locking_be.API.Extensions;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 
@@ -20,6 +21,10 @@ public sealed class OfflinePinController(IOfflinePinService service) : Controlle
     [HttpPost("sync"), Authorize, RequestSizeLimit(65_000)]
     public async Task<OfflinePinSyncResponse> Sync(OfflinePinSyncRequest request, CancellationToken ct) =>
         await service.SyncAsync(request, ct);
+    /// <summary>Tra cứu kết quả MQTT của chính cư dân; không nhận hay áp dụng proof HTTP.</summary>
+    [HttpPost("reconcile"), Authorize(Roles = "Resident"), RequestSizeLimit(10_000)]
+    public Task<OfflinePinSyncResponse> Reconcile(OfflinePinReconcileRequest request, CancellationToken ct) =>
+        service.ReconcileAsync(User.GetRequiredUserId(), request, ct);
     /// <summary>
     /// Tra cứu event phục vụ đối soát; Operator chỉ xem các tủ đang được phân công.
     /// Response không chứa PIN hoặc chuỗi nhật ký gốc chứa PIN.

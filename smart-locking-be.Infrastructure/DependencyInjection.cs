@@ -60,6 +60,7 @@ public static class DependencyInjection
         services.AddScoped<OfflinePinProvisioner>();
         services.AddHostedService<OfflinePinNotificationWorker>();
         services.AddSingleton<IBluetoothMessageCodec, BluetoothProtocol>();
+        services.AddSingleton<IBluetoothCommandSigner, HmacBluetoothCommandSigner>();
         services.AddSingleton<ICompartmentResetProtocol, BluetoothProtocol>();
         services.AddScoped<IBluetoothWorkflowStore, BluetoothWorkflowStore>();
         services.AddScoped<ILockerCommandDispatcher, MqttLockerCommandDispatcher>();

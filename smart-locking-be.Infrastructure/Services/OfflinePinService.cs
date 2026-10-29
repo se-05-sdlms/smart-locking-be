@@ -19,6 +19,21 @@ public sealed partial class OfflinePinService(ApplicationDbContext db, IBluetoot
         throw new ForbiddenException(BluetoothErrorCodes.UnverifiedEvidence,
             "Unsigned device events cannot be synchronized over HTTP. Let the ESP replay its journal through an authenticated device channel.");
 
+    public async Task<OfflinePinSyncResponse> ReconcileAsync(Guid userId, OfflinePinReconcileRequest request, CancellationToken ct = default)
+    {
+        if (userId == Guid.Empty) throw new ForbiddenException(BluetoothErrorCodes.AccessDenied, "Cần đăng nhập cư dân.");
+        if (request.EventIds is null || request.EventIds.Count is < 1 or > 100 || request.EventIds.Contains(Guid.Empty))
+            throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Cần từ 1 đến 100 mã nhật ký hợp lệ.");
+        var ids = request.EventIds.Distinct().ToArray();
+        // Không nhận bằng chứng từ HTTP: chỉ đọc nhật ký đã lưu qua MQTT của giao dịch
+        // thuộc cư dân đăng nhập. ID lạ/khác chủ không được trả trạng thái hoặc ACK.
+        var events = await db.OfflineLockerEvents.AsNoTracking().Where(e => ids.Contains(e.Id) &&
+            (db.ReturnRequests.Any(r => r.Id == e.DeliveryId && r.ResidentProfile.UserId == userId) ||
+             db.DeliveryRequests.Any(d => d.Id == e.DeliveryId && d.ResidentProfile != null && d.ResidentProfile.UserId == userId)))
+            .OrderBy(e => e.Sequence).ToListAsync(ct);
+        return new(events.Select(Result).ToList());
+    }
+
     // Nhật ký chờ/đối soát cũng hiển thị cho quản trị; tuyệt đối không trả PIN hoặc proof chứa PIN.
     public async Task<IReadOnlyList<OfflinePinEventResponse>> GetEventsAsync(Guid userId, string role, string? device, string? status,
         int page = 1, int pageSize = 50, CancellationToken ct = default)

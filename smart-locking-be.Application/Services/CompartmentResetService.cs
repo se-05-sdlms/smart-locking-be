@@ -10,7 +10,8 @@ using smart_locking_be.Domain.Enums;
 namespace smart_locking_be.Application.Services;
 
 /// <summary>Điều phối nghiệp vụ đặt lại ngăn qua các cổng lưu trữ và gửi lệnh.</summary>
-public sealed class CompartmentResetService(ICompartmentResetStore store, ICompartmentResetDispatcher dispatcher, ICompartmentResetProtocol protocol, TimeProvider clock) : ICompartmentResetService
+public sealed class CompartmentResetService(ICompartmentResetStore store, ICompartmentResetDispatcher dispatcher, ICompartmentResetProtocol protocol, TimeProvider clock,
+    IBluetoothCommandSigner? commandSigner = null) : ICompartmentResetService
 {
     // Chặn hai adapter áp dụng cùng ACK đồng thời trong một process BE.
     // Transaction/lưu event cùng commandId vẫn là lớp bảo vệ nhất quán dữ liệu.
@@ -104,6 +105,12 @@ public sealed class CompartmentResetService(ICompartmentResetStore store, ICompa
                 return result with { Command = null, Message = "Chưa gửi được tới tủ. Ngăn vẫn tạm ngừng cấp; thử lại qua MQTT hoặc Bluetooth." };
             }
         }
+        if (request.UseBluetooth && result.Command is { } bluetoothCommand)
+            return result with
+            {
+                Command = (commandSigner ?? throw new ConflictException(BluetoothErrorCodes.InvalidState,
+                "Chưa cấu hình xác thực lệnh Bluetooth.")).Sign(result.DeviceIdentifier, bluetoothCommand)
+            };
         return request.UseBluetooth ? result : result with { Command = null };
     }
     private async Task<CompartmentResetResponse> ResponseAsync(Guid id, CancellationToken ct)
@@ -226,9 +233,7 @@ public sealed class CompartmentResetService(ICompartmentResetStore store, ICompa
             .FirstOrDefault(x => JsonSerializer.Deserialize<Details>(x.Details!)?.TransferParcelId == parcel.Id);
         if (applied is not null)
         {
-            // This authenticated Operator call explicitly confirms arrival at RecoveryAddress.
-            // ACK handling never calls this physical-outcome operation.
-            parcel = await store.ConfirmRecoveryArrivalAsync(userId, parcel.Id, applied.Id, clock.GetUtcNow(), ct);
+            // Retry chỉ đọc trạng thái reset. Xác nhận tới điểm tập kết dùng thao tác riêng.
             return new(parcel.Id, parcel.ParcelCode, delivery.Locker.RecoveryAddress, parcel.Status.ToString(), applied.Id, "Applied");
         }
         if (parcel.Status == ParcelStatus.Removed)
@@ -241,6 +246,24 @@ public sealed class CompartmentResetService(ICompartmentResetStore store, ICompa
         var result = await RequestCoreAsync(userId, role, delivery.LockerId, slotId,
             new(delivery.Id, true, "Transferred to overdue collection point"), parcel.Id, ct);
         return new(parcel.Id, parcel.ParcelCode, delivery.Locker.RecoveryAddress, parcel.Status.ToString(), result.CommandId, result.Status);
+    }
+
+    public async Task<DTOs.Parcels.OverdueTransferResponse> ConfirmTransferArrivalAsync(Guid userId, string role, Guid parcelId,
+        DTOs.Parcels.ConfirmRecoveryArrivalRequest request, CancellationToken ct = default)
+    {
+        if (!request.ConfirmedArrived || request.ResetCommandId == Guid.Empty)
+            throw new BadRequestException(BluetoothErrorCodes.InvalidMessage, "Cần xác nhận đã giao hàng tới điểm tập kết và mã reset hợp lệ.");
+        var parcel = await store.FindTransferParcelAsync(parcelId, ct)
+            ?? throw new NotFoundException(BluetoothErrorCodes.NotFound, "Không tìm thấy kiện hàng.");
+        await AuthorizeAsync(userId, role, parcel.DeliveryRequest.LockerId, ct);
+        var (_, data, slot) = await ReadAsync(request.ResetCommandId, ct);
+        if (data.TransferParcelId != parcel.Id || data.SubjectId != parcel.DeliveryRequestId ||
+            slot.Id != parcel.DeliveryRequest.AllocatedCompartmentId || slot.LockerId != parcel.DeliveryRequest.LockerId ||
+            !await store.IsAppliedAsync(request.ResetCommandId, ct))
+            throw new ConflictException(BluetoothErrorCodes.InvalidState, "Chưa có reset được xác nhận cho đúng kiện và ngăn.");
+        parcel = await store.ConfirmRecoveryArrivalAsync(userId, parcel.Id, request.ResetCommandId, clock.GetUtcNow(), ct);
+        return new(parcel.Id, parcel.ParcelCode, parcel.DeliveryRequest.Locker.RecoveryAddress,
+            parcel.Status.ToString(), request.ResetCommandId, "Applied");
     }
 
     public async Task RetryPendingTransfersAsync(CancellationToken ct = default)

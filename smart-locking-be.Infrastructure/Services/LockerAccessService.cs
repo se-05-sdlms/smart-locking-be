@@ -13,7 +13,8 @@ public sealed class LockerAccessService(
     ILockerCommandDispatcher commandDispatcher,
     TimeProvider timeProvider,
     IBluetoothMessageCodec? protocol = null,
-    IConfiguration? configuration = null) : ILockerAccessService
+    IConfiguration? configuration = null,
+    IBluetoothCommandSigner? commandSigner = null) : ILockerAccessService
 {
     public async Task<OpenLockerResponse> OpenAsync(
         OpenLockerRequest request,
@@ -84,7 +85,8 @@ public sealed class LockerAccessService(
                 {
                     if (workflowCommand is null) throw new InvalidOperationException("Chua cau hinh lenh Bluetooth.");
                     bluetoothCommand = new(compartment.Locker.DeviceIdentifier, compartment.HardwareChannel,
-                        workflowCommand, now.AddMinutes(2));
+                        (commandSigner ?? throw new InvalidOperationException("Chưa cấu hình xác thực lệnh Bluetooth."))
+                            .Sign(compartment.Locker.DeviceIdentifier, workflowCommand), now.AddMinutes(2));
                 }
                 else await commandDispatcher.DispatchUnlockAsync(
                     new LockerUnlockCommand(

@@ -11,7 +11,7 @@ public interface IBluetoothWorkflowStore
 {
     // Kiểm tra có chính sách Bluetooth đang hiệu lực tại thời điểm UTC được truyền vào.
     Task<bool> IsEnabledAsync(DateTimeOffset now, CancellationToken ct);
-    // Không truyền thiết bị: lấy danh tính để cấp permit dùng tại tủ kết nối sau này.
+    // Lấy dữ liệu resident và tủ để use case kiểm tra quyền trước khi cấp lệnh online.
     Task<BluetoothResidentContext> GetResidentAsync(Guid userId, CancellationToken ct, string? deviceIdentifier = null);
     // D/R/G dùng ID yêu cầu, P dùng ID kiện hàng; trả thiết bị thực sự của giao dịch đó.
     Task<string> GetSubjectDeviceAsync(string kind, Guid id, CancellationToken ct);

@@ -216,6 +216,10 @@ public sealed class ParcelService(ApplicationDbContext dbContext, TimeProvider t
     }
 
 
+    public Task<OverdueTransferResponse> ConfirmOverdueArrivalAsync(Guid userId, string role, Guid parcelId,
+        ConfirmRecoveryArrivalRequest request, CancellationToken cancellationToken = default) =>
+        compartmentResets.ConfirmTransferArrivalAsync(userId, role, parcelId, request, cancellationToken);
+
     private Task PublishAsync(Parcel parcel, DateTimeOffset occurredAt, CancellationToken cancellationToken) =>
         realtimeNotifier?.PublishToLockerAsync(parcel.DeliveryRequest.LockerId, new RealtimeEvent(
             "ParcelUpdated",

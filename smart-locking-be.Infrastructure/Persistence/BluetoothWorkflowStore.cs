@@ -22,7 +22,7 @@ public sealed class BluetoothWorkflowStore(ApplicationDbContext db) : IBluetooth
             await db.Lockers.SingleOrDefaultAsync(x => x.DeviceIdentifier == deviceIdentifier, ct);
         if (!string.IsNullOrWhiteSpace(deviceIdentifier) && locker is null) throw new NotFoundException(BluetoothErrorCodes.NotFound, "Không tìm thấy tủ đang kết nối.");
         // Trả dữ liệu gốc; Application quyết định tài khoản/tủ có được thao tác hay không.
-        // "*" là permit chưa gắn tủ, không phải mã thiết bị ESP thực tế.
+        // "*" biểu diễn truy vấn không gắn tủ; không phải mã thiết bị hay quyền mở offline.
         return new(resident.Id, locker?.Id ?? Guid.Empty, locker?.DeviceIdentifier ?? "*", resident.User.PhoneNumber,
             resident.User.Status, resident.User.Role, locker?.OperationalStatus);
     }

@@ -93,4 +93,13 @@ public sealed class ParcelsController(
         var response = await parcelService.TransferOverdueAsync(userId, role, id, cancellationToken);
         return response.ResetStatus == "Pending" ? Accepted(response) : Ok(response);
     }
+
+    /// <summary>Operator/Admin xác nhận hàng đã tới điểm tập kết sau reset đúng kiện. Retry không ghi nhận lần hai.</summary>
+    [HttpPost("{id:guid}:confirmCollectionPointArrival")]
+    [Authorize(Roles = "Administrator,LockerOperator")]
+    public async Task<IActionResult> ConfirmCollectionPointArrival(Guid id, ConfirmRecoveryArrivalRequest request, CancellationToken cancellationToken)
+    {
+        var (userId, role) = User.GetRequiredIdentity();
+        return Ok(await parcelService.ConfirmOverdueArrivalAsync(userId, role, id, request, cancellationToken));
+    }
 }

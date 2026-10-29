@@ -112,8 +112,6 @@ public static class DependencyInjection
         // 2. Log request bằng Serilog
         app.UseSerilogRequestLogging();
 
-        app.UseStaticFiles();
-
         // 3. Chuyển hướng HTTPS
         app.UseHttpsRedirection();
         app.UseStaticFiles();

@@ -66,4 +66,8 @@ public sealed record OverdueTransferResponse(
     string CollectionAddress,
     string Status,
     Guid? ResetCommandId = null,
-    string? ResetStatus = null);
+    string? ResetStatus = null)
+{
+    // ResetApplied chưa có nghĩa hàng đã tới điểm tập kết.
+    public bool ArrivalConfirmed => ResetStatus == "Applied" && Status == nameof(ParcelStatus.Removed);
+}

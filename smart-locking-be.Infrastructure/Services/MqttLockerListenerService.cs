@@ -86,7 +86,6 @@ public sealed class MqttLockerListenerService(
 
                     await _mqttClient.SubscribeAsync("lockers/+/doors/+/status", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
                     await _mqttClient.SubscribeAsync("lockers/+/events/pin-ready", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
-                    await _mqttClient.SubscribeAsync("lockers/+/workflow/request", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
                     await _mqttClient.SubscribeAsync("lockers/+/events/offline", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
                     await _mqttClient.SubscribeAsync("lockers/+/events/state-reset", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
                     await _mqttClient.SubscribeAsync("lockers/+/alerts", MqttQualityOfServiceLevel.AtLeastOnce, stoppingToken);
@@ -185,36 +184,6 @@ public sealed class MqttLockerListenerService(
             return;
         }
 
-        if (parts.Length == 4 && parts[0] == "lockers" && parts[2] == "workflow" && parts[3] == "request")
-        {
-            // Điện thoại mất mạng: ESP chuyển quyền resident lên BE bằng Wi-Fi của tủ.
-            string[] f = payload.Split(':', 4);
-            if (f.Length != 4 || f[0].Length is < 1 or > 10 || !f[0].All(char.IsAsciiDigit) ||
-                f[1] is not ("R" or "P" or "N") || !Guid.TryParseExact(f[2], "N", out var subject)) return;
-            using var workflowScope = serviceScopeFactory.CreateScope();
-            string response;
-            try
-            {
-                var protocol = workflowScope.ServiceProvider.GetRequiredService<IBluetoothMessageCodec>();
-                var permission = protocol.ParseResidentPermit(f[3], parts[1], (timeProvider ?? TimeProvider.System).GetUtcNow());
-                var requestDb = workflowScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                if (!await requestDb.ResidentProfiles.AnyAsync(x => x.UserId == permission.UserId && x.User.Status == UserStatus.Active && x.User.Role == UserRole.Resident, cancellationToken))
-                    throw new UnauthorizedAccessException("Resident is not active.");
-                var workflow = workflowScope.ServiceProvider.GetRequiredService<IBluetoothWorkflowService>();
-                var result = await workflow.PrepareAsync(permission.UserId, new(f[1], subject, DeviceIdentifier: parts[1]), cancellationToken);
-                if (result.DeviceIdentifier != parts[1]) throw new UnauthorizedAccessException("Wrong locker.");
-                response = result.Command;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger.LogWarning("Resident Bluetooth request rejected: {Type}", ex.GetType().Name);
-                response = "FAIL:NOT_AUTHORIZED_OR_UNAVAILABLE";
-            }
-            if (_mqttClient is { IsConnected: true })
-                await _mqttClient.PublishAsync(new MqttApplicationMessageBuilder().WithTopic($"lockers/{parts[1]}/workflow/response")
-                    .WithPayload(f[0] + "|" + response).WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build(), cancellationToken);
-            return;
-        }
         if (parts.Length == 4 && parts[0] == "lockers" && parts[2] == "events" && parts[3] == "state-reset")
         {
             using var resetScope = serviceScopeFactory.CreateScope();

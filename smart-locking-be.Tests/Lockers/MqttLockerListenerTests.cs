@@ -14,6 +14,40 @@ namespace smart_locking_be.Tests.Lockers;
 
 public sealed class MqttLockerListenerTests
 {
+    [Theory]
+    [InlineData("*")]
+    [InlineData("LKR-1A0844")]
+    public async Task RemovedPhoneOfflineProxy_DoesNotAcceptResidentIdentity(string target)
+    {
+        using var provider = (ServiceProvider)BuildServiceProvider(Guid.NewGuid().ToString());
+        var db = provider.GetRequiredService<ApplicationDbContext>();
+        var listener = new MqttLockerListenerService(MqttConfiguration(), provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<MqttLockerListenerService>.Instance);
+        var forged = $"r1|{target}|{Guid.NewGuid():N}|0900000001|{DateTimeOffset.UtcNow.AddHours(8).ToUnixTimeSeconds()}";
+        await listener.HandleMessageAsync("lockers/LKR-1A0844/workflow/request", $"1:N:{Guid.NewGuid():N}:{forged}", default);
+        Assert.Empty(db.ReturnRequests); Assert.Empty(db.LockerAccessEvents); Assert.Empty(db.OfflineLockerEvents);
+    }
+    [Fact]
+    public async Task MqttReturnWithoutAuthenticatedAllocation_IsKeptForReview_NotCreatedFromPhone()
+    {
+        using var provider = (ServiceProvider)BuildServiceProvider(Guid.NewGuid().ToString());
+        var db = provider.GetRequiredService<ApplicationDbContext>();
+        var locker = new Locker { Id = Guid.NewGuid(), Code = "B", DeviceIdentifier = "LKR-B", Address = "B", RecoveryAddress = "B" };
+        var slot = new LockerCompartment { Id = Guid.NewGuid(), Locker = locker, LockerId = locker.Id, Code = "B1", HardwareCode = "CH1", HardwareChannel = 1 };
+        var owner = new User { Id = Guid.NewGuid(), PhoneNumber = "0900000001", Role = UserRole.Resident, Status = UserStatus.Active };
+        db.AddRange(slot, new ResidentProfile { Id = Guid.NewGuid(), UserId = owner.Id, User = owner, FullName = "Resident" });
+        await db.SaveChangesAsync();
+        var eventId = Guid.NewGuid(); var subject = Guid.NewGuid(); long now = Now.ToUnixTimeSeconds();
+        var listener = new MqttLockerListenerService(MqttConfiguration(), provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<MqttLockerListenerService>.Instance, new FixedTimeProvider());
+        await listener.HandleMessageAsync("lockers/LKR-B/events/offline",
+            $"o1|{eventId:N}|{subject:N}|LKR-B|1|R|0900000001|123456|{now - 4}|{now - 3}|1000|1", default);
+        Assert.Empty(db.ReturnRequests);
+        Assert.DoesNotContain(db.LockerAccessEvents, item => item.Result == LockerAccessResult.Succeeded);
+        Assert.Equal("NeedsReview", (await db.OfflineLockerEvents.SingleAsync()).Status);
+        await db.Entry(slot).ReloadAsync(); // Adapter MQTT lưu bằng DbContext trong scope riêng.
+        Assert.Equal(LockerCompartmentOperationalStatus.OutOfService, slot.OperationalStatus);
+    }
     private static readonly DateTimeOffset Now = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
@@ -43,6 +77,19 @@ public sealed class MqttLockerListenerTests
         var listener = new MqttLockerListenerService(MqttConfiguration(), provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<MqttLockerListenerService>.Instance, new FixedTimeProvider());
         var subject = Guid.NewGuid();
+        var resident = await db.ResidentProfiles.SingleAsync();
+        // Luồng R hợp lệ đã được API xác thực và cấp ngăn trước; không tạo đơn từ r1 offline.
+        db.ReturnRequests.Add(new ReturnRequest
+        {
+            Id = subject,
+            ResidentProfileId = resident.Id,
+            ResidentProfile = resident,
+            LockerId = locker.Id,
+            AllocatedCompartmentId = slot.Id,
+            ReturnCode = "123456",
+            Status = ReturnRequestStatus.Allocated
+        });
+        await db.SaveChangesAsync();
         long now = Now.ToUnixTimeSeconds();
         string deposit = $"o1|{Guid.NewGuid():N}|{subject:N}|LKR-B|1|R|0900000001|123456|{now - 4}|{now - 3}|1000|1";
         string pickup = $"o1|{Guid.NewGuid():N}|{subject:N}|LKR-B|1|G|0900000001|-|{now - 2}|{now - 1}|1000|2";

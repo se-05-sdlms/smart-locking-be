@@ -7,8 +7,9 @@ using smart_locking_be.Domain.Enums;
 namespace smart_locking_be.Infrastructure.Services;
 
 /// <summary>
-/// Chuyển đổi định dạng wire ESP (c1/r1/o1/q1/z1/z2). Chỉ kiểm tra cấu trúc/kiểu dữ liệu;
-/// giao thức hiện tại chưa có chữ ký mật mã, nên parse thành công không chứng minh nguồn gửi.
+/// Chuyển đổi định dạng wire ESP (c1/o1/q1/z1/z2). Chỉ kiểm tra cấu trúc/kiểu dữ liệu;
+/// payload thô không chứng minh nguồn gửi. Lệnh BLE được HmacBluetoothCommandSigner bọc riêng;
+/// nhật ký và ACK đầu vào chỉ được tin cậy qua MQTT có ACL của thiết bị.
 /// Quyền, giao dịch, thứ tự nhật ký và tác động trạng thái phải được service đối chiếu riêng.
 /// </summary>
 public sealed class BluetoothProtocol : IBluetoothMessageCodec, ICompartmentResetProtocol
@@ -70,18 +71,6 @@ public sealed class BluetoothProtocol : IBluetoothMessageCodec, ICompartmentRese
     // Lệnh mang đúng tủ, ngăn và giao dịch để ESP thực hiện.
     public string CreateCommand(string device, Guid subject, int channel, string kind, string phone, string pin, DateTimeOffset expires, Guid commandId) =>
         FormattableString.Invariant($"c1|{device}|{subject:N}|{channel}|{kind}|{phone}|{pin}|{expires.ToUnixTimeSeconds()}|{commandId:N}");
-
-    public string CreateResidentPermit(string device, Guid userId, string phone, DateTimeOffset expires) =>
-        FormattableString.Invariant($"r1|{device}|{userId:N}|{phone}|{expires.ToUnixTimeSeconds()}");
-
-    public (Guid UserId, string Phone) ParseResidentPermit(string permit, string device, DateTimeOffset now)
-    {
-        string[] f = ReadMessage(permit, device).Split('|');
-        if (f.Length != 5 || f[0] != "r1" || (f[1] != "*" && f[1] != device) || !Guid.TryParseExact(f[2], "N", out var user) ||
-            !Regex.IsMatch(f[3], "^0[0-9]{9}$") || !long.TryParse(f[4], out long expiry) || expiry <= now.ToUnixTimeSeconds())
-            throw new ForbiddenException(BluetoothErrorCodes.AccessDenied, "Quyen resident khong hop le hoac da het han.");
-        return (user, f[3]);
-    }
 
     private static string ReadMessage(string value, string device)
     {

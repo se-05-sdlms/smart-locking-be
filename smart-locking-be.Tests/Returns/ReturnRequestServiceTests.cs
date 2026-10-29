@@ -34,16 +34,16 @@ public sealed class ReturnRequestServiceTests
             EffectiveTo = now.AddHours(ends)
         });
         await db.SaveChangesAsync();
-        var workflow = new BluetoothWorkflowService(new BluetoothWorkflowStore(db), new BluetoothProtocol(), TimeProvider.System,
+        var workflow = new BluetoothWorkflowService(new BluetoothWorkflowStore(db), TimeProvider.System,
             null!, null!, null!, null!, null!);
-        var error = await Assert.ThrowsAsync<ConflictException>(() => workflow.GetPermitAsync(Guid.NewGuid()));
+        var error = await Assert.ThrowsAsync<ConflictException>(() => workflow.PrepareAsync(Guid.NewGuid(), new("R", Guid.NewGuid(), DeviceIdentifier: "LKR-B")));
         Assert.Equal(BluetoothErrorCodes.Disabled, error.ErrorCode);
         await Assert.ThrowsAsync<ConflictException>(() => workflow.PrepareAsync(Guid.NewGuid(), new("N", Guid.NewGuid(), DeviceIdentifier: "LKR-B")));
         Assert.Empty(db.ReturnRequests); Assert.Empty(db.LockerAccessEvents);
     }
 
     [Fact]
-    public async Task ActiveBluetoothPolicy_IssuesResidentPermitWithoutBindingToRegisteredLocker()
+    public async Task ActiveBluetoothPolicy_RejectsRemovedPhoneOfflineWorkflow()
     {
         await using var db = CreateDb(); var now = DateTimeOffset.UtcNow;
         var user = new User { Id = Guid.NewGuid(), PhoneNumber = "0900000001", PasswordHash = "x", Role = UserRole.Resident, Status = UserStatus.Active };
@@ -58,10 +58,10 @@ public sealed class ReturnRequestServiceTests
                 EffectiveFrom = now.AddHours(-1)
             });
         await db.SaveChangesAsync();
-        var workflow = new BluetoothWorkflowService(new BluetoothWorkflowStore(db), new BluetoothProtocol(), TimeProvider.System,
+        var workflow = new BluetoothWorkflowService(new BluetoothWorkflowStore(db), TimeProvider.System,
             null!, null!, null!, null!, null!);
-        var permit = await workflow.GetPermitAsync(user.Id);
-        Assert.Equal("*", permit.DeviceIdentifier); Assert.StartsWith("r1|*|", permit.Permit);
+        var error = await Assert.ThrowsAsync<BadRequestException>(() => workflow.PrepareAsync(user.Id, new("N", Guid.NewGuid(), DeviceIdentifier: "LKR-B")));
+        Assert.Equal(BluetoothErrorCodes.InvalidMessage, error.ErrorCode);
         Assert.Empty(db.ReturnRequests);
     }
 

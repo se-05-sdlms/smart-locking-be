@@ -99,6 +99,9 @@ public sealed class CompartmentResetStore(ApplicationDbContext db) : ICompartmen
         if (parcel.Status is not (ParcelStatus.Stored or ParcelStatus.Overdue) || parcel.MaxStorageUntil > now ||
             string.IsNullOrWhiteSpace(parcel.DeliveryRequest.Locker.RecoveryAddress))
             throw new ConflictException(BluetoothErrorCodes.InvalidState, "Parcel cannot be confirmed at the recovery address.");
+        if (await db.OfflineLockerEvents.AnyAsync(item => item.DeliveryId == parcel.DeliveryRequestId &&
+            item.Kind == "P" && item.Status == "NeedsReview", ct))
+            throw new ConflictException(BluetoothErrorCodes.InvalidState, "A device pickup outcome still requires reconciliation.");
         var slot = parcel.DeliveryRequest.AllocatedCompartment;
         DateTimeOffset? observed = slot?.DoorStatusObservedAt;
         bool closed = slot?.DoorStatus == DoorStatus.Closed;

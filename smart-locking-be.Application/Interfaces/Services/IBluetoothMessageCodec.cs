@@ -9,8 +9,6 @@ namespace smart_locking_be.Application.Interfaces.Services;
 public interface IBluetoothMessageCodec
 {
     string CreateCommand(string device, Guid subject, int channel, string kind, string phone, string pin, DateTimeOffset expires, Guid commandId);
-    string CreateResidentPermit(string device, Guid userId, string phone, DateTimeOffset expires);
-    (Guid UserId, string Phone) ParseResidentPermit(string permit, string device, DateTimeOffset now);
     // Chỉ đọc nhật ký mở-rồi-đóng cửa; service phải đối chiếu và lưu trước khi ACK cho ESP xóa.
     OfflinePinEvidence ParseOfflineEvent(string proof, string device);
     (Guid DeliveryId, string Pin) ParsePinProvisioned(string proof, string device);

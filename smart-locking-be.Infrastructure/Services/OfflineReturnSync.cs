@@ -19,31 +19,13 @@ public sealed partial class OfflinePinService
         {
             if (request is null)
             {
-                string international = "+84" + item.RecipientPhone[1..];
-                var residents = await db.ResidentProfiles.Include(x => x.User).Where(x =>
-                    x.User.Role == UserRole.Resident && x.User.Status == UserStatus.Active &&
-                    (x.User.PhoneNumber == item.RecipientPhone || x.User.PhoneNumber == international)).ToListAsync(ct);
-                if (residents.Count != 1) { Review(item, "Offline resident is unknown or ambiguous.", compartment); return; }
-                if (await db.ReturnRequests.AnyAsync(x => x.ReturnCode == item.PinCode, ct))
-                { Review(item, "Return code conflict; physical parcel requires reconciliation.", compartment); return; }
-                if (await CompartmentConflictAsync(compartment.Id, item.DeliveryId, occurred, ct))
-                { Review(item, "Offline return conflicts with another parcel or reservation.", compartment); return; }
-                request = new()
-                {
-                    Id = item.DeliveryId,
-                    ResidentProfileId = residents[0].Id,
-                    ResidentProfile = residents[0],
-                    LockerId = compartment.LockerId,
-                    AllocatedCompartmentId = compartment.Id,
-                    ReturnCode = item.PinCode!,
-                    ReturnReason = "Offline Bluetooth; image pending upload.",
-                    Status = ReturnRequestStatus.Deposited,
-                    CreatedAt = item.OpenedAt ?? occurred,
-                    AllocatedAt = item.OpenedAt ?? occurred,
-                    ResidentDepositedAt = occurred,
-                    UpdatedAt = item.ReceivedAt
-                };
-                db.ReturnRequests.Add(request);
+                // Không tạo đơn từ phone/PIN tự khai của quyền offline chưa được xác thực.
+                // Giữ nhật ký để vận hành đối soát hàng thực tế; không giả thành giao dịch hợp lệ.
+                // Có thể đã có hàng thật từ firmware cũ: khóa cấp ngăn đến khi vận hành đối soát.
+                compartment.OperationalStatus = LockerCompartmentOperationalStatus.OutOfService;
+                compartment.UpdatedAt = item.ReceivedAt;
+                Review(item, "Resident offline is disabled; no authenticated return allocation exists.", compartment);
+                return;
             }
             else
             {
