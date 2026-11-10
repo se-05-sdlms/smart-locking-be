@@ -12,6 +12,7 @@ RUN dotnet publish smart-locking-be.API/smart-locking-be.API.csproj -c Release -
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
 COPY --from=build /app .
+COPY supabase-ca.crt .
 ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "smart-locking-be.API.dll"]
