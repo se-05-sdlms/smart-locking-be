@@ -18,6 +18,11 @@ public sealed class ResidentProfile
     public Guid UserId { get; set; }
 
     /// <summary>
+    /// Mã tủ Locker duy nhất Cư dân đăng ký sử dụng. Có thể null với dữ liệu cũ chưa hoàn tất onboarding.
+    /// </summary>
+    public Guid? RegisteredLockerId { get; set; }
+
+    /// <summary>
     /// Họ tên đầy đủ của Cư dân dùng trong hiển thị và nghiệp vụ giao nhận.
     /// </summary>
     public string FullName { get; set; } = string.Empty;
@@ -36,16 +41,6 @@ public sealed class ResidentProfile
     /// Chế độ quyết định việc yêu cầu giao hàng được tự động duyệt hay cần Cư dân duyệt thủ công.
     /// </summary>
     public DeliveryApprovalMode DeliveryApprovalMode { get; set; }
-
-    /// <summary>
-    /// Giá trị băm của token QR cá nhân dùng để nhận hàng; không lưu raw token.
-    /// </summary>
-    public string PersonalQrTokenHash { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Thời điểm mã QR cá nhân hiện tại được phát hành.
-    /// </summary>
-    public DateTimeOffset PersonalQrIssuedAt { get; set; }
 
     /// <summary>
     /// Cho biết Cư dân đã bật phương thức nhận hàng bằng nhận diện khuôn mặt hay chưa.
@@ -68,6 +63,11 @@ public sealed class ResidentProfile
     public User User { get; set; } = null!;
 
     /// <summary>
+    /// Tủ Locker duy nhất Cư dân đăng ký sử dụng.
+    /// </summary>
+    public Locker? RegisteredLocker { get; set; }
+
+    /// <summary>
     /// Các bản ghi dữ liệu sinh trắc học của Cư dân.
     /// </summary>
     public ICollection<ResidentBiometric> Biometrics { get; set; } = new List<ResidentBiometric>();
@@ -81,4 +81,9 @@ public sealed class ResidentProfile
     /// Các yêu cầu gửi trả hàng do Cư dân này tạo.
     /// </summary>
     public ICollection<ReturnRequest> ReturnRequests { get; set; } = new List<ReturnRequest>();
+
+    /// <summary>
+    /// Các gói cước cư dân đã đăng ký.
+    /// </summary>
+    public ICollection<ResidentSubscription> Subscriptions { get; set; } = new List<ResidentSubscription>();
 }

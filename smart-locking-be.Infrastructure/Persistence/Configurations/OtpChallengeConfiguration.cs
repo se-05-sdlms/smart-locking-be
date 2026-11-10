@@ -9,6 +9,7 @@ public sealed class OtpChallengeConfiguration() : BaseConfiguration<OtpChallenge
     protected override void ConfigureEntity(EntityTypeBuilder<OtpChallenge> builder)
     {
         Varchar(builder.Property(entity => entity.DestinationPhone)).IsRequired().HasMaxLength(20);
+        Varchar(builder.Property(entity => entity.DestinationEmail)).HasMaxLength(254);
         EnumAsString(builder.Property(entity => entity.Purpose)).IsRequired();
         Varchar(builder.Property(entity => entity.CodeHash)).IsRequired().HasMaxLength(256);
 
@@ -23,6 +24,9 @@ public sealed class OtpChallengeConfiguration() : BaseConfiguration<OtpChallenge
 
         builder.HasIndex(entity => new { entity.DestinationPhone, entity.Purpose, entity.CreatedAt })
             .HasDatabaseName("IX_OtpChallenge_Destination_Purpose_CreatedAt");
+        builder.HasIndex(entity => new { entity.DestinationEmail, entity.Purpose, entity.CreatedAt })
+            .HasDatabaseName("IX_OtpChallenge_Email_Purpose_CreatedAt")
+            .HasFilter("\"DestinationEmail\" IS NOT NULL");
         builder.HasIndex(entity => entity.ParcelId)
             .HasDatabaseName("IX_OtpChallenge_ParcelId");
 

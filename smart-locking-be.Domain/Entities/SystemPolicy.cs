@@ -7,6 +7,11 @@ namespace smart_locking_be.Domain.Entities;
 /// </summary>
 public sealed class SystemPolicy
 {
+    public double? OperatorReplacementRadiusKm { get; set; }
+    public int? OperatorReplacementMaxLoad { get; set; }
+    public string[]? OperatorReplacementAreas { get; set; }
+    public Guid[]? OperatorReplacementEligibleUserIds { get; set; }
+
     /// <summary>
     /// Mã định danh của phiên bản chính sách.
     /// </summary>
@@ -68,6 +73,11 @@ public sealed class SystemPolicy
     public int ClearanceNoticeBeforeHours { get; set; }
 
     /// <summary>
+    /// Ngày đếm đầu tiên bắt đầu gửi nhắc nhận hàng hằng ngày (1-based).
+    /// </summary>
+    public int PickupReminderStartDay { get; set; } = 5;
+
+    /// <summary>
     /// Số lần nhập mã OTP sai tối đa cho phép trước khi tạm thời khóa xác thực.
     /// </summary>
     public int OtpMaxAttempts { get; set; }
@@ -76,11 +86,6 @@ public sealed class SystemPolicy
     /// Số phút khóa tạm thời lượt xác thực OTP sau khi nhập sai quá số lần cho phép.
     /// </summary>
     public int OtpLockoutMinutes { get; set; }
-
-    /// <summary>
-    /// Cho phép lấy hàng bằng mã QR cá nhân của Cư dân.
-    /// </summary>
-    public bool EnablePersonalQr { get; set; }
 
     /// <summary>
     /// Cho phép lấy hàng bằng mã OTP.
@@ -93,9 +98,18 @@ public sealed class SystemPolicy
     public bool EnableRemoteUnlock { get; set; }
 
     /// <summary>
-    /// Cho phép lấy hàng bằng nhận diện khuôn mặt nếu Cư dân đã đăng ký.
+    /// Cho phép mở ngăn qua Bluetooth từ ứng dụng di động.
     /// </summary>
-    public bool EnableFaceRecognition { get; set; }
+    public bool EnableBluetoothUnlock { get; set; }
+
+    public int IncidentCriticalAcknowledgeMinutes { get; set; } = 15;
+    public int IncidentCriticalResolveMinutes { get; set; } = 60;
+    public int IncidentHighAcknowledgeMinutes { get; set; } = 30;
+    public int IncidentHighResolveMinutes { get; set; } = 240;
+    public int IncidentMediumAcknowledgeMinutes { get; set; } = 120;
+    public int IncidentMediumResolveMinutes { get; set; } = 1440;
+    public int IncidentLowAcknowledgeMinutes { get; set; } = 480;
+    public int IncidentLowResolveMinutes { get; set; } = 4320;
 
     /// <summary>
     /// Thời điểm chính sách bắt đầu có hiệu lực.

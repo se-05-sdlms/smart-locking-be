@@ -23,6 +23,16 @@ public sealed class LockerCompartment
     public string Code { get; set; } = string.Empty;
 
     /// <summary>
+    /// Mã định danh phần cứng/kênh điều khiển ngăn locker kết nối thiết bị IoT (ví dụ: HW-CH-01, LOCK-01).
+    /// </summary>
+    public string HardwareCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Chỉ số kênh/cổng relay mở khóa vật lý trên bo mạch phần cứng (Relay/Lock Channel Index, ví dụ: 1, 2, 3...).
+    /// </summary>
+    public int HardwareChannel { get; set; }
+
+    /// <summary>
     /// Trạng thái vận hành của ngăn locker, độc lập với việc ngăn đang chứa hàng hay trống.
     /// </summary>
     public LockerCompartmentOperationalStatus OperationalStatus { get; set; }
@@ -31,6 +41,11 @@ public sealed class LockerCompartment
     /// Trạng thái cảm biến cửa gần nhất của ngăn locker.
     /// </summary>
     public DoorStatus DoorStatus { get; set; }
+
+    /// <summary>
+    /// Thời điểm trạng thái cửa mới nhất được thiết bị ghi nhận, dùng để bỏ qua bản tin đến trễ.
+    /// </summary>
+    public DateTimeOffset? DoorStatusObservedAt { get; set; }
 
     /// <summary>
     /// Thời điểm thông tin ngăn được cập nhật gần nhất.

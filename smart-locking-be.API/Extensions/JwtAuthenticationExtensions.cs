@@ -1,6 +1,12 @@
-using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.EntityFrameworkCore;
+using smart_locking_be.API.Authorization;
+using smart_locking_be.API.Middleware;
+using smart_locking_be.Domain.Enums;
+using smart_locking_be.Infrastructure.Persistence;
+using System.Security.Claims;
+using System.Text;
 
 namespace smart_locking_be.API.Extensions;
 
@@ -21,6 +27,7 @@ public static class JwtAuthenticationExtensions
             throw new InvalidOperationException("Jwt:Key must be at least 32 bytes for HMAC SHA-256.");
         }
 
+        // 1. Đăng ký Authentication với JWT Bearer Schema
         services
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
@@ -34,11 +41,69 @@ public static class JwtAuthenticationExtensions
                     ValidIssuer = issuer,
                     ValidAudience = audience,
                     IssuerSigningKey = new SymmetricSecurityKey(signingKey),
-                    ClockSkew = TimeSpan.Zero
+                    ClockSkew = TimeSpan.Zero,
+                    // Ánh ánh claim chứa vai trò trong token với System.Security.Claims.ClaimTypes.Role
+                    RoleClaimType = ClaimTypes.Role
+                };
+                options.Events = new JwtBearerEvents
+                {
+                    OnTokenValidated = async context =>
+                    {
+                        string? subject = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                        if (!Guid.TryParse(subject, out Guid userId))
+                        {
+                            context.Fail("Invalid account identity.");
+                            return;
+                        }
+                        var db = context.HttpContext.RequestServices.GetRequiredService<ApplicationDbContext>();
+                        var account = await db.Users.AsNoTracking().Where(u => u.Id == userId)
+                            .Select(u => new { u.Status, u.Role, u.PhoneNumber }).SingleOrDefaultAsync(context.HttpContext.RequestAborted);
+                        if (account is null || account.Status != UserStatus.Active ||
+                            context.Principal?.IsInRole(account.Role.ToString()) != true ||
+                            context.Principal?.FindFirstValue("phone_number") != account.PhoneNumber)
+                            context.Fail("The account is inactive or its identity has changed.");
+                    },
+                    OnMessageReceived = context =>
+                    {
+                        string? accessToken = context.Request.Query["access_token"].FirstOrDefault();
+                        if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs/operations"))
+                            context.Token = accessToken;
+                        return Task.CompletedTask;
+                    },
+                    OnChallenge = async context =>
+                    {
+                        context.HandleResponse();
+                        context.Response.Headers.WWWAuthenticate = "Bearer";
+                        string code = context.AuthenticateFailure is SecurityTokenExpiredException
+                            ? AuthErrorCodes.TokenExpired
+                            : context.AuthenticateFailure is null
+                                ? AuthErrorCodes.AuthenticationRequired
+                                : AuthErrorCodes.InvalidToken;
+                        await ProblemResponse.WriteAsync(context.HttpContext, StatusCodes.Status401Unauthorized,
+                            code, "Authentication is required or the token is invalid.");
+                    },
+                    OnForbidden = context => ProblemResponse.WriteAsync(context.HttpContext,
+                        StatusCodes.Status403Forbidden, CommonErrorCodes.AccessDenied,
+                        "You do not have permission to perform this action.")
                 };
             });
 
-        services.AddAuthorization();
+        // 2. Đăng ký Authorization Policies theo vai trò (Role-based policies)
+        // Dùng ApiPolicies hằng số để áp dụng [Authorize(Policy = ApiPolicies.Administrator)] trên Controller/Endpoint
+        services.AddAuthorization(options =>
+        {
+            // Policy dành cho Quản trị viên
+            options.AddPolicy(ApiPolicies.Administrator, policy =>
+                policy.RequireRole(ApiPolicies.Administrator));
+
+            // Policy dành cho Cư dân
+            options.AddPolicy(ApiPolicies.Resident, policy =>
+                policy.RequireRole(ApiPolicies.Resident));
+
+            // Policy dành cho Nhân viên vận hành
+            options.AddPolicy(ApiPolicies.LockerOperator, policy =>
+                policy.RequireRole(ApiPolicies.LockerOperator));
+        });
 
         return services;
     }

@@ -1,0 +1,66 @@
+using smart_locking_be.Domain.Enums;
+
+namespace smart_locking_be.Application.DTOs.SystemPolicies;
+
+public sealed record SaveSystemPolicyRequest(
+    DeliveryApprovalMode DefaultApprovalMode,
+    int GuestSessionTimeoutMinutes,
+    int ManualApprovalTimeoutMinutes,
+    int CompartmentReservationMinutes,
+    int OverdueStartAfterHours,
+    decimal OverdueFeePerHour,
+    string Currency,
+    int MaxStorageHours,
+    int ClearanceEligibilityAfterHours,
+    int ClearanceNoticeBeforeHours,
+    int PickupReminderStartDay,
+    int OtpMaxAttempts,
+    int OtpLockoutMinutes,
+    bool EnableOtp,
+    bool EnableRemoteUnlock,
+    bool EnableBluetoothUnlock,
+    DateTimeOffset EffectiveFrom,
+    double? OperatorReplacementRadiusKm = null,
+    int? OperatorReplacementMaxLoad = null,
+    string[]? OperatorReplacementAreas = null,
+    Guid[]? OperatorReplacementEligibleUserIds = null,
+    IncidentSlaPolicy? IncidentSla = null);
+
+public sealed record SystemPolicyResponse(
+    Guid Id,
+    int Version,
+    DeliveryApprovalMode DefaultApprovalMode,
+    int GuestSessionTimeoutMinutes,
+    int ManualApprovalTimeoutMinutes,
+    int CompartmentReservationMinutes,
+    int OverdueStartAfterHours,
+    decimal OverdueFeePerHour,
+    string Currency,
+    int MaxStorageHours,
+    int ClearanceEligibilityAfterHours,
+    int ClearanceNoticeBeforeHours,
+    int PickupReminderStartDay,
+    int OtpMaxAttempts,
+    int OtpLockoutMinutes,
+    bool EnableOtp,
+    bool EnableRemoteUnlock,
+    bool EnableBluetoothUnlock,
+    DateTimeOffset EffectiveFrom,
+    DateTimeOffset? EffectiveTo,
+    bool IsActive,
+    DateTimeOffset CreatedAt,
+    double? OperatorReplacementRadiusKm = null,
+    int? OperatorReplacementMaxLoad = null,
+    string[]? OperatorReplacementAreas = null,
+    Guid[]? OperatorReplacementEligibleUserIds = null,
+    IncidentSlaPolicy? IncidentSla = null);
+
+public sealed record IncidentSlaPolicy(
+    int CriticalAcknowledgeMinutes = 15,
+    int CriticalResolveMinutes = 60,
+    int HighAcknowledgeMinutes = 30,
+    int HighResolveMinutes = 240,
+    int MediumAcknowledgeMinutes = 120,
+    int MediumResolveMinutes = 1440,
+    int LowAcknowledgeMinutes = 480,
+    int LowResolveMinutes = 4320);

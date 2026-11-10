@@ -18,9 +18,9 @@ public sealed class DeliveryRequest
     public Guid? ResidentProfileId { get; set; }
 
     /// <summary>
-    /// Mã định danh cụm locker nơi Shipper đang thực hiện gửi hàng.
+    /// Mã định danh tủ locker nơi Shipper đang thực hiện gửi hàng.
     /// </summary>
-    public Guid LockerClusterId { get; set; }
+    public Guid LockerId { get; set; }
 
     /// <summary>
     /// Mã định danh phiên bản chính sách được snapshot cho yêu cầu giao hàng.
@@ -36,16 +36,6 @@ public sealed class DeliveryRequest
     /// Giá trị băm của token phiên gửi hàng khách; không lưu raw token.
     /// </summary>
     public string GuestSessionTokenHash { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Họ tên của Shipper nếu quy trình thu thập.
-    /// </summary>
-    public string? ShipperName { get; set; }
-
-    /// <summary>
-    /// Số điện thoại của Shipper nếu quy trình thu thập.
-    /// </summary>
-    public string? ShipperPhone { get; set; }
 
     /// <summary>
     /// Số điện thoại Cư dân nhận hàng do Shipper xác nhận; null ở bước đầu phiên.
@@ -143,9 +133,9 @@ public sealed class DeliveryRequest
     public ResidentProfile? ResidentProfile { get; set; }
 
     /// <summary>
-    /// Cụm locker nơi diễn ra quá trình gửi hàng.
+    /// Tủ locker nơi diễn ra quá trình gửi hàng.
     /// </summary>
-    public LockerCluster LockerCluster { get; set; } = null!;
+    public Locker Locker { get; set; } = null!;
 
     /// <summary>
     /// Phiên bản chính sách áp dụng cho yêu cầu giao hàng.
@@ -171,6 +161,11 @@ public sealed class DeliveryRequest
     /// Lịch sử các lần mở cửa/xác thực liên quan đến yêu cầu giao hàng này.
     /// </summary>
     public ICollection<LockerAccessEvent> AccessEvents { get; set; } = new List<LockerAccessEvent>();
+
+    /// <summary>
+    /// Các thông báo phát sinh từ yêu cầu giao hàng này.
+    /// </summary>
+    public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
 
     /// <summary>
     /// Các sự cố phát sinh trong quá trình gửi hàng.

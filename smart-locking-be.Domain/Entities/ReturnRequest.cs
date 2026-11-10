@@ -7,6 +7,8 @@ namespace smart_locking_be.Domain.Entities;
 /// </summary>
 public sealed class ReturnRequest
 {
+    public ReturnCancellationRequest? Cancellation { get; set; }
+
     /// <summary>
     /// Mã định danh duy nhất của yêu cầu trả hàng.
     /// </summary>
@@ -23,9 +25,9 @@ public sealed class ReturnRequest
     public Guid? OriginalParcelId { get; set; }
 
     /// <summary>
-    /// Mã định danh cụm locker nơi Cư dân thực hiện trả hàng.
+    /// Mã định danh tủ locker nơi Cư dân thực hiện trả hàng.
     /// </summary>
-    public Guid LockerClusterId { get; set; }
+    public Guid LockerId { get; set; }
 
     /// <summary>
     /// Mã định danh ngăn locker được phân bổ giữ đặt trước cho Cư dân gửi hàng trả; null trước khi phân bổ.
@@ -50,7 +52,6 @@ public sealed class ReturnRequest
     /// <summary>
     /// Số điện thoại của Shipper đến nhận hàng trả nếu đã xác định.
     /// </summary>
-    public string? ShipperPhone { get; set; }
 
     /// <summary>
     /// Giá trị băm của token phiên làm việc của Shipper khi thực hiện lấy hàng trả nếu dùng guest session token.
@@ -113,9 +114,9 @@ public sealed class ReturnRequest
     public Parcel? OriginalParcel { get; set; }
 
     /// <summary>
-    /// Cụm locker diễn ra quá trình trả hàng.
+    /// Tủ locker diễn ra quá trình trả hàng.
     /// </summary>
-    public LockerCluster LockerCluster { get; set; } = null!;
+    public Locker Locker { get; set; } = null!;
 
     /// <summary>
     /// Ngăn locker được phân bổ cho yêu cầu trả hàng.
@@ -131,4 +132,11 @@ public sealed class ReturnRequest
     /// Lịch sử các lần mở cửa/xác thực liên quan đến yêu cầu trả hàng.
     /// </summary>
     public ICollection<LockerAccessEvent> AccessEvents { get; set; } = new List<LockerAccessEvent>();
+
+    /// <summary>
+    /// Các sự cố phát sinh trong quá trình gửi hoặc nhận hàng trả.
+    /// </summary>
+    public ICollection<Incident> Incidents { get; set; } = new List<Incident>();
+
+    public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
 }

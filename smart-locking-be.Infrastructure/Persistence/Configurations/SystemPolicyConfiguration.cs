@@ -12,6 +12,20 @@ public sealed class SystemPolicyConfiguration() : BaseConfiguration<SystemPolicy
         builder.Property(entity => entity.OverdueFeePerHour).HasPrecision(18, 2);
         Varchar(builder.Property(entity => entity.Currency)).IsRequired().HasMaxLength(3);
 
+        builder.Property(entity => entity.IncidentCriticalAcknowledgeMinutes).HasDefaultValue(15);
+        builder.Property(entity => entity.IncidentCriticalResolveMinutes).HasDefaultValue(60);
+        builder.Property(entity => entity.IncidentHighAcknowledgeMinutes).HasDefaultValue(30);
+        builder.Property(entity => entity.IncidentHighResolveMinutes).HasDefaultValue(240);
+        builder.Property(entity => entity.IncidentMediumAcknowledgeMinutes).HasDefaultValue(120);
+        builder.Property(entity => entity.IncidentMediumResolveMinutes).HasDefaultValue(1440);
+        builder.Property(entity => entity.IncidentLowAcknowledgeMinutes).HasDefaultValue(480);
+        builder.Property(entity => entity.IncidentLowResolveMinutes).HasDefaultValue(4320);
+        builder.ToTable("SystemPolicy", table => table.HasCheckConstraint("CK_SystemPolicy_IncidentSla",
+            "\"IncidentCriticalAcknowledgeMinutes\" > 0 AND \"IncidentCriticalResolveMinutes\" >= \"IncidentCriticalAcknowledgeMinutes\" AND " +
+            "\"IncidentHighAcknowledgeMinutes\" > 0 AND \"IncidentHighResolveMinutes\" >= \"IncidentHighAcknowledgeMinutes\" AND " +
+            "\"IncidentMediumAcknowledgeMinutes\" > 0 AND \"IncidentMediumResolveMinutes\" >= \"IncidentMediumAcknowledgeMinutes\" AND " +
+            "\"IncidentLowAcknowledgeMinutes\" > 0 AND \"IncidentLowResolveMinutes\" >= \"IncidentLowAcknowledgeMinutes\""));
+
         builder.HasOne(entity => entity.CreatedByUser)
             .WithMany(user => user.CreatedSystemPolicies)
             .HasForeignKey(entity => entity.CreatedByUserId)
@@ -38,6 +52,7 @@ public sealed class SystemPolicyConfiguration() : BaseConfiguration<SystemPolicy
             "\"OverdueFeePerHour\" >= 0 AND " +
             "\"MaxStorageHours\" > 0 AND " +
             "\"ClearanceEligibilityAfterHours\" >= 0 AND " +
-            "\"ClearanceNoticeBeforeHours\" >= 0"));
+            "\"ClearanceNoticeBeforeHours\" >= 0 AND " +
+            "\"PickupReminderStartDay\" > 0"));
     }
 }

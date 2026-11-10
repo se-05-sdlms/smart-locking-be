@@ -1,7 +1,7 @@
 namespace smart_locking_be.Domain.Entities;
 
 /// <summary>
-/// Lưu thông tin phân công phạm vi quản lý vận hành cho Nhân viên vận hành (Locker Operator).
+/// Lưu thông tin phân công phạm vi quản lý vận hành tủ locker cho Nhân viên vận hành (Locker Operator).
 /// </summary>
 public sealed class OperatorAssignment
 {
@@ -16,19 +16,9 @@ public sealed class OperatorAssignment
     public Guid OperatorUserId { get; set; }
 
     /// <summary>
-    /// Mã định danh tòa nhà nếu phân công áp dụng ở phạm vi toàn bộ tòa nhà.
+    /// Mã định danh tủ locker được phân công quản lý.
     /// </summary>
-    public Guid? BuildingId { get; set; }
-
-    /// <summary>
-    /// Mã định danh cụm locker nếu phân công áp dụng ở phạm vi cụm locker.
-    /// </summary>
-    public Guid? LockerClusterId { get; set; }
-
-    /// <summary>
-    /// Mã định danh locker cụ thể nếu phân công áp dụng ở phạm vi một tủ locker.
-    /// </summary>
-    public Guid? LockerId { get; set; }
+    public Guid LockerId { get; set; }
 
     /// <summary>
     /// Mã định danh Quản trị viên đã thực hiện tạo phân công.
@@ -56,19 +46,9 @@ public sealed class OperatorAssignment
     public User OperatorUser { get; set; } = null!;
 
     /// <summary>
-    /// Tòa nhà được giao quản lý nếu phạm vi phân công là Building.
+    /// Tủ locker được giao quản lý.
     /// </summary>
-    public Building? Building { get; set; }
-
-    /// <summary>
-    /// Cụm locker được giao quản lý nếu phạm vi phân công là LockerCluster.
-    /// </summary>
-    public LockerCluster? LockerCluster { get; set; }
-
-    /// <summary>
-    /// Locker được giao quản lý nếu phạm vi phân công là Locker.
-    /// </summary>
-    public Locker? Locker { get; set; }
+    public Locker Locker { get; set; } = null!;
 
     /// <summary>
     /// Quản trị viên đã thực hiện phân công.

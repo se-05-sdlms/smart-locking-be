@@ -5,11 +5,20 @@ on:
     branches: [main, dev]
   push:
     branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build-test:
     name: Restore, format, build, and test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -31,3 +40,21 @@ jobs:
 
       - name: Test Release
         run: dotnet test smart-locking-be.sln --configuration Release --no-build --verbosity normal
+
+      - name: Build demo seeder
+        run: dotnet build tools/SmartLocking.DemoSeeder/SmartLocking.DemoSeeder.csproj --configuration Release
+
+  deploy:
+    name: Deploy main to Render
+    needs: build-test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger Render deployment of the tested commit
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          test -n "$RENDER_DEPLOY_HOOK_URL" || { echo "RENDER_DEPLOY_HOOK_URL is not configured"; exit 1; }
+          curl --fail --silent --show-error --max-time 60 \
+            --request POST "${RENDER_DEPLOY_HOOK_URL}&ref=${GITHUB_SHA}"

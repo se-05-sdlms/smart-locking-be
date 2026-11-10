@@ -15,6 +15,7 @@ public sealed class IncidentConfiguration() : BaseConfiguration<Incident>(entity
         EnumAsString(builder.Property(entity => entity.Status)).IsRequired();
         Varchar(builder.Property(entity => entity.Title)).IsRequired().HasMaxLength(200);
         Text(builder.Property(entity => entity.Description)).IsRequired();
+        Varchar(builder.Property(entity => entity.EvidenceUrl)).HasMaxLength(2048);
         Text(builder.Property(entity => entity.ResolutionSummary));
 
         builder.HasOne(entity => entity.ReporterUser)
@@ -41,6 +42,10 @@ public sealed class IncidentConfiguration() : BaseConfiguration<Incident>(entity
             .WithMany(payment => payment.Incidents)
             .HasForeignKey(entity => entity.PaymentTransactionId)
             .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(entity => entity.ReturnRequest)
+            .WithMany(request => request.Incidents)
+            .HasForeignKey(entity => entity.ReturnRequestId)
+            .OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(entity => entity.AssignedOperatorUser)
             .WithMany(user => user.AssignedIncidents)
             .HasForeignKey(entity => entity.AssignedOperatorUserId)
@@ -50,6 +55,8 @@ public sealed class IncidentConfiguration() : BaseConfiguration<Incident>(entity
             .HasDatabaseName("IX_Incident_Status_AssignedOperator");
         builder.HasIndex(entity => entity.ParcelId)
             .HasDatabaseName("IX_Incident_ParcelId");
+        builder.HasIndex(entity => entity.ReturnRequestId)
+            .HasDatabaseName("IX_Incident_ReturnRequestId");
         builder.HasIndex(entity => new { entity.LockerId, entity.Status })
             .HasDatabaseName("IX_Incident_LockerId_Status");
         builder.HasIndex(entity => entity.CreatedAt)

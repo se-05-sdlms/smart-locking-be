@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using smart_locking_be.Domain.Entities;
+using smart_locking_be.Domain.Enums;
 
 namespace smart_locking_be.Infrastructure.Persistence;
 
@@ -11,10 +12,10 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<ResidentBiometric> ResidentBiometrics => Set<ResidentBiometric>();
     public DbSet<OtpChallenge> OtpChallenges => Set<OtpChallenge>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
-    public DbSet<Building> Buildings => Set<Building>();
-    public DbSet<LockerCluster> LockerClusters => Set<LockerCluster>();
     public DbSet<Locker> Lockers => Set<Locker>();
     public DbSet<LockerCompartment> LockerCompartments => Set<LockerCompartment>();
+    public DbSet<OperatorAbsence> OperatorAbsences => Set<OperatorAbsence>();
+    public DbSet<TemporaryOperatorAssignment> TemporaryOperatorAssignments => Set<TemporaryOperatorAssignment>();
     public DbSet<OperatorAssignment> OperatorAssignments => Set<OperatorAssignment>();
     public DbSet<SystemPolicy> SystemPolicies => Set<SystemPolicy>();
     public DbSet<NotificationRule> NotificationRules => Set<NotificationRule>();
@@ -27,6 +28,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<OverdueCharge> OverdueCharges => Set<OverdueCharge>();
     public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<DeviceInstallation> DeviceInstallations => Set<DeviceInstallation>();
     public DbSet<Incident> Incidents => Set<Incident>();
     public DbSet<IncidentAction> IncidentActions => Set<IncidentAction>();
     public DbSet<LockerEvent> LockerEvents => Set<LockerEvent>();
@@ -34,17 +36,49 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<MaintenanceRequest> MaintenanceRequests => Set<MaintenanceRequest>();
     public DbSet<MaintenanceActivity> MaintenanceActivities => Set<MaintenanceActivity>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+    public DbSet<ResidentSubscription> ResidentSubscriptions => Set<ResidentSubscription>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        AddStatusAudits();
         EnforceAuditLogImmutability();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        AddStatusAudits();
         EnforceAuditLogImmutability();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void AddStatusAudits()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries().Where(item => item.State == EntityState.Modified &&
+            item.Entity is not AuditLog).ToArray())
+        {
+            string[] changes = entry.Properties
+                .Where(property => property.IsModified &&
+                    (property.Metadata.Name.EndsWith("Status", StringComparison.Ordinal) ||
+                     property.Metadata.Name is "Result" or "IsActive"))
+                .Select(property => $"{property.Metadata.Name}: {property.OriginalValue} -> {property.CurrentValue}")
+                .ToArray();
+            if (changes.Length == 0) continue;
+            Guid? entityId = entry.Properties.FirstOrDefault(property => property.Metadata.Name == "Id")?.CurrentValue is Guid id
+                ? id : null;
+            AuditLogs.Add(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                Action = $"{entry.Metadata.ClrType.Name}.StatusChanged",
+                EntityType = entry.Metadata.ClrType.Name,
+                EntityId = entityId,
+                Result = AuditLogResult.Succeeded,
+                Details = string.Join("; ", changes),
+                OccurredAt = DateTimeOffset.UtcNow
+            });
+        }
     }
 
     private void EnforceAuditLogImmutability()

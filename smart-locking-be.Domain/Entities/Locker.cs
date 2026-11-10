@@ -7,20 +7,32 @@ namespace smart_locking_be.Domain.Entities;
 /// </summary>
 public sealed class Locker
 {
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+    public string? ServiceArea { get; set; }
+    public Guid? LocationConfirmedByUserId { get; set; }
+    public DateTimeOffset? LocationConfirmedAt { get; set; }
+    public Guid? LocationRevision { get; set; }
+
     /// <summary>
     /// Mã định danh duy nhất của locker.
     /// </summary>
     public Guid Id { get; set; }
 
     /// <summary>
-    /// Mã định danh cụm locker chứa tủ locker này.
-    /// </summary>
-    public Guid LockerClusterId { get; set; }
-
-    /// <summary>
-    /// Mã tủ locker duy nhất trong phạm vi cụm locker.
+    /// Mã tủ locker duy nhất.
     /// </summary>
     public string Code { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Địa chỉ đặt tủ locker vật lý.
+    /// </summary>
+    public string Address { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Địa chỉ tập kết/thu hồi hàng khi hàng gửi tại locker bị quá hạn để cư dân đến lấy lại.
+    /// </summary>
+    public string RecoveryAddress { get; set; } = string.Empty;
 
     /// <summary>
     /// Mã định danh phần cứng/IoT của thiết bị dùng để định tuyến tin nhắn và lệnh điều khiển.
@@ -53,9 +65,19 @@ public sealed class Locker
     public DateTimeOffset UpdatedAt { get; set; }
 
     /// <summary>
-    /// Cụm locker chứa tủ locker này.
+    /// Các yêu cầu giao hàng được thực hiện tại tủ locker này.
     /// </summary>
-    public LockerCluster LockerCluster { get; set; } = null!;
+    public ICollection<DeliveryRequest> DeliveryRequests { get; set; } = new List<DeliveryRequest>();
+
+    /// <summary>
+    /// Các yêu cầu gửi trả hàng được thực hiện tại tủ locker này.
+    /// </summary>
+    public ICollection<ReturnRequest> ReturnRequests { get; set; } = new List<ReturnRequest>();
+
+    /// <summary>
+    /// Các Cư dân đăng ký sử dụng tủ Locker này.
+    /// </summary>
+    public ICollection<ResidentProfile> RegisteredResidents { get; set; } = new List<ResidentProfile>();
 
     /// <summary>
     /// Danh sách các ngăn vật lý thuộc tủ locker.

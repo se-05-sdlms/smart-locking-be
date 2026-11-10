@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+.git/
+.codegraph/
+.vs/
+.vscode/
+.superpowers/
+**/logs/
+**/.env*
+**/wwwroot/uploads/
+**/appsettings.Development.json
+**/*.csproj.user
+smart-locking-be.Tests/
