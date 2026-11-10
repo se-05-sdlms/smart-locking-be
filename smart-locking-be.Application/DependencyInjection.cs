@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using smart_locking_be.Application.Interfaces.Services;
+using smart_locking_be.Application.Services;
 
 namespace smart_locking_be.Application;
 
@@ -6,15 +8,9 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
-        // Tầng Application chứa interface, DTOs, Validators và các nghiệp vụ Use Cases / Application Services.
-        // HƯỚNG DẪN ĐĂNG KÝ SERVICE TRONG TƯƠNG LAI:
-        // Khi tạo Service nghiệp vụ (Ví dụ: AuthService, ParcelService, LockerService), hãy đăng ký AddScoped tại đây:
-        //
-        // Ví dụ:
-        // services.AddScoped<IAuthService, AuthService>();
-        // services.AddScoped<IParcelService, ParcelService>();
-        // services.AddScoped<ILockerService, LockerService>();
-        // services.AddScoped<IBuildingService, BuildingService>();
+        services.AddScoped<ICompartmentResetService, CompartmentResetService>();
+        // Use case chỉ phụ thuộc interface; các adapter EF/MQTT được đăng ký ở Infrastructure.
+        services.AddScoped<IBluetoothWorkflowService, BluetoothWorkflowService>();
 
         return services;
     }

@@ -8,12 +8,70 @@ using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Auth;
 using smart_locking_be.Infrastructure.Persistence;
+using smart_locking_be.Infrastructure.Services;
 
 namespace smart_locking_be.Tests.Auth;
 
 public sealed class AuthServiceTests
 {
     private const string OtpCode = "123456";
+
+    [Theory]
+    [InlineData(null, DeliveryApprovalMode.Auto)]
+    [InlineData(DeliveryApprovalMode.Auto, DeliveryApprovalMode.Auto)]
+    [InlineData(DeliveryApprovalMode.Manual, DeliveryApprovalMode.Manual)]
+    public async Task RegisterAsync_UsesActivePolicyApprovalMode(DeliveryApprovalMode? configured, DeliveryApprovalMode expected)
+    {
+        await using var db = CreateDbContext();
+        var locker = CreateLocker(LockerOperationalStatus.Operational);
+        db.AddRange(locker, CreateRegistrationChallenge("0912345678"));
+        SeedApprovalPolicies(db, configured);
+        await db.SaveChangesAsync();
+
+        await CreateService(db).RegisterAsync(new("0912345678", OtpCode, "P@ssw0rd123", "Resident", locker.Id, null), null, default);
+
+        Assert.Equal(expected, (await db.ResidentProfiles.SingleAsync()).DeliveryApprovalMode);
+    }
+
+    [Theory]
+    [InlineData(null, DeliveryApprovalMode.Auto)]
+    [InlineData(DeliveryApprovalMode.Auto, DeliveryApprovalMode.Auto)]
+    [InlineData(DeliveryApprovalMode.Manual, DeliveryApprovalMode.Manual)]
+    public async Task MissingResidentProfile_UsesActivePolicyApprovalMode(DeliveryApprovalMode? configured, DeliveryApprovalMode expected)
+    {
+        await using var db = CreateDbContext();
+        var user = new User { Id = Guid.NewGuid(), PhoneNumber = "0912345678", Role = UserRole.Resident, Status = UserStatus.Active };
+        db.Add(user);
+        SeedApprovalPolicies(db, configured);
+        await db.SaveChangesAsync();
+
+        await new ResidentService(db).GetProfileAsync(user.Id);
+
+        Assert.Equal(expected, (await db.ResidentProfiles.SingleAsync()).DeliveryApprovalMode);
+    }
+
+    [Fact]
+    public async Task ExistingResidentProfile_KeepsResidentApprovalPreference()
+    {
+        await using var db = CreateDbContext();
+        var user = new User { Id = Guid.NewGuid(), PhoneNumber = "0912345678", Role = UserRole.Resident, Status = UserStatus.Active };
+        var profile = new ResidentProfile { Id = Guid.NewGuid(), UserId = user.Id, User = user, FullName = "Resident", DeliveryApprovalMode = DeliveryApprovalMode.Manual };
+        db.Add(profile);
+        SeedApprovalPolicies(db, DeliveryApprovalMode.Auto);
+        await db.SaveChangesAsync();
+
+        await new ResidentService(db).GetProfileAsync(user.Id);
+
+        Assert.Equal(DeliveryApprovalMode.Manual, profile.DeliveryApprovalMode);
+    }
+
+    private static void SeedApprovalPolicies(ApplicationDbContext db, DeliveryApprovalMode? configured)
+    {
+        // Policy không active không được quyết định giá trị khởi tạo cho resident mới.
+        db.Add(new SystemPolicy { Id = Guid.NewGuid(), Version = 1, IsActive = false, DefaultApprovalMode = configured == DeliveryApprovalMode.Manual ? DeliveryApprovalMode.Auto : DeliveryApprovalMode.Manual });
+        if (configured.HasValue)
+            db.Add(new SystemPolicy { Id = Guid.NewGuid(), Version = 2, IsActive = true, DefaultApprovalMode = configured.Value });
+    }
 
     #region AUTH-01: RegisterAsync
     [Fact]

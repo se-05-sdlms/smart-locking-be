@@ -31,5 +31,7 @@ public interface IParcelService
         CancellationToken cancellationToken = default);
 
     Task FinalizeRetrievalAsync(Guid parcelId, Guid? residentUserId, DateTimeOffset completedAt, CancellationToken cancellationToken = default);
+    Task<OverdueTransferResponse> ConfirmOverdueArrivalAsync(Guid userId, string role, Guid parcelId,
+        ConfirmRecoveryArrivalRequest request, CancellationToken cancellationToken = default);
 
 }

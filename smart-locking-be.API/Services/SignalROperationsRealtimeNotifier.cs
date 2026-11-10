@@ -1,6 +1,3 @@
-using Microsoft.EntityFrameworkCore;
-using smart_locking_be.Infrastructure.Persistence;
-using smart_locking_be.Domain.Enums;
 using Microsoft.AspNetCore.SignalR;
 using smart_locking_be.API.Hubs;
 using smart_locking_be.Application.DTOs.Notifications;
@@ -11,7 +8,7 @@ namespace smart_locking_be.API.Services;
 public sealed class SignalROperationsRealtimeNotifier(
     IHubContext<OperationsHub> hubContext,
     ILogger<SignalROperationsRealtimeNotifier> logger,
-    ApplicationDbContext dbContext, TimeProvider timeProvider)
+    IOperationsRealtimeAudience audience, TimeProvider timeProvider, LockerStatusStream statusStream)
     : IOperationsRealtimeNotifier
 {
     public Task PublishToUserAsync(Guid userId, RealtimeEvent message, CancellationToken cancellationToken = default) =>
@@ -22,10 +19,13 @@ public sealed class SignalROperationsRealtimeNotifier(
     public Task PublishToLockerAsync(Guid lockerId, RealtimeEvent message, CancellationToken cancellationToken = default) =>
         PublishAsync(async () =>
         {
-            var operators = dbContext.EffectiveOperatorAssignments(timeProvider.GetUtcNow())
-                .Where(x => x.LockerId == lockerId).Select(x => x.OperatorUserId);
-            var admins = dbContext.Users.Where(x => x.Role == UserRole.Administrator && x.Status == UserStatus.Active).Select(x => x.Id);
-            var recipients = await operators.Union(admins).ToListAsync(cancellationToken);
+            // Đẩy tín hiệu công khai trước truy vấn người nhận vận hành; SSE chỉ trả snapshot tối thiểu.
+            if (statusStream.HasSubscribers)
+            {
+                string? device = await audience.GetDeviceIdentifierAsync(lockerId, cancellationToken);
+                if (device is not null) statusStream.Publish(device);
+            }
+            var recipients = await audience.GetRecipientIdsAsync(lockerId, timeProvider.GetUtcNow(), cancellationToken);
             foreach (Guid userId in recipients) await PublishToUserAsync(userId, message, cancellationToken);
         }, $"locker:{lockerId}");
 

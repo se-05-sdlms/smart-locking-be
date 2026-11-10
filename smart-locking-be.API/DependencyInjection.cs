@@ -35,6 +35,7 @@ public static class DependencyInjection
             };
         });
         services.AddSignalR();
+        services.AddSingleton<LockerStatusStream>();
         services.AddScoped<IOperationsRealtimeNotifier, SignalROperationsRealtimeNotifier>();
         IConfigurationSection storageSection = configuration.GetSection(SupabaseStorageOptions.SectionName);
         if (!string.IsNullOrWhiteSpace(storageSection["Url"]) && !string.IsNullOrWhiteSpace(storageSection["ApiKey"]))

@@ -12,7 +12,9 @@ public sealed class LockerAccessService(
     ApplicationDbContext dbContext,
     ILockerCommandDispatcher commandDispatcher,
     TimeProvider timeProvider,
-    IConfiguration configuration) : ILockerAccessService
+    IBluetoothMessageCodec? protocol = null,
+    IConfiguration? configuration = null,
+    IBluetoothCommandSigner? commandSigner = null) : ILockerAccessService
 {
     public async Task<OpenLockerResponse> OpenAsync(
         OpenLockerRequest request,
@@ -46,6 +48,8 @@ public sealed class LockerAccessService(
                 throw new ConflictException(ReturnErrorCodes.InvalidState, "Return access is revoked or no longer available.");
         }
 
+        bool useBluetooth = request.AccessMethod == LockerAccessMethod.Bluetooth;
+        BluetoothCommandResponse? bluetoothCommand = null;
 
         LockerCompartment compartment = await dbContext.LockerCompartments
             .Include(item => item.Locker)
@@ -57,8 +61,13 @@ public sealed class LockerAccessService(
             throw new BadRequestException(LockerErrorCodes.InvalidCompartment, "Compartment does not belong to the requested locker.");
         }
 
-        bool monitoringEnabled = configuration.GetValue<bool>("LockerMonitoring:Enabled");
-        if (monitoringEnabled && compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
+        Guid? deliveryId = request.DeliveryRequestId;
+        if (request.ParcelId.HasValue)
+            deliveryId = await dbContext.Parcels.Where(x => x.Id == request.ParcelId.Value)
+                .Select(x => (Guid?)x.DeliveryRequestId).SingleOrDefaultAsync(cancellationToken);
+        bool monitoringEnabled = configuration?.GetValue<bool>("LockerMonitoring:Enabled") ?? false;
+        // Mất kết nối máy chủ chỉ chặn đường MQTT; điện thoại vẫn được nhận lệnh để chuyển qua BLE.
+        if (!useBluetooth && monitoringEnabled && compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
         {
             throw new ConflictException(LockerErrorCodes.Offline, "Locker is offline or has not reported its connection status.");
         }
@@ -80,7 +89,7 @@ public sealed class LockerAccessService(
             OccurredAt = now,
         };
 
-        string? blockedReason = GetBlockedReason(compartment, monitoringEnabled);
+        string? blockedReason = GetBlockedReason(compartment, useBluetooth, monitoringEnabled);
         if (blockedReason is null && request.AccessType != LockerAccessType.OperatorEmergency &&
             !await dbContext.OperationalCompartments().AnyAsync(item => item.Id == compartment.Id, cancellationToken))
             blockedReason = "Locker or compartment is blocked by maintenance or an unresolved equipment incident.";
@@ -93,11 +102,21 @@ public sealed class LockerAccessService(
         {
             try
             {
-                await commandDispatcher.DispatchUnlockAsync(
+                // BLE trả lệnh về điện thoại; MQTT gửi cùng nội dung xuống tủ.
+                string? workflowCommand = protocol is null ? null : await BuildCommandAsync(request, compartment, accessEvent.Id, protocol, cancellationToken);
+                if (useBluetooth)
+                {
+                    if (workflowCommand is null) throw new InvalidOperationException("Chua cau hinh lenh Bluetooth.");
+                    bluetoothCommand = new(compartment.Locker.DeviceIdentifier, compartment.HardwareChannel,
+                        (commandSigner ?? throw new InvalidOperationException("Chưa cấu hình xác thực lệnh Bluetooth."))
+                            .Sign(compartment.Locker.DeviceIdentifier, workflowCommand), now.AddMinutes(2));
+                }
+                else await commandDispatcher.DispatchUnlockAsync(
                     new LockerUnlockCommand(
                         accessEvent.Id,
                         compartment.Locker.DeviceIdentifier,
-                        compartment.HardwareChannel),
+                        compartment.HardwareChannel, deliveryId,
+                        request.AccessType is LockerAccessType.OperatorEmergency or LockerAccessType.Maintenance, workflowCommand),
                     cancellationToken);
                 accessEvent.Result = LockerAccessResult.Succeeded;
             }
@@ -123,16 +142,41 @@ public sealed class LockerAccessService(
         await dbContext.SaveChangesAsync(cancellationToken);
         if (parcelTransaction is not null) await parcelTransaction.CommitAsync(cancellationToken);
         if (returnTransition is not null) await returnTransition.CommitAsync(cancellationToken);
-        return Map(accessEvent, compartment);
+        return Map(accessEvent, compartment, bluetoothCommand);
     }
 
-    private static string? GetBlockedReason(LockerCompartment compartment, bool monitoringEnabled)
+    private async Task<string?> BuildCommandAsync(OpenLockerRequest request, LockerCompartment compartment, Guid commandId,
+        IBluetoothMessageCodec protocol, CancellationToken ct)
+    {
+        if (request.AccessType is LockerAccessType.OperatorEmergency or LockerAccessType.Maintenance) return null;
+        string kind, phone, pin = "-";
+        Guid subject;
+        if (request.ReturnRequestId is { } returnId)
+        {
+            var item = await dbContext.ReturnRequests.Include(x => x.ResidentProfile).ThenInclude(x => x.User).SingleAsync(x => x.Id == returnId, ct);
+            kind = request.AccessType == LockerAccessType.ResidentReturnDropOff ? "R" : "G";
+            subject = item.Id; phone = item.ResidentProfile.User.PhoneNumber ?? ""; pin = item.ReturnCode;
+        }
+        else
+        {
+            Guid? id = request.DeliveryRequestId;
+            if (request.ParcelId is { } parcelId) id = await dbContext.Parcels.Where(x => x.Id == parcelId).Select(x => (Guid?)x.DeliveryRequestId).SingleAsync(ct);
+            var item = await dbContext.DeliveryRequests.SingleAsync(x => x.Id == id, ct);
+            kind = request.AccessType == LockerAccessType.ShipperDropOff ? "D" : "P";
+            subject = item.Id; phone = item.RecipientPhoneSnapshot ?? "";
+        }
+        phone = phone.StartsWith("+84", StringComparison.Ordinal) ? "0" + phone[3..] : phone;
+        return protocol.CreateCommand(compartment.Locker.DeviceIdentifier, subject, compartment.HardwareChannel, kind, phone, pin,
+            timeProvider.GetUtcNow().AddMinutes(2), commandId);
+    }
+
+    private static string? GetBlockedReason(LockerCompartment compartment, bool allowBluetooth, bool monitoringEnabled)
     {
         if (compartment.Locker.OperationalStatus != LockerOperationalStatus.Operational)
         {
             return "Locker is not operational.";
         }
-        if (monitoringEnabled && compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
+        if (!allowBluetooth && monitoringEnabled && compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
         {
             return "Locker is offline.";
         }
@@ -167,7 +211,7 @@ public sealed class LockerAccessService(
         }
     }
 
-    private static OpenLockerResponse Map(LockerAccessEvent accessEvent, LockerCompartment compartment) => new(
+    private static OpenLockerResponse Map(LockerAccessEvent accessEvent, LockerCompartment compartment, BluetoothCommandResponse? bluetoothCommand) => new(
         accessEvent.Id,
         accessEvent.LockerId,
         accessEvent.LockerCompartmentId,
@@ -175,7 +219,7 @@ public sealed class LockerAccessService(
         compartment.HardwareChannel,
         accessEvent.Result,
         accessEvent.FailureReason,
-        accessEvent.OccurredAt);
+        accessEvent.OccurredAt, bluetoothCommand);
 
     private static string? TrimToNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

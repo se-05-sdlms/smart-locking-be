@@ -1,3 +1,4 @@
+using smart_locking_be.Domain.Enums;
 using smart_locking_be.Application.DTOs.Common;
 using smart_locking_be.Application.DTOs.Returns;
 
@@ -12,7 +13,7 @@ public interface IReturnRequestService
         int pageNumber = 1,
         int pageSize = 20);
     Task<ReturnRequestResponse> GetAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default);
-    Task<ReturnUnlockResponse> OpenCompartmentAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default);
+    Task<ReturnUnlockResponse> OpenCompartmentAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default, LockerAccessMethod accessMethod = LockerAccessMethod.RemoteApp);
     Task<ReturnRequestResponse> CancelAsync(Guid residentUserId, Guid id, CancellationToken cancellationToken = default);
     Task FinalizeDepositAsync(Guid id, DateTimeOffset completedAt, CancellationToken cancellationToken = default);
     Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default);

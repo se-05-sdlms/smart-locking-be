@@ -604,7 +604,7 @@ public sealed class DeliveryRequestService(
     public async Task<CompartmentReservationResponse> OpenCompartmentAsync(
         Guid requestId,
         string guestSessionToken,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, LockerAccessMethod accessMethod = LockerAccessMethod.GuestSession)
     {
         DeliveryRequest deliveryRequest = await FindValidSessionAsync(requestId, guestSessionToken, cancellationToken);
         if (deliveryRequest.Status != DeliveryRequestStatus.Approved)
@@ -620,7 +620,8 @@ public sealed class DeliveryRequestService(
             deliveryRequest.Id,
             null,
             reservationExpiresAt,
-            cancellationToken);
+            cancellationToken,
+            verifyDoorOnDevice: accessMethod == LockerAccessMethod.Bluetooth);
         if (reservation is null)
         {
             deliveryRequest.Status = DeliveryRequestStatus.Failed;
@@ -651,7 +652,7 @@ public sealed class DeliveryRequestService(
             null,
             null,
             LockerAccessType.ShipperDropOff,
-            LockerAccessMethod.GuestSession,
+            accessMethod,
             null,
             "Guest Web"), cancellationToken);
         if (access.Result != LockerAccessResult.Succeeded)
@@ -673,7 +674,7 @@ public sealed class DeliveryRequestService(
             availableCompartment.Id,
             availableCompartment.Code,
             reservation.ReservedAt,
-            reservation.ExpiresAt);
+            reservation.ExpiresAt, access.Bluetooth);
     }
 
     public async Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default)
@@ -769,7 +770,8 @@ public sealed class DeliveryRequestService(
 
         deliveryRequest.Status = DeliveryRequestStatus.Deposited;
         deliveryRequest.DepositedAt = now;
-        deliveryRequest.CompartmentReleasedAt = now;
+        // Chỉ giải phóng ngăn sau khi nhận hàng, không phải khi vừa gửi vào tủ.
+        deliveryRequest.CompartmentReleasedAt = null;
         deliveryRequest.LastActivityAt = now;
         deliveryRequest.UpdatedAt = now;
 
@@ -791,7 +793,9 @@ public sealed class DeliveryRequestService(
             compartmentCode);
         AddAudit(null, "DeliveryRequest.Deposited", deliveryRequest, $"ParcelId={parcel.Id}", now);
         await dbContext.SaveChangesAsync(cancellationToken);
-        await pushNotificationService.TrySendAsync(pushNotificationId, cancellationToken);
+        // Khi đồng bộ đang có transaction, worker sẽ gửi sau khi lưu thành công.
+        if (dbContext.Database.CurrentTransaction is null)
+            await pushNotificationService.TrySendAsync(pushNotificationId, cancellationToken);
         if (realtimeNotifier is not null)
         {
             await realtimeNotifier.PublishToLockerAsync(deliveryRequest.LockerId, new RealtimeEvent(

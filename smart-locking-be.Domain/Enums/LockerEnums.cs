@@ -153,7 +153,12 @@ public enum LockerAccessMethod
     /// <summary>
     /// Quyền tự động ủy quyền trực tiếp từ hệ thống.
     /// </summary>
-    SystemAuthorization
+    SystemAuthorization,
+
+    /// <summary>
+    /// Mở ngăn ngoại tuyến qua kết nối Bluetooth Low Energy (BLE).
+    /// </summary>
+    Bluetooth
 }
 
 /// <summary>

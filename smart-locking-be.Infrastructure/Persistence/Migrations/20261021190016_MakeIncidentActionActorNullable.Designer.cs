@@ -2534,6 +2534,146 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
 
                     b.Navigation("ResidentProfile");
                 });
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OfflineLockerCursor", b =>
+                {
+                    b.Property<string>("DeviceIdentifier")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<long>("LastSequence")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("DeviceIdentifier");
+
+                    b.ToTable("OfflineLockerCursor", (string)null);
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OfflineLockerEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DeliveryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DeviceIdentifier")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<long>("ElapsedMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("HardwareChannel")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(1)
+                        .HasColumnType("character varying(1)");
+
+                    b.Property<DateTimeOffset?>("OpenedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PinCode")
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RecipientPhone")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("ReviewReason")
+                        .HasColumnType("text");
+
+                    b.Property<long>("Sequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeviceIdentifier", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "ReceivedAt");
+
+                    b.HasIndex("DeviceIdentifier", "DeliveryId", "Kind");
+
+                    b.ToTable("OfflineLockerEvent", (string)null);
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OfflineLockerPin", b =>
+                {
+                    b.Property<Guid>("ParcelId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DeliveryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("LockerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PinCode")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
+                    b.Property<DateTimeOffset?>("ProvisionedAt")
+                        .IsConcurrencyToken()
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RecipientPhone")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("ParcelId");
+
+                    b.HasIndex("DeliveryId")
+                        .IsUnique();
+
+                    b.ToTable("OfflineLockerPin", (string)null);
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OfflineLockerPin", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.Locker", null)
+                        .WithMany()
+                        .HasForeignKey("LockerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.Parcel", null)
+                        .WithOne()
+                        .HasForeignKey("smart_locking_be.Domain.Entities.OfflineLockerPin", "ParcelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
 #pragma warning restore 612, 618
         }
     }
