@@ -24,7 +24,20 @@ public sealed class OperatorTaskService(ApplicationDbContext db, TimeProvider cl
         var incidents = await db.Incidents.AsNoTracking().Where(x => x.LockerId.HasValue && ids.Contains(x.LockerId.Value) && x.Status != IncidentStatus.Resolved)
             .OrderBy(x => x.Type.ToLower() == "locker" ? 0 : x.Type.ToLower() == "compartment" || x.Type.ToLower() == "payment" || x.Type.ToLower() == "retrieval" ? 1 : x.Type.ToLower() == "other" ? 3 : 2)
             .ThenBy(x => x.CreatedAt).ThenBy(x => x.Id)
-            .Select(x => new { x.Id, LockerId = x.LockerId!.Value, LockerCode = x.Locker!.Code, x.Title, x.Type, x.Status, x.CreatedAt, x.AssignedOperatorUserId }).Take(fetch).ToListAsync(ct);
+            .Select(x => new
+            {
+                x.Id,
+                LockerId = x.LockerId!.Value,
+                LockerCode = x.Locker!.Code,
+                x.Title,
+                x.Type,
+                x.Status,
+                x.CreatedAt,
+                x.AssignedOperatorUserId,
+                AssignedOperatorName = x.AssignedOperatorUser == null ? null :
+                    (x.AssignedOperatorUser.ResidentProfile == null ? null : x.AssignedOperatorUser.ResidentProfile.FullName)
+                    ?? x.AssignedOperatorUser.PhoneNumber ?? x.AssignedOperatorUser.Email ?? x.AssignedOperatorUser.Id.ToString()
+            }).Take(fetch).ToListAsync(ct);
         var maintenance = await db.MaintenanceRequests.AsNoTracking().Where(x => ids.Contains(x.LockerId) && (x.Status == MaintenanceStatus.Open || x.Status == MaintenanceStatus.InProgress))
             .OrderBy(x => x.Priority == MaintenancePriority.Critical ? 0 : x.Priority == MaintenancePriority.High ? 1 : x.Priority == MaintenancePriority.Normal ? 2 : 3).ThenBy(x => x.CreatedAt).ThenBy(x => x.Id)
             .Select(x => new { x.Id, x.LockerId, LockerCode = x.Locker.Code, x.Description, x.Priority, x.Status, x.CreatedAt }).Take(fetch).ToListAsync(ct);
@@ -37,10 +50,10 @@ public sealed class OperatorTaskService(ApplicationDbContext db, TimeProvider cl
             SlaTargets targets = IncidentSlaService.TargetsFor(priority, policy, sla.Value);
             int minutes = x.Status == IncidentStatus.Open && x.AssignedOperatorUserId == null ? targets.AcknowledgeMinutes : targets.ResolveMinutes;
             DateTimeOffset? due = sla.Value.Enabled ? x.CreatedAt.AddMinutes(minutes) : null;
-            return new OperatorTaskResponse("incident", x.Id, x.LockerId, x.LockerCode, x.Title, priority.ToString(), x.Status.ToString(), due, x.CreatedAt, $"/api/incidents/{x.Id}");
+            return new OperatorTaskResponse("incident", x.Id, x.LockerId, x.LockerCode, x.Title, priority.ToString(), x.Status.ToString(), due, x.CreatedAt, $"/api/incidents/{x.Id}", x.AssignedOperatorUserId, x.AssignedOperatorName);
         }).Concat(maintenance.Select(x => new OperatorTaskResponse("maintenance", x.Id, x.LockerId, x.LockerCode, x.Description,
-            x.Priority == MaintenancePriority.Normal ? "Medium" : x.Priority.ToString(), x.Status.ToString(), null, x.CreatedAt, $"/api/maintenance-requests/{x.Id}")))
-        .Concat(parcels.Select(x => new OperatorTaskResponse("recovery", x.Id, x.LockerId, x.LockerCode, $"Chuyển kiện {x.ParcelCode} tới địa chỉ thu hồi của tủ", "High", x.Status.ToString(), x.MaxStorageUntil, x.CreatedAt, $"/api/parcels/{x.Id}")))
+            x.Priority == MaintenancePriority.Normal ? "Medium" : x.Priority.ToString(), x.Status.ToString(), null, x.CreatedAt, $"/api/maintenance-requests/{x.Id}", null, null)))
+        .Concat(parcels.Select(x => new OperatorTaskResponse("recovery", x.Id, x.LockerId, x.LockerCode, $"Chuyển kiện {x.ParcelCode} tới địa chỉ thu hồi của tủ", "High", x.Status.ToString(), x.MaxStorageUntil, x.CreatedAt, $"/api/parcels/{x.Id}", null, null)))
         .OrderBy(x => Rank(x.Priority)).ThenBy(x => x.CreatedAt).ThenBy(x => x.Id).ThenBy(x => x.Kind, StringComparer.Ordinal).ToList();
         return new(items.Skip(offset).Take(limit).ToList(), offset, limit, items.Count > offset + limit);
     }
