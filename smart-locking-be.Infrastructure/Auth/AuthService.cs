@@ -85,12 +85,22 @@ public sealed class AuthService(
         if (!await dbContext.OperationalLockers().AnyAsync(candidate => candidate.Id == locker.Id, cancellationToken))
             throw new ConflictException(LockerErrorCodes.NotOperational, "Registered locker is not operational.");
 
-        await otpService.VerifyAndConsumeAsync(
-            phoneNumber,
-            request.OtpCode,
-            OtpPurpose.Registration,
-            null,
-            cancellationToken);
+        try
+        {
+            await otpService.VerifyAndConsumeAsync(
+                phoneNumber,
+                request.OtpCode,
+                OtpPurpose.Registration,
+                null,
+                cancellationToken);
+        }
+        catch (BadRequestException exception) when (exception.ErrorCode == AuthErrorCodes.InvalidOtp)
+        {
+            // No account changes have been staged yet. Persist the rejected attempt and
+            // lockout instead of rolling them back with the unsuccessful registration.
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            throw;
+        }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         User user = new()
