@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using smart_locking_be.Application.DTOs.Lockers;
 using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
@@ -11,8 +10,7 @@ namespace smart_locking_be.Infrastructure.Services;
 public sealed class LockerAccessService(
     ApplicationDbContext dbContext,
     ILockerCommandDispatcher commandDispatcher,
-    TimeProvider timeProvider,
-    IConfiguration configuration) : ILockerAccessService
+    TimeProvider timeProvider) : ILockerAccessService
 {
     public async Task<OpenLockerResponse> OpenAsync(
         OpenLockerRequest request,
@@ -57,8 +55,7 @@ public sealed class LockerAccessService(
             throw new BadRequestException(LockerErrorCodes.InvalidCompartment, "Compartment does not belong to the requested locker.");
         }
 
-        bool monitoringEnabled = configuration.GetValue<bool>("LockerMonitoring:Enabled");
-        if (monitoringEnabled && compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
+        if (compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
         {
             throw new ConflictException(LockerErrorCodes.Offline, "Locker is offline or has not reported its connection status.");
         }
@@ -80,7 +77,7 @@ public sealed class LockerAccessService(
             OccurredAt = now,
         };
 
-        string? blockedReason = GetBlockedReason(compartment, monitoringEnabled);
+        string? blockedReason = GetBlockedReason(compartment);
         if (blockedReason is null && request.AccessType != LockerAccessType.OperatorEmergency &&
             !await dbContext.OperationalCompartments().AnyAsync(item => item.Id == compartment.Id, cancellationToken))
             blockedReason = "Locker or compartment is blocked by maintenance or an unresolved equipment incident.";
@@ -126,13 +123,13 @@ public sealed class LockerAccessService(
         return Map(accessEvent, compartment);
     }
 
-    private static string? GetBlockedReason(LockerCompartment compartment, bool monitoringEnabled)
+    private static string? GetBlockedReason(LockerCompartment compartment)
     {
         if (compartment.Locker.OperationalStatus != LockerOperationalStatus.Operational)
         {
             return "Locker is not operational.";
         }
-        if (monitoringEnabled && compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
+        if (compartment.Locker.ConnectionStatus != LockerConnectionStatus.Online)
         {
             return "Locker is offline.";
         }
