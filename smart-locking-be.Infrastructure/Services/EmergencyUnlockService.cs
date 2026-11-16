@@ -31,6 +31,7 @@ public sealed class EmergencyUnlockService(
             incident.LockerCompartmentId == request.CompartmentId,
             cancellationToken))
             throw new BadRequestException(IncidentErrorCodes.InvalidLink, "Incident does not match the locker or compartment being opened.");
+        await using var unlockTransaction = await EmergencyUnlockLock.AcquireAsync(dbContext, compartment.Id, cancellationToken);
         DateTimeOffset now = timeProvider.GetUtcNow();
         EmergencyUnlock entity = new()
         {
@@ -66,6 +67,7 @@ public sealed class EmergencyUnlockService(
             OccurredAt = now
         });
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (unlockTransaction is not null) await unlockTransaction.CommitAsync(cancellationToken);
         return new EmergencyUnlockResponse(entity.Id, entity.Result, compartment.Code, entity.RequestedAt);
     }
 

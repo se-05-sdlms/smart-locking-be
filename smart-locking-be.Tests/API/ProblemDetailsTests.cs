@@ -39,6 +39,7 @@ public sealed class ProblemDetailsTests
     [Theory]
     [InlineData(401, "auth/invalid_credentials", "Invalid credentials.")]
     [InlineData(409, "locker/no_available_compartment", "No available compartment.")]
+    [InlineData(409, "locker/unlock_in_progress", "An unlock command for this compartment is already in progress.")]
     public async Task HandlerWritesDomainProblem(int status, string code, string message)
     {
         Exception exception = status == 401
