@@ -19,9 +19,11 @@ public sealed class DemoDataSeederTests
         await DemoDataSeeder.SeedAsync(db, password);
 
         var entries = db.ChangeTracker.Entries().ToArray();
-        Assert.Equal(41, db.Model.GetEntityTypes().Count());
+        Assert.Equal(42, db.Model.GetEntityTypes().Count());
         Assert.Equal(618, entries.Length);
-        Assert.All(db.Model.GetEntityTypes(), type =>
+        // Security throttle state starts empty; demo data must never pre-lock real clients.
+        Assert.Empty(entries.Where(entry => entry.Entity is ReturnPickupAttempt));
+        Assert.All(db.Model.GetEntityTypes().Where(type => type.ClrType != typeof(ReturnPickupAttempt)), type =>
             Assert.True(entries.Count(entry => entry.Metadata == type) >= 10, type.Name));
         await db.SaveChangesAsync();
 

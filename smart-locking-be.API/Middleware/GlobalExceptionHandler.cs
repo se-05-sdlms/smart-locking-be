@@ -37,6 +37,9 @@ public sealed class GlobalExceptionHandler(
         if (statusCode == StatusCodes.Status401Unauthorized)
             httpContext.Response.Headers.WWWAuthenticate = "Bearer";
 
+        if (exception is TooManyRequestsException { RetryAfterSeconds: > 0 } throttled)
+            httpContext.Response.Headers.RetryAfter = throttled.RetryAfterSeconds.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
         httpContext.Response.StatusCode = statusCode;
         string code = exception is ApiException apiException
             ? apiException.ErrorCode
