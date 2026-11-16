@@ -57,6 +57,18 @@ public sealed class ReportBoundaryTests
         _ => controller.Export("operational-activities", from, to, null, null)
     };
 
+    [Fact]
+    public async Task DateOutsideUtcRange_IsRejectedAsBadRequest()
+    {
+        var controller = new ReportsController(new CapturingService(), TimeProvider.System)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        controller.Request.QueryString = new QueryString("?from=0001-01-01");
+        await Assert.ThrowsAsync<smart_locking_be.Application.Exceptions.BadRequestException>(() =>
+            controller.Summary(DateTimeOffset.MinValue, null, null, default));
+    }
+
     private sealed class CapturingService : IReportService
     {
         public DateTimeOffset From { get; private set; }

@@ -72,7 +72,16 @@ public sealed class ReportsController(IReportService service, TimeProvider timeP
         // Date-only UI filters mean midnight in Vietnam, independent of the server timezone.
         string? raw = Request.Query[name];
         if (DateOnly.TryParseExact(raw, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly date))
-            return new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7)).ToUniversalTime();
+        {
+            try
+            {
+                return new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7)).ToUniversalTime();
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                throw BadRequestException.For(name, "Report date cannot be represented in UTC.");
+            }
+        }
         return bound?.ToUniversalTime();
     }
 }
