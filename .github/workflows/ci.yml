@@ -19,6 +19,20 @@ jobs:
     name: Restore, format, build, and test
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SMART_LOCKING_TEST_POSTGRES: Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=test-only-password
 
     steps:
       - name: Checkout
