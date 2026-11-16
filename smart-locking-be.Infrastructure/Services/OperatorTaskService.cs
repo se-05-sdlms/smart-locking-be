@@ -26,7 +26,14 @@ public sealed class OperatorTaskService(ApplicationDbContext db, TimeProvider cl
             .ThenBy(x => x.CreatedAt).ThenBy(x => x.Id)
             .Select(x => new
             {
-                x.Id, LockerId = x.LockerId!.Value, LockerCode = x.Locker!.Code, x.Title, x.Type, x.Status, x.CreatedAt, x.AssignedOperatorUserId,
+                x.Id,
+                LockerId = x.LockerId!.Value,
+                LockerCode = x.Locker!.Code,
+                x.Title,
+                x.Type,
+                x.Status,
+                x.CreatedAt,
+                x.AssignedOperatorUserId,
                 AssignedOperatorName = x.AssignedOperatorUser == null ? null :
                     (x.AssignedOperatorUser.ResidentProfile == null ? null : x.AssignedOperatorUser.ResidentProfile.FullName)
                     ?? x.AssignedOperatorUser.PhoneNumber ?? x.AssignedOperatorUser.Email ?? x.AssignedOperatorUser.Id.ToString()

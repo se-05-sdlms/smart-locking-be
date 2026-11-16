@@ -43,13 +43,34 @@ public sealed class OperatorTaskAssigneePostgresTests : IAsyncLifetime
             new User { Id = viewerId, Email = "viewer@tasks.test", Role = UserRole.LockerOperator, Status = UserStatus.Active },
             new Locker { Id = lockerId, Code = "TASK", DeviceIdentifier = "task-device", OperationalStatus = LockerOperationalStatus.Operational },
             new Locker { Id = anchorId, Code = "ANCHOR", DeviceIdentifier = "anchor-device", OperationalStatus = LockerOperationalStatus.Operational },
-            new SystemPolicy { Id = policyId, Version = 1, Currency = "VND", CreatedByUserId = adminId, IsActive = true, EffectiveFrom = Now.AddDays(-2) },
+            new SystemPolicy
+            {
+                Id = policyId,
+                Version = 1,
+                Currency = "VND",
+                CreatedByUserId = adminId,
+                IsActive = true,
+                EffectiveFrom = Now.AddDays(-2),
+                CompartmentReservationMinutes = 5,
+                GuestSessionTimeoutMinutes = 10,
+                ManualApprovalTimeoutMinutes = 10,
+                OtpMaxAttempts = 5,
+                OtpLockoutMinutes = 15,
+                MaxStorageHours = 24
+            },
             new OperatorAssignment { Id = assignmentId, OperatorUserId = ownerId, LockerId = lockerId, AssignedByUserId = adminId, AssignedAt = Now.AddDays(-1) },
             new OperatorAssignment { Id = Guid.NewGuid(), OperatorUserId = viewerId, LockerId = anchorId, AssignedByUserId = adminId, AssignedAt = Now.AddDays(-1) },
             Incident(assignedId, ownerId), Incident(unassignedId, null),
             new MaintenanceRequest { Id = Guid.NewGuid(), LockerId = lockerId, CreatedByUserId = ownerId, Description = "Maintenance", Priority = MaintenancePriority.Normal, Status = MaintenanceStatus.Open, CreatedAt = Now },
-            new Parcel { Id = Guid.NewGuid(), ParcelCode = "RECOVERY", Status = ParcelStatus.Stored, MaxStorageUntil = Now.AddHours(-1), CreatedAt = Now,
-                DeliveryRequest = new DeliveryRequest { Id = Guid.NewGuid(), LockerId = lockerId, SystemPolicyId = policyId, GuestSessionTokenHash = "test-session", CreatedAt = Now } });
+            new Parcel
+            {
+                Id = Guid.NewGuid(),
+                ParcelCode = "RECOVERY",
+                Status = ParcelStatus.Stored,
+                MaxStorageUntil = Now.AddHours(-1),
+                CreatedAt = Now,
+                DeliveryRequest = new DeliveryRequest { Id = Guid.NewGuid(), LockerId = lockerId, SystemPolicyId = policyId, GuestSessionTokenHash = "test-session", CreatedAt = Now }
+            });
         await db.SaveChangesAsync();
     }
 
@@ -86,12 +107,12 @@ public sealed class OperatorTaskAssigneePostgresTests : IAsyncLifetime
         Assert.Equal(ownerId, (await service.ListAsync(adminId, nameof(UserRole.Administrator), 0, 100, lockerId, default)).Items.Single(x => x.Id == assignedId).AssignedOperatorUserId);
 
         await db.ResidentProfiles.Where(x => x.UserId == ownerId).ExecuteDeleteAsync();
-        foreach (string expected in new[] { "0901234567", "owner@tasks.test", ownerId.ToString() })
+        // PostgreSQL requires a phone or email login identifier; an ID-only user cannot be persisted.
+        foreach (string expected in new[] { "0901234567", "owner@tasks.test" })
         {
             var page = await service.ListAsync(ownerId, nameof(UserRole.LockerOperator), 0, 100, lockerId, default);
             Assert.Equal(expected, page.Items.Single(x => x.Id == assignedId).AssignedOperatorName);
             if (expected == "0901234567") await db.Users.Where(x => x.Id == ownerId).ExecuteUpdateAsync(s => s.SetProperty(x => x.PhoneNumber, (string?)null));
-            if (expected == "owner@tasks.test") await db.Users.Where(x => x.Id == ownerId).ExecuteUpdateAsync(s => s.SetProperty(x => x.Email, (string?)null));
         }
         db.AddRange(Enumerable.Range(0, 30).Select(_ => Incident(Guid.NewGuid(), ownerId)));
         await db.SaveChangesAsync();
@@ -112,11 +133,18 @@ public sealed class OperatorTaskAssigneePostgresTests : IAsyncLifetime
         var absence = new OperatorAbsence { Id = Guid.NewGuid(), OperatorUserId = ownerId, CreatedByUserId = adminId, StartsAt = Now, EndsAt = Now.AddHours(1), Reason = "Coverage", CreatedAt = Now };
         db.AddRange(absence, new TemporaryOperatorAssignment
         {
-            Id = Guid.NewGuid(), AbsenceId = absence.Id, BaseAssignmentId = assignmentId, LockerId = lockerId,
-            OperatorUserId = viewerId, AnchorLockerId = anchorId, PolicyId = policyId,
+            Id = Guid.NewGuid(),
+            AbsenceId = absence.Id,
+            BaseAssignmentId = assignmentId,
+            LockerId = lockerId,
+            OperatorUserId = viewerId,
+            AnchorLockerId = anchorId,
+            PolicyId = policyId,
             TargetLocationRevision = (await db.Lockers.SingleAsync(x => x.Id == lockerId)).LocationRevision,
             AnchorLocationRevision = (await db.Lockers.SingleAsync(x => x.Id == anchorId)).LocationRevision,
-            Status = TemporaryAssignmentStatus.Active, ActivatedAt = Now, CreatedAt = Now
+            Status = TemporaryAssignmentStatus.Active,
+            ActivatedAt = Now,
+            CreatedAt = Now
         });
         await db.SaveChangesAsync();
         Assert.Empty((await Service(db, Now.AddTicks(-1)).ListAsync(viewerId, nameof(UserRole.LockerOperator), 0, 100, lockerId, default)).Items);
