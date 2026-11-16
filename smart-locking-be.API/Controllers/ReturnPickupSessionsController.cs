@@ -12,7 +12,7 @@ public sealed class ReturnPickupSessionsController(IReturnPickupSessionService s
 
     [HttpPost]
     public Task<IActionResult> Create(ValidateReturnPickupRequest request, CancellationToken ct) =>
-        Execute(() => service.CreateAsync(request, ct), StatusCodes.Status201Created);
+        Execute(() => service.CreateAsync(request, ct, HttpContext.Connection.RemoteIpAddress?.ToString()), StatusCodes.Status201Created);
 
     [HttpGet("{id:guid}")]
     public Task<IActionResult> Get(Guid id, CancellationToken ct) =>
