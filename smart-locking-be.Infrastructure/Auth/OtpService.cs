@@ -135,9 +135,22 @@ public sealed class OtpService(
 
     private async Task VerifyChallengeAsync(OtpChallenge challenge, string code, CancellationToken cancellationToken)
     {
+        await using var transaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+
+        if (dbContext.Database.IsRelational())
+        {
+            // Serialize both failures and consumption, including callers that have already
+            // started a transaction. Reload after waiting: the tracked value may be stale.
+            await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT \"Id\" FROM \"OtpChallenge\" WHERE \"Id\" = {challenge.Id} FOR UPDATE", cancellationToken);
+            await dbContext.Entry(challenge).ReloadAsync(cancellationToken);
+        }
+
         DateTimeOffset now = timeProvider.GetUtcNow();
 
-        if (challenge.ExpiresAt <= now || challenge.LockedUntil > now)
+        if (dbContext.Entry(challenge).State == EntityState.Detached || challenge.UsedAt is not null ||
+            challenge.RevokedAt is not null || challenge.ExpiresAt <= now || challenge.LockedUntil > now)
         {
             throw InvalidOtp();
         }
@@ -163,11 +176,13 @@ public sealed class OtpService(
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
             throw InvalidOtp();
         }
 
         challenge.UsedAt = now;
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
     }
 
     private async Task<(int MaxAttempts, int LockoutMinutes)> GetPolicyLimitsAsync(
