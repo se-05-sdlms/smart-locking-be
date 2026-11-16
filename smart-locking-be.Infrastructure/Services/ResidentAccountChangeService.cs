@@ -328,7 +328,18 @@ public sealed class ResidentAccountChangeService(ApplicationDbContext db, IPassw
     private void AddEvent(ResidentAccountChange item, Guid actorId, string action, string message)
     {
         item.UpdatedAt = clock.GetUtcNow();
-        item.Events.Add(new() { Id = Guid.NewGuid(), ActorUserId = actorId, Action = action, Message = message, CreatedAt = item.UpdatedAt });
+        var history = new ResidentAccountChangeEvent
+        {
+            Id = Guid.NewGuid(),
+            ResidentAccountChangeId = item.Id,
+            ResidentAccountChange = item,
+            ActorUserId = actorId,
+            Action = action,
+            Message = message,
+            CreatedAt = item.UpdatedAt
+        };
+        // A preassigned Guid on a new child of an existing request must be inserted.
+        db.Set<ResidentAccountChangeEvent>().Add(history);
         db.AuditLogs.Add(new()
         {
             Id = Guid.NewGuid(),
