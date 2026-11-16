@@ -51,7 +51,7 @@ public sealed class UserEmailValidationPostgresTests : IAsyncLifetime
         await drop.ExecuteNonQueryAsync();
     }
 
-    private static readonly string[] InvalidEmails = ["o3.test@sdlms", "", "   ", "no-at.example.test", "@example.test", "a@@example.test", "a b@example.test", "Name <a@example.test>", "a@example..test", "a@.example.test", "a@example.test.", "a@example-.test", "a@-example.test", "a@127.0.0.1", new string('a', 65) + "@example.test", "a@" + new string('b', 64) + ".test", new string('a', 64) + "@" + new string('b', 63) + "." + new string('c', 63) + "." + new string('d', 62)];
+    private static readonly string[] InvalidEmails = ["o3.test@sdlms", "", "   ", "no-at.example.test", "@example.test", "a@@example.test", "a.@example.test", "a b@example.test", "Name <a@example.test>", "a@example..test", "a@.example.test", "a@example.test.", "a@example-.test", "a@-example.test", "a@127.0.0.1", new string('a', 65) + "@example.test", "a@" + new string('b', 64) + ".test", new string('a', 64) + "@" + new string('b', 63) + "." + new string('c', 63) + "." + new string('d', 62)];
 
     [PostgresFact]
     public async Task InvalidCreateEmails_RejectBeforeAccountProfileAssignmentAuditOrEmail()

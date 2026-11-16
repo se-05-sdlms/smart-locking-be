@@ -496,7 +496,7 @@ public sealed class UserService(
         email.Length <= 254 &&
         MailAddress.TryCreate(email, out MailAddress? address) &&
         string.Equals(address.Address, email, StringComparison.Ordinal) &&
-        address.User.Length <= 64 &&
+        address.User.Length <= 64 && !address.User.EndsWith('.') &&
         address.Host.Contains('.') && !address.Host.EndsWith('.') &&
         Uri.CheckHostName(address.Host) == UriHostNameType.Dns &&
         address.Host.Split('.').All(label => label.Length is > 0 and <= 63 &&
