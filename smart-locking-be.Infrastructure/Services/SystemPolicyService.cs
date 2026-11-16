@@ -156,7 +156,8 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
         policy.EnableRemoteUnlock = request.EnableRemoteUnlock;
         policy.EnableBluetoothUnlock = request.EnableBluetoothUnlock;
         policy.EffectiveFrom = request.EffectiveFrom;
-        IncidentSlaPolicy sla = request.IncidentSla ?? new();
+        // Omitted SLA fields preserve the existing version; new entities carry defaults.
+        if (request.IncidentSla is not { } sla) return;
         policy.IncidentCriticalAcknowledgeMinutes = sla.CriticalAcknowledgeMinutes;
         policy.IncidentCriticalResolveMinutes = sla.CriticalResolveMinutes;
         policy.IncidentHighAcknowledgeMinutes = sla.HighAcknowledgeMinutes;
