@@ -6,6 +6,7 @@ using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
 using System.Security.Cryptography;
+using System.Net.Mail;
 
 namespace smart_locking_be.Infrastructure.Services;
 
@@ -99,12 +100,12 @@ public sealed class UserService(
             throw BadRequestException.For("fullName", "Full name is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.Email) || !request.Email.Contains('@'))
+        string email = request.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (!IsValidAccountEmail(email))
         {
             throw BadRequestException.For("email", "Email is invalid.");
         }
 
-        string email = request.Email.Trim().ToLowerInvariant();
         string? phone = string.IsNullOrWhiteSpace(request.PhoneNumber) ? null : request.PhoneNumber.Trim();
 
         bool exists = await dbContext.Users.AnyAsync(u =>
@@ -288,6 +289,9 @@ public sealed class UserService(
 
         string? email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToLowerInvariant();
         string? phone = string.IsNullOrWhiteSpace(request.PhoneNumber) ? null : request.PhoneNumber.Trim();
+
+        if (email != null && !IsValidAccountEmail(email))
+            throw BadRequestException.For("email", "Email is invalid.");
 
         if (email != null && email != user.Email)
         {
@@ -487,6 +491,17 @@ public sealed class UserService(
             assignment.Reason
         );
     }
+
+    private static bool IsValidAccountEmail(string email) =>
+        email.Length <= 254 &&
+        MailAddress.TryCreate(email, out MailAddress? address) &&
+        string.Equals(address.Address, email, StringComparison.Ordinal) &&
+        address.User.Length <= 64 && !address.User.EndsWith('.') &&
+        address.Host.Contains('.') && !address.Host.EndsWith('.') &&
+        Uri.CheckHostName(address.Host) == UriHostNameType.Dns &&
+        address.Host.Split('.').All(label => label.Length is > 0 and <= 63 &&
+            char.IsAsciiLetterOrDigit(label[0]) && char.IsAsciiLetterOrDigit(label[^1]) &&
+            label.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'));
 
     private async Task ValidateAvailableOperatorLockerAsync(Guid lockerId, CancellationToken cancellationToken)
     {
