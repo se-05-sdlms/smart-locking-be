@@ -24,6 +24,7 @@ public sealed class ReturnRequestService(
     public async Task<ReturnRequestResponse> CreateAsync(Guid residentUserId, CreateReturnRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.ImageUrl)) throw BadRequestException.For("imageUrl", "Return image URL is required.");
+        if (string.IsNullOrWhiteSpace(request.Note)) throw BadRequestException.For("note", "Return description is required.");
         await using var residentTransaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
         if (dbContext.Database.IsRelational())
@@ -52,7 +53,7 @@ public sealed class ReturnRequestService(
             ResidentProfileId = resident.Id,
             LockerId = resident.RegisteredLocker.Id,
             ReturnCode = await GeneratePickupCodeAsync(cancellationToken),
-            ReturnReason = request.Note?.Trim(),
+            ReturnReason = request.Note.Trim(),
             ReturnImageUrl = request.ImageUrl.Trim(),
             Status = ReturnRequestStatus.Created,
             CreatedAt = now,
