@@ -71,6 +71,9 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
             policy.IsActive = false;
             policy.EffectiveTo = now;
         }
+        // Release the unique active-policy slot before activating the replacement.
+        // The transaction keeps both saves atomic for other requests.
+        await dbContext.SaveChangesAsync(cancellationToken);
         var obsoleteCoverage = await dbContext.TemporaryOperatorAssignments.Include(x => x.Absence)
             .Where(x => x.PolicyId != id && (x.Status == TemporaryAssignmentStatus.Approved || x.Status == TemporaryAssignmentStatus.Active))
             .ToListAsync(cancellationToken);
