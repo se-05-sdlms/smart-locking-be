@@ -411,7 +411,12 @@ public sealed class UserService(
         if (dbContext.Database.IsNpgsql())
             await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({EffectiveOperatorAssignmentQueries.AllocationLock})", cancellationToken);
 
+        // Read status after acquiring the row lock so a concurrent status update
+        // cannot disable the operator between validation and assignment commit.
+        if (dbContext.Database.IsNpgsql())
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"User\" WHERE \"Id\" = {operatorId} FOR UPDATE", cancellationToken);
         var user = await dbContext.Users
+            .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == operatorId && u.Role == UserRole.LockerOperator, cancellationToken);
 
         if (user is null)
@@ -419,10 +424,16 @@ public sealed class UserService(
             throw new NotFoundException(UserErrorCodes.NotFound, "Locker operator not found.");
         }
 
+        if (user.Status != UserStatus.Active)
+            throw new ConflictException(UserErrorCodes.Inactive, "Only an active locker operator can receive an assignment.");
+
         if (request.LockerId == Guid.Empty)
         {
             throw BadRequestException.For("lockerId", "A valid LockerId is required.");
         }
+
+        if (!await dbContext.Lockers.AnyAsync(l => l.Id == request.LockerId, cancellationToken))
+            throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
 
         bool activeExists = await dbContext.OperatorAssignments.AnyAsync(a =>
             a.RevokedAt == null &&
