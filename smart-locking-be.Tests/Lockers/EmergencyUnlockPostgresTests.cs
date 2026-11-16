@@ -74,6 +74,88 @@ public sealed class EmergencyUnlockPostgresTests : IAsyncLifetime
     }
 
     [EmergencyPostgresFact]
+    public async Task ConcurrentAllocationAndEmergencyOpen_CompleteWithoutForeignKeyLockDeadlock()
+    {
+        Guid requestId = Guid.NewGuid();
+        await using (var seed = Context())
+        {
+            await seed.LockerCompartments.ExecuteUpdateAsync(update => update.SetProperty(item => item.DoorStatus, DoorStatus.Closed));
+            var policy = new SystemPolicy
+            {
+                Id = Guid.NewGuid(),
+                CreatedByUserId = userId,
+                Version = 98765,
+                GuestSessionTimeoutMinutes = 10,
+                ManualApprovalTimeoutMinutes = 5,
+                CompartmentReservationMinutes = 5,
+                OtpMaxAttempts = 5,
+                OtpLockoutMinutes = 15,
+                MaxStorageHours = 24
+            };
+            seed.Add(policy);
+            seed.Add(new DeliveryRequest
+            {
+                Id = requestId,
+                LockerId = lockerId,
+                SystemPolicyId = policy.Id,
+                GuestSessionTokenHash = "emergency-allocation",
+                Status = DeliveryRequestStatus.Approved,
+                SessionExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10)
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var dispatcher = new BarrierDispatcher();
+        Task<EmergencyUnlockResponse> opening = Open(dispatcher);
+        await dispatcher.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var allocatorPid = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task allocating = Allocate();
+        try
+        {
+            int pid = await allocatorPid.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            // Observe PostgreSQL's actual lock wait, not elapsed time alone. With the
+            // compatible lock mode allocation can instead finish while OPEN is paused.
+            await using var observer = new NpgsqlConnection(connectionString);
+            await observer.OpenAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (!allocating.IsCompleted)
+            {
+                await using var command = new NpgsqlCommand(
+                    "SELECT wait_event_type = 'Lock' FROM pg_stat_activity WHERE pid = @pid", observer);
+                command.Parameters.AddWithValue("pid", pid);
+                if (await command.ExecuteScalarAsync(timeout.Token) is true) break;
+                await Task.Delay(20, timeout.Token);
+            }
+        }
+        finally { dispatcher.Release.TrySetResult(); }
+
+        Exception? allocationError = await Record.ExceptionAsync(() => allocating.WaitAsync(TimeSpan.FromSeconds(15)));
+        Exception? emergencyError = await Record.ExceptionAsync(() => opening.WaitAsync(TimeSpan.FromSeconds(15)));
+        Assert.Null(allocationError);
+        Assert.Null(emergencyError);
+        Assert.Equal(EmergencyUnlockResult.Succeeded, (await opening).Result);
+        Assert.Equal(1, dispatcher.Commands);
+        await using var read = Context();
+        Assert.Equal(compartmentId, (await read.CompartmentReservations.SingleAsync()).LockerCompartmentId);
+        Assert.Single(await read.EmergencyUnlocks.ToListAsync());
+        Assert.Single(await read.LockerAccessEvents.ToListAsync());
+
+        async Task Allocate()
+        {
+            await using var db = Context();
+            await db.Database.OpenConnectionAsync();
+            await using var transaction = await db.Database.BeginTransactionAsync();
+            // The allocator owns this parent lock in the real service. Taking it
+            // explicitly lets the test identify its connection before the FK insert.
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"Locker\" WHERE \"Id\" = {lockerId} FOR UPDATE");
+            allocatorPid.TrySetResult(((NpgsqlConnection)db.Database.GetDbConnection()).ProcessID);
+            var allocator = new CompartmentAllocationService(db, TimeProvider.System);
+            Assert.NotNull(await allocator.ReserveAvailableAsync(lockerId, requestId, null, DateTimeOffset.UtcNow.AddMinutes(5)));
+            await transaction.CommitAsync();
+        }
+    }
+
+    [EmergencyPostgresFact]
     public async Task SequentialEmergencyOpensAfterCompletion_AreAllowedWithoutCooldown()
     {
         var dispatcher = new BarrierDispatcher { PauseFirst = false };
