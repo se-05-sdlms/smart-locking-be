@@ -115,6 +115,18 @@ public sealed class UserService(
             throw new ConflictException(UserErrorCodes.AlreadyExists, "Email or phone number is already in use.");
         }
 
+        bool hasInitialAssignment = request.Role == UserRole.LockerOperator && request.LockerId.HasValue;
+        await using var assignmentTransaction = hasInitialAssignment && dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (hasInitialAssignment)
+        {
+            // Share the allocation lock with assignment/revocation so creating an
+            // account cannot race another owner into the same locker.
+            if (dbContext.Database.IsNpgsql())
+                await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({EffectiveOperatorAssignmentQueries.AllocationLock})", cancellationToken);
+            await ValidateAvailableOperatorLockerAsync(request.LockerId!.Value, cancellationToken);
+        }
+
         string temporaryPassword = request.Role == UserRole.LockerOperator || string.IsNullOrWhiteSpace(request.Password)
             ? GenerateTemporaryPassword()
             : request.Password;
@@ -177,6 +189,7 @@ public sealed class UserService(
 
         dbContext.AuditLogs.Add(auditLog);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (assignmentTransaction != null) await assignmentTransaction.CommitAsync(cancellationToken);
 
         try
         {
@@ -427,22 +440,7 @@ public sealed class UserService(
         if (user.Status != UserStatus.Active)
             throw new ConflictException(UserErrorCodes.Inactive, "Only an active locker operator can receive an assignment.");
 
-        if (request.LockerId == Guid.Empty)
-        {
-            throw BadRequestException.For("lockerId", "A valid LockerId is required.");
-        }
-
-        if (!await dbContext.Lockers.AnyAsync(l => l.Id == request.LockerId, cancellationToken))
-            throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
-
-        bool activeExists = await dbContext.OperatorAssignments.AnyAsync(a =>
-            a.RevokedAt == null &&
-            a.LockerId == request.LockerId, cancellationToken);
-
-        if (activeExists)
-        {
-            throw new ConflictException(UserErrorCodes.AssignmentConflict, "Locker is assigned to another operator.");
-        }
+        await ValidateAvailableOperatorLockerAsync(request.LockerId, cancellationToken);
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var assignment = new OperatorAssignment
@@ -488,6 +486,26 @@ public sealed class UserService(
             assignment.RevokedAt,
             assignment.Reason
         );
+    }
+
+    private async Task ValidateAvailableOperatorLockerAsync(Guid lockerId, CancellationToken cancellationToken)
+    {
+        if (lockerId == Guid.Empty)
+        {
+            throw BadRequestException.For("lockerId", "A valid LockerId is required.");
+        }
+
+        if (!await dbContext.Lockers.AnyAsync(l => l.Id == lockerId, cancellationToken))
+            throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
+
+        bool activeExists = await dbContext.OperatorAssignments.AnyAsync(a =>
+            a.RevokedAt == null &&
+            a.LockerId == lockerId, cancellationToken);
+
+        if (activeExists)
+        {
+            throw new ConflictException(UserErrorCodes.AssignmentConflict, "Locker is assigned to another operator.");
+        }
     }
 
     public async Task RevokeOperatorScopeAsync(
