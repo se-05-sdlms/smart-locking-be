@@ -49,12 +49,17 @@ public sealed class OfflineUnlockGuardTests
 
     private static LockerCompartment Compartment(LockerConnectionStatus status) => new()
     {
-        Id = Guid.NewGuid(), Code = "C01", HardwareChannel = 1,
+        Id = Guid.NewGuid(),
+        Code = "C01",
+        HardwareChannel = 1,
         OperationalStatus = LockerCompartmentOperationalStatus.Operational,
         Locker = new Locker
         {
-            Id = Guid.NewGuid(), Code = "TEST", DeviceIdentifier = "TEST-DEVICE",
-            OperationalStatus = LockerOperationalStatus.Operational, ConnectionStatus = status
+            Id = Guid.NewGuid(),
+            Code = "TEST",
+            DeviceIdentifier = "TEST-DEVICE",
+            OperationalStatus = LockerOperationalStatus.Operational,
+            ConnectionStatus = status
         }
     };
 
