@@ -76,7 +76,9 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
         if (to.HasValue) filtered = filtered.Where(item => item.OccurredAt < to);
         OperationalRecordResponse[] ordered = filtered.OrderByDescending(item => item.OccurredAt).ToArray();
         return new PagedResult<OperationalRecordResponse>(
-            ordered.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToArray(),
+            ordered.Skip((pageNumber - 1) * pageSize).Take(pageSize)
+                .Select(item => item.Kind == "LockerCompartment" ? item :
+                    item with { Summary = OperationalPhoneMask.Apply(item.Summary) }).ToArray(),
             ordered.Length, pageNumber, pageSize);
     }
 
@@ -209,7 +211,13 @@ public sealed class OperationalRecordService(ApplicationDbContext dbContext) : I
         }
         if (result is null || !await ScopeLockers(userId, role).AnyAsync(item => item.Id == result.LockerId, cancellationToken))
             throw new NotFoundException(OperationalRecordErrorCodes.NotFound, "Operational record not found.");
-        return result;
+        return result with
+        {
+            Details = result.Details.ToDictionary(item => item.Key, item => item.Key is
+                "recipientPhone" or "removalReason" or "title" or "description" or "resolution" or
+                "previousValue" or "newValue" or "reason" or "details"
+                ? OperationalPhoneMask.Apply(item.Value) : item.Value)
+        };
     }
 
     private IQueryable<Locker> ScopeLockers(Guid userId, string role)
