@@ -17,8 +17,10 @@ internal static class EmergencyUnlockLock
         {
             // Reject overlapping commands immediately rather than queueing another OPEN
             // behind a command that has already completed by the time its waiter runs.
+            // This flow does not change compartment keys. Permit FK KEY SHARE checks
+            // so an allocator holding the parent Locker lock cannot form a lock cycle.
             await db.Database.ExecuteSqlInterpolatedAsync(
-                $"SELECT 1 FROM \"LockerCompartment\" WHERE \"Id\" = {compartmentId} FOR UPDATE NOWAIT", ct);
+                $"SELECT 1 FROM \"LockerCompartment\" WHERE \"Id\" = {compartmentId} FOR NO KEY UPDATE NOWAIT", ct);
             return transaction;
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.LockNotAvailable)
