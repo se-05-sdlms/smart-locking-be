@@ -76,7 +76,7 @@ public sealed class UserEmailValidationPostgresTests : IAsyncLifetime
     public async Task ValidCreate_NormalizesAddressAndPreservesAliasesAndDuplicateConflict()
     {
         var email = new RecordingEmail();
-        foreach (string value in new[] { "  First.Last+Ops@Example.Test  ", "operator@sub.example.test", "operator@xn--bcher-kva.example" })
+        foreach (string value in new[] { "  First.Last+Ops@Example.Test  ", "operator@sub.example.test", "operator@xn--bcher-kva.example", new string('a', 64) + "@" + new string('b', 63) + "." + new string('c', 63) + "." + new string('d', 61) })
         {
             await using var db = Context();
             var created = await Service(db, email).CreateUserAsync(adminId, Request(value, null));
@@ -88,10 +88,10 @@ public sealed class UserEmailValidationPostgresTests : IAsyncLifetime
             Assert.Equal(UserErrorCodes.AlreadyExists, error.ErrorCode);
         }
         await using var read = Context();
-        Assert.Equal(5, await read.Users.CountAsync());
-        Assert.Equal(3, await read.ResidentProfiles.CountAsync());
-        Assert.Equal(3, await read.AuditLogs.CountAsync(a => a.Action == "User.Created"));
-        Assert.Equal(3, email.Count);
+        Assert.Equal(6, await read.Users.CountAsync());
+        Assert.Equal(4, await read.ResidentProfiles.CountAsync());
+        Assert.Equal(4, await read.AuditLogs.CountAsync(a => a.Action == "User.Created"));
+        Assert.Equal(4, email.Count);
     }
 
     [PostgresFact]

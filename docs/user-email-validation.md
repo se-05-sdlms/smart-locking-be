@@ -2,7 +2,7 @@
 
 Creating an account with a dotless email such as `operator@sdlms` previously saved the account before attempting credential delivery. The SMTP failure could therefore leave an account behind while returning 503. Updating a staff account also accepted malformed email addresses.
 
-`UserService` now validates a normalized email before creating account/profile/assignment/audit records or sending credentials. Staff updates validate an explicitly supplied email before changing the account or profile. Invalid input returns the existing 400 `common/invalid-input` response with an `email` field error, which the web form can display.
+`UserService` now validates a normalized email before creating account/profile/assignment/audit records or sending credentials. Staff updates validate an explicitly supplied email before changing the account or profile. Invalid input returns the existing 400 `validation/invalid_input` response with an `email` field error, which the web form can display.
 
 Addresses are trimmed and lowercased as before. Validation requires a standalone mailbox address and a dotted DNS host with valid labels; it rejects display names, IP hosts, empty labels and labels beginning/ending with a hyphen. Limits are 254 characters overall, 64 for the local part and 63 per DNS label. Aliases, subdomains and ASCII punycode hosts remain supported. This validates syntax; it does not check DNS or guarantee delivery. A valid address whose email provider fails still follows the existing account-created/email-failed recovery behavior.
 
