@@ -27,6 +27,8 @@ public sealed class ReportService(ApplicationDbContext dbContext, TimeProvider t
     public async Task<OperationsReportResponse> GetSummaryAsync(
         DateTimeOffset from, DateTimeOffset to, Guid? lockerId = null, CancellationToken cancellationToken = default)
     {
+        from = from.ToUniversalTime();
+        to = to.ToUniversalTime();
         if (to <= from) throw BadRequestException.For("to", "Report time range is invalid.");
         if (lockerId.HasValue && !await dbContext.Lockers.AnyAsync(item => item.Id == lockerId, cancellationToken))
             throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
@@ -74,8 +76,8 @@ public sealed class ReportService(ApplicationDbContext dbContext, TimeProvider t
         if (query.LockerId.HasValue && !await dbContext.Lockers.AnyAsync(item => item.Id == query.LockerId, cancellationToken))
             throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
 
-        DateTimeOffset from = query.From;
-        DateTimeOffset to = query.To;
+        DateTimeOffset from = query.From.ToUniversalTime();
+        DateTimeOffset to = query.To.ToUniversalTime();
         Guid? lockerId = query.LockerId;
         string? status = string.IsNullOrWhiteSpace(query.Status) ? null : query.Status.Trim();
 

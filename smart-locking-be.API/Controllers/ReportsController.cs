@@ -4,6 +4,7 @@ using smart_locking_be.Application.DTOs.Operations;
 using smart_locking_be.Application.Errors;
 using smart_locking_be.Application.Interfaces.Services;
 using System.Text;
+using System.Globalization;
 
 namespace smart_locking_be.API.Controllers;
 
@@ -17,8 +18,8 @@ public sealed class ReportsController(IReportService service, TimeProvider timeP
         [FromQuery] Guid? lockerId,
         CancellationToken cancellationToken)
     {
-        DateTimeOffset end = to ?? timeProvider.GetUtcNow();
-        DateTimeOffset start = from ?? end.AddDays(-30);
+        DateTimeOffset end = ResolveBoundary("to", to) ?? timeProvider.GetUtcNow();
+        DateTimeOffset start = ResolveBoundary("from", from) ?? end.AddDays(-30);
         OperationsReportResponse report = await service.GetSummaryAsync(start, end, lockerId, cancellationToken);
         if (!Request.Headers.Accept.Any(value => value?.Contains("text/csv", StringComparison.OrdinalIgnoreCase) == true))
             return Ok(report);
@@ -62,7 +63,16 @@ public sealed class ReportsController(IReportService service, TimeProvider timeP
     {
         if (!Enum.TryParse(type.Replace("-", string.Empty), ignoreCase: true, out ReportType reportType) || !Enum.IsDefined(reportType))
             throw BadRequestException.For("type", "Report type is invalid.");
-        DateTimeOffset end = to ?? timeProvider.GetUtcNow();
-        return new ReportQuery(reportType, from ?? end.AddDays(-30), end, lockerId, status, page, pageSize);
+        DateTimeOffset end = ResolveBoundary("to", to) ?? timeProvider.GetUtcNow();
+        return new ReportQuery(reportType, ResolveBoundary("from", from) ?? end.AddDays(-30), end, lockerId, status, page, pageSize);
+    }
+
+    private DateTimeOffset? ResolveBoundary(string name, DateTimeOffset? bound)
+    {
+        // Date-only UI filters mean midnight in Vietnam, independent of the server timezone.
+        string? raw = Request.Query[name];
+        if (DateOnly.TryParseExact(raw, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly date))
+            return new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7)).ToUniversalTime();
+        return bound?.ToUniversalTime();
     }
 }
