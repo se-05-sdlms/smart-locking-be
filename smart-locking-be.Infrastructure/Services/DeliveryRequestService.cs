@@ -606,62 +606,80 @@ public sealed class DeliveryRequestService(
         string guestSessionToken,
         CancellationToken cancellationToken = default)
     {
-        DeliveryRequest deliveryRequest = await FindValidSessionAsync(requestId, guestSessionToken, cancellationToken);
-        if (deliveryRequest.Status != DeliveryRequestStatus.Approved)
+        DeliveryRequest deliveryRequest;
+        CompartmentReservation reservation;
+        // Serialize allocation for the same delivery. Commit the reservation before
+        // dispatch so an ambiguous transport/persistence failure cannot free a door
+        // that may already have opened.
+        await using (IDbContextTransaction? transaction = await LockDecisionAsync(requestId, cancellationToken))
         {
-            throw new ConflictException(DeliveryErrorCodes.InvalidState, $"Delivery request cannot be allocated in state {deliveryRequest.Status}.");
-        }
+            deliveryRequest = await FindValidSessionAsync(requestId, guestSessionToken, cancellationToken);
+            if (deliveryRequest.Status != DeliveryRequestStatus.Approved)
+            {
+                throw new ConflictException(DeliveryErrorCodes.InvalidState, $"Delivery request cannot be allocated in state {deliveryRequest.Status}.");
+            }
 
-        DateTimeOffset now = timeProvider.GetUtcNow();
+            DateTimeOffset now = timeProvider.GetUtcNow();
+            DateTimeOffset reservationExpiresAt = now.AddMinutes(deliveryRequest.SystemPolicy.CompartmentReservationMinutes);
+            CompartmentReservation? allocated = await compartmentAllocationService.ReserveAvailableAsync(
+                deliveryRequest.LockerId,
+                deliveryRequest.Id,
+                null,
+                reservationExpiresAt,
+                cancellationToken);
+            if (allocated is null)
+            {
+                deliveryRequest.Status = DeliveryRequestStatus.Failed;
+                deliveryRequest.FailureCode = DeliveryRequestFailureCode.NoCompartment;
+                deliveryRequest.FailureDetail = "No locker compartment is available.";
+                deliveryRequest.UpdatedAt = now;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                if (transaction is not null) await transaction.CommitAsync(cancellationToken);
 
-        DateTimeOffset reservationExpiresAt = now.AddMinutes(deliveryRequest.SystemPolicy.CompartmentReservationMinutes);
-        CompartmentReservation? reservation = await compartmentAllocationService.ReserveAvailableAsync(
-            deliveryRequest.LockerId,
-            deliveryRequest.Id,
-            null,
-            reservationExpiresAt,
-            cancellationToken);
-        if (reservation is null)
-        {
-            deliveryRequest.Status = DeliveryRequestStatus.Failed;
-            deliveryRequest.FailureCode = DeliveryRequestFailureCode.NoCompartment;
-            deliveryRequest.FailureDetail = "No locker compartment is available.";
+                throw new ConflictException(LockerErrorCodes.NoAvailableCompartment, "No available compartment was found at this locker.");
+            }
+
+            reservation = allocated;
+            LockerCompartment availableCompartment = reservation.LockerCompartment;
+            deliveryRequest.AllocatedCompartmentId = reservation.LockerCompartmentId;
+            deliveryRequest.Status = DeliveryRequestStatus.Allocated;
+            deliveryRequest.AllocatedAt = now;
+            deliveryRequest.ReservationExpiresAt = reservationExpiresAt;
+            deliveryRequest.LastActivityAt = now;
             deliveryRequest.UpdatedAt = now;
-            await dbContext.SaveChangesAsync(cancellationToken);
 
-            throw new ConflictException(LockerErrorCodes.NoAvailableCompartment, "No available compartment was found at this locker.");
+            AddAudit(null, "DeliveryRequest.CompartmentAllocated", deliveryRequest, availableCompartment.Code, now);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         }
 
-        LockerCompartment availableCompartment = reservation.LockerCompartment;
-        deliveryRequest.AllocatedCompartmentId = reservation.LockerCompartmentId;
-        deliveryRequest.Status = DeliveryRequestStatus.Allocated;
-        deliveryRequest.AllocatedAt = now;
-        deliveryRequest.ReservationExpiresAt = reservationExpiresAt;
-        deliveryRequest.LastActivityAt = now;
-        deliveryRequest.UpdatedAt = now;
-
-        AddAudit(null, "DeliveryRequest.CompartmentAllocated", deliveryRequest, availableCompartment.Code, now);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        OpenLockerResponse access = await lockerAccessService.OpenAsync(new OpenLockerRequest(
-            deliveryRequest.LockerId,
-            availableCompartment.Id,
-            null,
-            deliveryRequest.Id,
-            null,
-            null,
-            LockerAccessType.ShipperDropOff,
-            LockerAccessMethod.GuestSession,
-            null,
-            "Guest Web"), cancellationToken);
+        OpenLockerResponse access;
+        try
+        {
+            access = await lockerAccessService.OpenAsync(new OpenLockerRequest(
+                deliveryRequest.LockerId,
+                reservation.LockerCompartmentId,
+                null,
+                deliveryRequest.Id,
+                null,
+                null,
+                LockerAccessType.ShipperDropOff,
+                LockerAccessMethod.GuestSession,
+                null,
+                "Guest Web"), cancellationToken);
+        }
+        catch (ApiException exception) when (
+            (exception is ConflictException && exception.ErrorCode == LockerErrorCodes.Offline) ||
+            ((exception is NotFoundException || exception is BadRequestException) && exception.ErrorCode == LockerErrorCodes.InvalidCompartment))
+        {
+            // These guards run before dispatch in LockerAccessService. Unknown
+            // exceptions may follow a successful publish and must keep the hold.
+            await ReleaseFailedAllocationAsync(exception.Message);
+            throw;
+        }
         if (access.Result != LockerAccessResult.Succeeded)
         {
-            await compartmentAllocationService.ReleaseAsync(deliveryRequest.Id, null, now, cancellationToken);
-            deliveryRequest.Status = DeliveryRequestStatus.Failed;
-            deliveryRequest.FailureCode = DeliveryRequestFailureCode.DeviceUnavailable;
-            deliveryRequest.FailureDetail = access.FailureReason;
-            deliveryRequest.UpdatedAt = now;
-            await dbContext.SaveChangesAsync(cancellationToken);
+            await ReleaseFailedAllocationAsync(access.FailureReason);
             throw access.Result == LockerAccessResult.Failed
                 ? new ServiceUnavailableException(LockerErrorCodes.OpenFailed, "The locker compartment could not be opened.")
                 : new ConflictException(LockerErrorCodes.OpenFailed, "The locker compartment could not be opened.");
@@ -670,10 +688,24 @@ public sealed class DeliveryRequestService(
         return new CompartmentReservationResponse(
             deliveryRequest.Id,
             reservation.Id,
-            availableCompartment.Id,
-            availableCompartment.Code,
+            reservation.LockerCompartmentId,
+            reservation.LockerCompartment.Code,
             reservation.ReservedAt,
             reservation.ExpiresAt);
+
+        async Task ReleaseFailedAllocationAsync(string? detail)
+        {
+            DateTimeOffset failedAt = timeProvider.GetUtcNow();
+            // Release this allocation only; never all reservations owned by a
+            // delivery, which could include a later or unrelated reservation.
+            reservation.ReleasedAt ??= failedAt;
+            deliveryRequest.Status = DeliveryRequestStatus.Failed;
+            deliveryRequest.FailureCode = DeliveryRequestFailureCode.DeviceUnavailable;
+            deliveryRequest.FailureDetail = detail;
+            deliveryRequest.UpdatedAt = failedAt;
+            AddAudit(null, "DeliveryRequest.CompartmentOpenFailed", deliveryRequest, detail, failedAt, AuditLogResult.Failed);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
     }
 
     public async Task<int> ExpireReservationsAsync(CancellationToken cancellationToken = default)
@@ -925,7 +957,7 @@ public sealed class DeliveryRequestService(
     private static DeliveryRequestSummaryResponse MapSummary(DeliveryRequest request) =>
         new(request.Id, request.Status, request.ParcelImageUrl, request.SessionExpiresAt);
 
-    private void AddAudit(Guid? actorUserId, string action, DeliveryRequest request, string? details, DateTimeOffset occurredAt) =>
+    private void AddAudit(Guid? actorUserId, string action, DeliveryRequest request, string? details, DateTimeOffset occurredAt, AuditLogResult result = AuditLogResult.Succeeded) =>
         dbContext.AuditLogs.Add(new AuditLog
         {
             Id = Guid.NewGuid(),
@@ -933,7 +965,7 @@ public sealed class DeliveryRequestService(
             Action = action,
             EntityType = nameof(DeliveryRequest),
             EntityId = request.Id,
-            Result = AuditLogResult.Succeeded,
+            Result = result,
             Details = details,
             OccurredAt = occurredAt
         });
