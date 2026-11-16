@@ -335,10 +335,12 @@ public sealed class PaymentReconciliationService(ApplicationDbContext db, IPayme
     private void AddEvent(PaymentReconciliation item, Guid actorId, string action, string message, string? evidence = null)
     {
         item.UpdatedAt = clock.GetUtcNow();
-        item.Events.Add(new PaymentReconciliationEvent
+        // Register history explicitly as new, including on an existing tracked case.
+        db.Set<PaymentReconciliationEvent>().Add(new PaymentReconciliationEvent
         {
             Id = Guid.NewGuid(),
             PaymentReconciliationId = item.Id,
+            PaymentReconciliation = item,
             ActorUserId = actorId,
             Action = action,
             Status = item.Status,
