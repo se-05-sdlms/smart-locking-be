@@ -1255,41 +1255,6 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.ToTable("OperatorTaskHandover", (string)null);
                 });
 
-            modelBuilder.Entity("smart_locking_be.Domain.Entities.OperatorTaskAcknowledgement", b =>
-                {
-                    b.HasOne("smart_locking_be.Domain.Entities.OperatorTaskHandover", null)
-                        .WithMany()
-                        .HasForeignKey("HandoverId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
-                        .WithMany()
-                        .HasForeignKey("ReceiverUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("smart_locking_be.Domain.Entities.OperatorTaskHandover", b =>
-                {
-                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
-                        .WithMany()
-                        .HasForeignKey("AuthorUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
-                        .WithMany()
-                        .HasForeignKey("IntendedReceiverUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("smart_locking_be.Domain.Entities.Locker", null)
-                        .WithMany()
-                        .HasForeignKey("LockerId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("smart_locking_be.Domain.Entities.OtpChallenge", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2038,6 +2003,31 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.HasKey("ReturnRequestId");
 
                     b.ToTable("ReturnCancellationRequest", (string)null);
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnPickupAttempt", b =>
+                {
+                    b.Property<Guid>("LockerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ClientKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying");
+
+                    b.Property<int>("FailedAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("WindowExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("LockerId", "ClientKey");
+
+                    b.HasIndex("WindowExpiresAt");
+
+                    b.ToTable("ReturnPickupAttempt", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ReturnPickupAttempt_FailedAttempts", "\"FailedAttempts\" >= 0 AND \"FailedAttempts\" <= 5");
+                        });
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnRequest", b =>
@@ -2957,6 +2947,41 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OperatorTaskAcknowledgement", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.OperatorTaskHandover", null)
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("ReceiverUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.OperatorTaskHandover", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("smart_locking_be.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("IntendedReceiverUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("smart_locking_be.Domain.Entities.Locker", null)
+                        .WithMany()
+                        .HasForeignKey("LockerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("smart_locking_be.Domain.Entities.OtpChallenge", b =>
                 {
                     b.HasOne("smart_locking_be.Domain.Entities.Parcel", "Parcel")
@@ -3215,6 +3240,15 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("ReturnRequest");
+                });
+
+            modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnPickupAttempt", b =>
+                {
+                    b.HasOne("smart_locking_be.Domain.Entities.Locker", null)
+                        .WithMany()
+                        .HasForeignKey("LockerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("smart_locking_be.Domain.Entities.ReturnRequest", b =>

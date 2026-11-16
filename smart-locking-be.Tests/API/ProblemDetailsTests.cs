@@ -17,6 +17,25 @@ namespace smart_locking_be.Tests.API;
 
 public sealed class ProblemDetailsTests
 {
+    [Fact]
+    public async Task PickupLockoutIncludesRetryAfterAndStableProblemCode()
+    {
+        using ServiceProvider provider = new ServiceCollection().AddLogging().AddProblemDetails().BuildServiceProvider();
+        DefaultHttpContext context = new() { RequestServices = provider };
+        context.Request.Headers.Accept = "application/problem+json";
+        context.Response.Body = new MemoryStream();
+        GlobalExceptionHandler handler = new(provider.GetRequiredService<IProblemDetailsService>(),
+            NullLogger<GlobalExceptionHandler>.Instance);
+
+        Assert.True(await handler.TryHandleAsync(context,
+            new TooManyRequestsException(ReturnErrorCodes.PickupLocked, "Try later.", 897), default));
+        Assert.Equal(429, context.Response.StatusCode);
+        Assert.Equal("897", context.Response.Headers.RetryAfter.ToString());
+        context.Response.Body.Position = 0;
+        using JsonDocument body = await JsonDocument.ParseAsync(context.Response.Body);
+        Assert.Equal(ReturnErrorCodes.PickupLocked, body.RootElement.GetProperty("code").GetString());
+    }
+
     [Theory]
     [InlineData(401, "auth/invalid_credentials", "Invalid credentials.")]
     [InlineData(409, "locker/no_available_compartment", "No available compartment.")]

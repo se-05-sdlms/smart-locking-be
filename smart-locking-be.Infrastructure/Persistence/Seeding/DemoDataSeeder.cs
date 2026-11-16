@@ -649,7 +649,9 @@ public static class DemoDataSeeder
         foreach (var entry in db.ChangeTracker.Entries<User>())
             if (!hashes.VerifyPassword(password, entry.Entity.PasswordHash) || hashes.VerifyPassword(password + "invalid", entry.Entity.PasswordHash))
                 throw new Exception("Password hash self-check failed.");
-        var missing = db.Model.GetEntityTypes().Where(type => db.ChangeTracker.Entries().Count(entry => entry.Metadata == type) < 10 && type.ClrType != typeof(User)).Select(type => type.ClrType.Name).ToArray();
+        // Throttle buckets are transient security state, never pre-populated by demo data.
+        var missing = db.Model.GetEntityTypes().Where(type => db.ChangeTracker.Entries().Count(entry => entry.Metadata == type) < 10
+            && type.ClrType != typeof(User) && type.ClrType != typeof(ReturnPickupAttempt)).Select(type => type.ClrType.Name).ToArray();
         if (missing.Length > 0) throw new Exception("Dataset omits required rows: " + string.Join(", ", missing));
     }
 }
