@@ -69,7 +69,7 @@ public sealed class ReportBoundaryTests
             controller.Summary(DateTimeOffset.MinValue, null, null, default));
     }
 
-    private sealed class CapturingService : IReportService
+    internal sealed class CapturingService : IReportService
     {
         public DateTimeOffset From { get; private set; }
         public DateTimeOffset To { get; private set; }
