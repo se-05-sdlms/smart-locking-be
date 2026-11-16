@@ -22,8 +22,8 @@ the OPEN may have reached the device, so the already committed allocation is
 retained for the existing expiry/recovery flow. Publishing and SQL persistence
 are not atomic and this change does not prove physical door state.
 
-Eight regression cases use real service code and migrated, disposable PostgreSQL
-databases: offline cleanup/reuse, same-request overlap, preservation of another
+Nine regression cases use real service code and migrated, disposable PostgreSQL
+databases: offline cleanup/reuse, concurrent initial requests, in-flight overlap, preservation of another
 owner and another reservation of the same owner, failed-dispatch response,
 post-publish SQL failure, invalid session and no available compartments. Device
 transport is a controlled fake; no shared application database or physical

@@ -93,6 +93,26 @@ public sealed class DeliveryReservationPostgresTests : IAsyncLifetime
     }
 
     [EmergencyPostgresFact]
+    public async Task ConcurrentInitialRequests_AllocateOnceAndPublishOnce()
+    {
+        var dispatcher = new Dispatcher();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<Exception?>[] contenders = Enumerable.Range(0, 12).Select(async _ =>
+        {
+            await start.Task;
+            return (Exception?)await Record.ExceptionAsync(() => Open(dispatcher));
+        }).ToArray();
+        start.SetResult();
+        Exception?[] errors = await Task.WhenAll(contenders).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Single(errors, error => error is null);
+        Assert.Equal(11, errors.Count(error => error is ConflictException { ErrorCode: DeliveryErrorCodes.InvalidState }));
+        Assert.Equal(1, dispatcher.Commands);
+        await using var db = Context();
+        Assert.Single(await db.CompartmentReservations.ToListAsync());
+        Assert.Single(await db.LockerAccessEvents.ToListAsync());
+    }
+
+    [EmergencyPostgresFact]
     public async Task SameRequestInFlight_CannotAllocateOrPublishAgain()
     {
         var dispatcher = new Dispatcher { Pause = true };
