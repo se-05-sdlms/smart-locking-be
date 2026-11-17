@@ -51,7 +51,8 @@ public sealed class ReturnImageUrlHttpPostgresTests : IAsyncLifetime
         await db.Database.MigrateAsync();
         db.Add(new ResidentProfile
         {
-            Id = Guid.NewGuid(), FullName = "Image round trip resident",
+            Id = Guid.NewGuid(),
+            FullName = "Image round trip resident",
             User = new User { Id = userId, Email = "return-image@example.test", Role = UserRole.Resident, Status = UserStatus.Active },
             RegisteredLocker = new Locker { Id = Guid.NewGuid(), Code = "RETURN-IMAGE", DeviceIdentifier = "return-image", OperationalStatus = LockerOperationalStatus.Operational }
         });
@@ -74,7 +75,10 @@ public sealed class ReturnImageUrlHttpPostgresTests : IAsyncLifetime
         using var providerClient = new HttpClient(provider);
         var storage = new SupabaseImageStorageService(providerClient, Options.Create(new SupabaseStorageOptions
         {
-            Url = "https://storage.example.test/", ApiKey = "test-only-key", BucketName = "return-images", Folder = "/resident returns/proofs/"
+            Url = "https://storage.example.test/",
+            ApiKey = "test-only-key",
+            BucketName = "return-images",
+            Folder = "/resident returns/proofs/"
         }));
         await using var app = await StartAsync(storage);
         using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
