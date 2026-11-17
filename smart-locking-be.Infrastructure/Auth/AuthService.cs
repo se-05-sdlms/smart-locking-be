@@ -20,6 +20,8 @@ public sealed class AuthService(
     IConfiguration configuration) : IAuthService
 {
     private static readonly Regex PhonePattern = new("^0[0-9]{9}$", RegexOptions.Compiled);
+    private const string CurrentTermsVersion = "1.0";
+    private const string CurrentPrivacyVersion = "1.0";
     private const string InvalidCredentialsMessage = "Invalid credentials.";
 
     public async Task<IReadOnlyCollection<RegistrationLockerResponse>> GetRegistrationLockersAsync(
@@ -48,6 +50,8 @@ public sealed class AuthService(
         {
             throw BadRequestException.For("password", "Password must contain at least 8 characters.");
         }
+
+        ValidateConsent(request);
 
         string fullName = request.FullName.Trim();
         if (string.IsNullOrWhiteSpace(fullName) || fullName.Length > 150)
@@ -113,7 +117,10 @@ public sealed class AuthService(
             Status = UserStatus.Active,
             MustChangePassword = false,
             CreatedAt = now,
-            UpdatedAt = now
+            UpdatedAt = now,
+            TermsVersion = request.TermsVersion!.Trim(),
+            PrivacyVersion = request.PrivacyVersion!.Trim(),
+            ConsentedAt = now
         };
 
         dbContext.Users.Add(user);
@@ -398,6 +405,16 @@ public sealed class AuthService(
 
     private static string? NormalizePhone(string? phoneNumber) =>
         string.IsNullOrWhiteSpace(phoneNumber) ? null : phoneNumber.Trim();
+
+    private static void ValidateConsent(RegisterRequest request)
+    {
+        if (!string.Equals(request.TermsVersion?.Trim(), CurrentTermsVersion, StringComparison.Ordinal))
+            throw BadRequestException.For("termsVersion", "Terms version is required and must be current.");
+        if (!string.Equals(request.PrivacyVersion?.Trim(), CurrentPrivacyVersion, StringComparison.Ordinal))
+            throw BadRequestException.For("privacyVersion", "Privacy version is required and must be current.");
+        if (request.ConsentedAt is null || request.ConsentedAt.Value > DateTimeOffset.UtcNow.AddMinutes(5))
+            throw BadRequestException.For("consentedAt", "Consent timestamp is required and must be valid.");
+    }
     public async Task<AuthTokenResponse> ChangePasswordAsync(
         Guid userId,
         ChangePasswordRequest request,

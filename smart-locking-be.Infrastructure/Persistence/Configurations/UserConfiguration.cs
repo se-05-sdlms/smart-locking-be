@@ -11,6 +11,8 @@ public sealed class UserConfiguration() : BaseConfiguration<User>(entity => enti
         Varchar(builder.Property(entity => entity.PhoneNumber)).HasMaxLength(20);
         Varchar(builder.Property(entity => entity.Email)).HasMaxLength(254);
         Varchar(builder.Property(entity => entity.PasswordHash)).IsRequired().HasMaxLength(512);
+        Varchar(builder.Property(entity => entity.TermsVersion)).HasMaxLength(32);
+        Varchar(builder.Property(entity => entity.PrivacyVersion)).HasMaxLength(32);
         EnumAsString(builder.Property(entity => entity.Status)).IsRequired();
         EnumAsString(builder.Property(entity => entity.Role)).IsRequired();
 
