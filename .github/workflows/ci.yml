@@ -17,6 +17,7 @@ concurrency:
 jobs:
   build-test:
     name: Restore, format, build, and test
+    if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -58,17 +59,85 @@ jobs:
       - name: Build demo seeder
         run: dotnet build tools/SmartLocking.DemoSeeder/SmartLocking.DemoSeeder.csproj --configuration Release
 
-  deploy:
-    name: Deploy main to Render
+  publish:
+    name: Publish tested image to GHCR
     needs: build-test
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
     steps:
-      - name: Trigger Render deployment of the tested commit
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set image name and validate target platform
+        id: image
         env:
-          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          EC2_PLATFORM: ${{ vars.EC2_PLATFORM }}
         run: |
-          test -n "$RENDER_DEPLOY_HOOK_URL" || { echo "RENDER_DEPLOY_HOOK_URL is not configured"; exit 1; }
-          curl --fail --silent --show-error --max-time 60 \
-            --request POST "${RENDER_DEPLOY_HOOK_URL}&ref=${GITHUB_SHA}"
+          case "$EC2_PLATFORM" in
+            linux/amd64|linux/arm64) ;;
+            *) echo 'EC2_PLATFORM must be linux/amd64 or linux/arm64.'; exit 1 ;;
+          esac
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          platforms: ${{ vars.EC2_PLATFORM }}
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  deploy:
+    name: Deploy to EC2 via SSH
+    needs: publish
+    if: >-
+      always() && !cancelled() && github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'push' && needs.publish.result == 'success') ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions: {}
+    steps:
+      - name: Deploy or reload the running image
+        env:
+          IMAGE: ${{ needs.publish.outputs.image }}
+          EC2_HOST: ${{ vars.EC2_HOST }}
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          EC2_SSH_KNOWN_HOSTS: ${{ vars.EC2_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ $EC2_HOST =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ && -n $EC2_SSH_PRIVATE_KEY && -n $EC2_SSH_KNOWN_HOSTS ]] ||
+            { echo 'Configure EC2_HOST, EC2_SSH_PRIVATE_KEY, and EC2_SSH_KNOWN_HOSTS.'; exit 1; }
+          if [[ $GITHUB_EVENT_NAME == push ]]; then
+            [[ $IMAGE =~ ^ghcr\.io/se-05-sdlms/smart-locking-be@sha256:[a-f0-9]{64}$ ]]
+            command=$IMAGE
+          else
+            command=reload
+          fi
+
+          umask 077
+          ssh_dir=$(mktemp -d)
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > "$ssh_dir/key"
+          unset EC2_SSH_PRIVATE_KEY
+          printf '%s\n' "$EC2_SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          ssh -T -F /dev/null -i "$ssh_dir/key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" -o GlobalKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            "deploy@$EC2_HOST" "$command"
