@@ -6,6 +6,7 @@ using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
 using System.Security.Cryptography;
+using System.Net.Mail;
 
 namespace smart_locking_be.Infrastructure.Services;
 
@@ -99,12 +100,12 @@ public sealed class UserService(
             throw BadRequestException.For("fullName", "Full name is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.Email) || !request.Email.Contains('@'))
+        string email = request.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (!IsValidAccountEmail(email))
         {
             throw BadRequestException.For("email", "Email is invalid.");
         }
 
-        string email = request.Email.Trim().ToLowerInvariant();
         string? phone = string.IsNullOrWhiteSpace(request.PhoneNumber) ? null : request.PhoneNumber.Trim();
 
         bool exists = await dbContext.Users.AnyAsync(u =>
@@ -113,6 +114,18 @@ public sealed class UserService(
         if (exists)
         {
             throw new ConflictException(UserErrorCodes.AlreadyExists, "Email or phone number is already in use.");
+        }
+
+        bool hasInitialAssignment = request.Role == UserRole.LockerOperator && request.LockerId.HasValue;
+        await using var assignmentTransaction = hasInitialAssignment && dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        if (hasInitialAssignment)
+        {
+            // Share the allocation lock with assignment/revocation so creating an
+            // account cannot race another owner into the same locker.
+            if (dbContext.Database.IsNpgsql())
+                await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({EffectiveOperatorAssignmentQueries.AllocationLock})", cancellationToken);
+            await ValidateAvailableOperatorLockerAsync(request.LockerId!.Value, cancellationToken);
         }
 
         string temporaryPassword = request.Role == UserRole.LockerOperator || string.IsNullOrWhiteSpace(request.Password)
@@ -177,6 +190,7 @@ public sealed class UserService(
 
         dbContext.AuditLogs.Add(auditLog);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (assignmentTransaction != null) await assignmentTransaction.CommitAsync(cancellationToken);
 
         try
         {
@@ -275,6 +289,9 @@ public sealed class UserService(
 
         string? email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToLowerInvariant();
         string? phone = string.IsNullOrWhiteSpace(request.PhoneNumber) ? null : request.PhoneNumber.Trim();
+
+        if (email != null && !IsValidAccountEmail(email))
+            throw BadRequestException.For("email", "Email is invalid.");
 
         if (email != null && email != user.Email)
         {
@@ -411,7 +428,12 @@ public sealed class UserService(
         if (dbContext.Database.IsNpgsql())
             await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({EffectiveOperatorAssignmentQueries.AllocationLock})", cancellationToken);
 
+        // Read status after acquiring the row lock so a concurrent status update
+        // cannot disable the operator between validation and assignment commit.
+        if (dbContext.Database.IsNpgsql())
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"User\" WHERE \"Id\" = {operatorId} FOR UPDATE", cancellationToken);
         var user = await dbContext.Users
+            .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == operatorId && u.Role == UserRole.LockerOperator, cancellationToken);
 
         if (user is null)
@@ -419,19 +441,10 @@ public sealed class UserService(
             throw new NotFoundException(UserErrorCodes.NotFound, "Locker operator not found.");
         }
 
-        if (request.LockerId == Guid.Empty)
-        {
-            throw BadRequestException.For("lockerId", "A valid LockerId is required.");
-        }
+        if (user.Status != UserStatus.Active)
+            throw new ConflictException(UserErrorCodes.Inactive, "Only an active locker operator can receive an assignment.");
 
-        bool activeExists = await dbContext.OperatorAssignments.AnyAsync(a =>
-            a.RevokedAt == null &&
-            a.LockerId == request.LockerId, cancellationToken);
-
-        if (activeExists)
-        {
-            throw new ConflictException(UserErrorCodes.AssignmentConflict, "Locker is assigned to another operator.");
-        }
+        await ValidateAvailableOperatorLockerAsync(request.LockerId, cancellationToken);
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var assignment = new OperatorAssignment
@@ -477,6 +490,37 @@ public sealed class UserService(
             assignment.RevokedAt,
             assignment.Reason
         );
+    }
+
+    private static bool IsValidAccountEmail(string email) =>
+        email.Length <= 254 &&
+        MailAddress.TryCreate(email, out MailAddress? address) &&
+        string.Equals(address.Address, email, StringComparison.Ordinal) &&
+        address.User.Length <= 64 && !address.User.EndsWith('.') &&
+        address.Host.Contains('.') && !address.Host.EndsWith('.') &&
+        Uri.CheckHostName(address.Host) == UriHostNameType.Dns &&
+        address.Host.Split('.').All(label => label.Length is > 0 and <= 63 &&
+            char.IsAsciiLetterOrDigit(label[0]) && char.IsAsciiLetterOrDigit(label[^1]) &&
+            label.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'));
+
+    private async Task ValidateAvailableOperatorLockerAsync(Guid lockerId, CancellationToken cancellationToken)
+    {
+        if (lockerId == Guid.Empty)
+        {
+            throw BadRequestException.For("lockerId", "A valid LockerId is required.");
+        }
+
+        if (!await dbContext.Lockers.AnyAsync(l => l.Id == lockerId, cancellationToken))
+            throw new NotFoundException(LockerErrorCodes.NotFound, "Locker not found.");
+
+        bool activeExists = await dbContext.OperatorAssignments.AnyAsync(a =>
+            a.RevokedAt == null &&
+            a.LockerId == lockerId, cancellationToken);
+
+        if (activeExists)
+        {
+            throw new ConflictException(UserErrorCodes.AssignmentConflict, "Locker is assigned to another operator.");
+        }
     }
 
     public async Task RevokeOperatorScopeAsync(

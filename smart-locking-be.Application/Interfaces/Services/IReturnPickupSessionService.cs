@@ -6,7 +6,8 @@ public interface IReturnPickupSessionService
 {
     Task<ReturnPickupSessionResponse> CreateAsync(
         ValidateReturnPickupRequest request,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? clientIpAddress = null);
 
     Task<ReturnPickupSessionResponse> GetAsync(
         Guid id,

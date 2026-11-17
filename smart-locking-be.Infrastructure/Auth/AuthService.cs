@@ -85,12 +85,22 @@ public sealed class AuthService(
         if (!await dbContext.OperationalLockers().AnyAsync(candidate => candidate.Id == locker.Id, cancellationToken))
             throw new ConflictException(LockerErrorCodes.NotOperational, "Registered locker is not operational.");
 
-        await otpService.VerifyAndConsumeAsync(
-            phoneNumber,
-            request.OtpCode,
-            OtpPurpose.Registration,
-            null,
-            cancellationToken);
+        try
+        {
+            await otpService.VerifyAndConsumeAsync(
+                phoneNumber,
+                request.OtpCode,
+                OtpPurpose.Registration,
+                null,
+                cancellationToken);
+        }
+        catch (BadRequestException exception) when (exception.ErrorCode == AuthErrorCodes.InvalidOtp)
+        {
+            // No account changes have been staged yet. Persist the rejected attempt and
+            // lockout instead of rolling them back with the unsuccessful registration.
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            throw;
+        }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         User user = new()
@@ -266,10 +276,10 @@ public sealed class AuthService(
         CancellationToken cancellationToken)
     {
         User? user = await FindUserByIdentifierAsync(request.LoginIdentifier, cancellationToken);
-        if (user?.PhoneNumber is not null)
+        if (user is not null && UsesEmailPasswordReset(user, request.LoginIdentifier))
+            await otpService.IssueEmailAsync(user.Email!, OtpPurpose.PasswordReset, user.Id, cancellationToken);
+        else if (user?.PhoneNumber is not null)
             await otpService.IssueAsync(user.PhoneNumber, OtpPurpose.PasswordReset, user.Id, cancellationToken);
-        else if (user?.Email is not null && user.Role is UserRole.LockerOperator or UserRole.Administrator)
-            await otpService.IssueEmailAsync(user.Email, OtpPurpose.PasswordReset, user.Id, cancellationToken);
     }
 
     public async Task ResetPasswordAsync(
@@ -290,11 +300,11 @@ public sealed class AuthService(
             throw BadRequestException.For("newPassword", "Password must contain at least 8 characters.");
         }
 
-        if (user.PhoneNumber is not null)
-            await otpService.VerifyAndConsumeAsync(user.PhoneNumber, request.OtpCode,
+        if (UsesEmailPasswordReset(user, request.LoginIdentifier))
+            await otpService.VerifyAndConsumeEmailAsync(user.Email!, request.OtpCode,
                 OtpPurpose.PasswordReset, user.Id, cancellationToken);
         else
-            await otpService.VerifyAndConsumeEmailAsync(user.Email!, request.OtpCode,
+            await otpService.VerifyAndConsumeAsync(user.PhoneNumber!, request.OtpCode,
                 OtpPurpose.PasswordReset, user.Id, cancellationToken);
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -315,6 +325,12 @@ public sealed class AuthService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
     }
+
+    // Internal web accounts choose email by entering email, even when a phone is also stored.
+    // Keep the existing resident and explicit phone-identifier reset contracts unchanged.
+    private static bool UsesEmailPasswordReset(User user, string identifier) =>
+        user.Role is UserRole.Administrator or UserRole.LockerOperator &&
+        user.Email is not null && user.Email == NormalizeEmail(identifier);
 
     private (AuthTokenResponse Response, RefreshToken RefreshToken) IssueTokens(User user, string? ipAddress, DateTimeOffset now)
     {

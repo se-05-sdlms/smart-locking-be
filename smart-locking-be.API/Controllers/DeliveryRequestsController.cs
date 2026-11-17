@@ -15,7 +15,9 @@ namespace smart_locking_be.API.Controllers;
 public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryRequestService) : ControllerBase
 {
     private const string GuestSessionHeaderName = "X-Guest-Session-Token";
-    private const int MaxWaybillImageBytes = 8 * 1024 * 1024;
+    private const int MaxWaybillImageBytes = 5 * 1024 * 1024;
+    // Keep multipart headers/boundaries outside the file cap while retaining the existing request ceiling.
+    private const int MaxWaybillRequestBytes = 8 * 1024 * 1024;
 
     [HttpPost]
     [AllowAnonymous]
@@ -46,7 +48,7 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
     [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicyNames.Upload)]
     [RequestTimeout(RequestTimeoutPolicyNames.Upload)]
-    [RequestSizeLimit(MaxWaybillImageBytes)]
+    [RequestSizeLimit(MaxWaybillRequestBytes)]
     public async Task<IActionResult> ScanWaybill(
         Guid id,
         IFormFile file,
@@ -57,9 +59,13 @@ public sealed class DeliveryRequestsController(IDeliveryRequestService deliveryR
             throw new UnauthorizedException(AuthErrorCodes.MissingGuestSession, $"{GuestSessionHeaderName} is required.");
         }
 
-        if (file.Length == 0 || file.Length > MaxWaybillImageBytes)
+        if (file.Length == 0)
         {
-            throw new BadRequestException(ImageErrorCodes.InvalidImage, "Image must be JPG, PNG, or WEBP and no larger than 8 MB.");
+            throw new BadRequestException(ImageErrorCodes.InvalidImage, "Image must not be empty.");
+        }
+        if (file.Length > MaxWaybillImageBytes)
+        {
+            throw new BadRequestException(ImageErrorCodes.InvalidImage, "Image must not exceed 5 MB.");
         }
 
         await using Stream stream = file.OpenReadStream();

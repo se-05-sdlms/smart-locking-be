@@ -8,6 +8,7 @@ using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
 using System.Security.Cryptography;
+using System.Net;
 
 namespace smart_locking_be.Infrastructure.Services;
 
@@ -23,6 +24,7 @@ public sealed class ReturnRequestService(
     public async Task<ReturnRequestResponse> CreateAsync(Guid residentUserId, CreateReturnRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.ImageUrl)) throw BadRequestException.For("imageUrl", "Return image URL is required.");
+        if (string.IsNullOrWhiteSpace(request.Note)) throw BadRequestException.For("note", "Return description is required.");
         await using var residentTransaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
         if (dbContext.Database.IsRelational())
@@ -51,7 +53,7 @@ public sealed class ReturnRequestService(
             ResidentProfileId = resident.Id,
             LockerId = resident.RegisteredLocker.Id,
             ReturnCode = await GeneratePickupCodeAsync(cancellationToken),
-            ReturnReason = request.Note?.Trim(),
+            ReturnReason = request.Note.Trim(),
             ReturnImageUrl = request.ImageUrl.Trim(),
             Status = ReturnRequestStatus.Created,
             CreatedAt = now,
@@ -157,23 +159,58 @@ public sealed class ReturnRequestService(
         await PublishAsync(entity, cancellationToken);
     }
 
-    public async Task<ReturnPickupSessionResponse> CreateAsync(ValidateReturnPickupRequest request, CancellationToken cancellationToken = default)
+    public async Task<ReturnPickupSessionResponse> CreateAsync(ValidateReturnPickupRequest request, CancellationToken cancellationToken = default,
+        string? clientIpAddress = null)
     {
         string code = request.PickupCode.Trim();
         if (code.Length != PickupCodeLength || !code.All(char.IsAsciiDigit)) throw BadRequestException.For("pickupCode", "Pickup code must contain exactly six digits.");
-        ReturnRequest entity = await FullQuery().SingleOrDefaultAsync(item => item.ReturnCode == code && item.Locker.Code == request.LockerCode.Trim(), cancellationToken)
-            ?? throw new NotFoundException(ReturnErrorCodes.InvalidPickupCode, "Pickup code is invalid for this locker.");
+        if (!IPAddress.TryParse(clientIpAddress, out var address))
+            throw new ServiceUnavailableException(ReturnErrorCodes.PickupVerificationUnavailable, "Pickup verification requires a trusted client network address.");
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        string clientKey = tokenHashService.HashToken(address.ToString());
+        Guid? lockerId = await dbContext.Lockers.Where(item => item.Code == request.LockerCode.Trim())
+            .Select(item => (Guid?)item.Id).SingleOrDefaultAsync(cancellationToken);
+        if (lockerId is null) throw new NotFoundException(ReturnErrorCodes.InvalidPickupCode, "Pickup code is invalid for this locker.");
+        await ReturnPickupAttemptGuard.CleanupAsync(dbContext, timeProvider.GetUtcNow(), cancellationToken);
+        await using var attemptTransaction = dbContext.Database.IsRelational() && dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        ReturnPickupAttempt bucket = await ReturnPickupAttemptGuard.AcquireAsync(dbContext, lockerId.Value, clientKey, timeProvider, cancellationToken);
+        now = timeProvider.GetUtcNow();
+        TooManyRequestsException Locked() => new(ReturnErrorCodes.PickupLocked,
+            "Too many invalid pickup codes. Retry after the temporary verification window expires.",
+            Math.Max(1, (int)Math.Ceiling((bucket.WindowExpiresAt - timeProvider.GetUtcNow()).TotalSeconds)));
+        if (bucket.FailedAttempts >= ReturnPickupAttemptGuard.MaxFailures) throw Locked();
+
+        ReturnRequest? entity = await FullQuery().SingleOrDefaultAsync(item => item.ReturnCode == code && item.LockerId == lockerId, cancellationToken);
+        async Task RecordFailureAsync()
+        {
+            bucket.FailedAttempts++;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            if (attemptTransaction is not null) await attemptTransaction.CommitAsync(cancellationToken);
+            if (bucket.FailedAttempts >= ReturnPickupAttemptGuard.MaxFailures) throw Locked();
+        }
+        if (entity is null)
+        {
+            await RecordFailureAsync();
+            throw new NotFoundException(ReturnErrorCodes.InvalidPickupCode, "Pickup code is invalid for this locker.");
+        }
         await using var transition = await ReturnTransitionLock.AcquireAsync(dbContext, entity.Id, cancellationToken);
         await dbContext.Entry(entity).Reference(item => item.Cancellation).LoadAsync(cancellationToken);
         if (entity.Cancellation is not null || entity.Status != ReturnRequestStatus.Deposited || entity.AllocatedCompartment is null)
+        {
+            await RecordFailureAsync();
             throw new ConflictException(ReturnErrorCodes.InvalidState, "Pickup code has been used or is not ready.");
-        DateTimeOffset now = timeProvider.GetUtcNow();
+        }
         SystemPolicy policy = await ActivePolicyAsync(cancellationToken);
         string token = tokenHashService.CreateSecureToken();
         entity.ShipperSessionTokenHash = tokenHashService.HashToken(token);
         entity.UpdatedAt = now;
+        bucket.FailedAttempts = 0;
+        bucket.WindowExpiresAt = now.Add(ReturnPickupAttemptGuard.Window);
         await dbContext.SaveChangesAsync(cancellationToken);
         if (transition is not null) await transition.CommitAsync(cancellationToken);
+        if (attemptTransaction is not null) await attemptTransaction.CommitAsync(cancellationToken);
         return new ReturnPickupSessionResponse(entity.Id, token, entity.Locker.Code, entity.AllocatedCompartment.Code, entity.ReturnImageUrl!, now.AddMinutes(policy.GuestSessionTimeoutMinutes));
     }
 

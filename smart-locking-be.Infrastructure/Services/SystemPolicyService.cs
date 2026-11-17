@@ -71,6 +71,9 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
             policy.IsActive = false;
             policy.EffectiveTo = now;
         }
+        // Release the unique active-policy slot before activating the replacement.
+        // The transaction keeps both saves atomic for other requests.
+        await dbContext.SaveChangesAsync(cancellationToken);
         var obsoleteCoverage = await dbContext.TemporaryOperatorAssignments.Include(x => x.Absence)
             .Where(x => x.PolicyId != id && (x.Status == TemporaryAssignmentStatus.Approved || x.Status == TemporaryAssignmentStatus.Active))
             .ToListAsync(cancellationToken);
@@ -156,7 +159,8 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
         policy.EnableRemoteUnlock = request.EnableRemoteUnlock;
         policy.EnableBluetoothUnlock = request.EnableBluetoothUnlock;
         policy.EffectiveFrom = request.EffectiveFrom;
-        IncidentSlaPolicy sla = request.IncidentSla ?? new();
+        // Omitted SLA fields preserve the existing version; new entities carry defaults.
+        if (request.IncidentSla is not { } sla) return;
         policy.IncidentCriticalAcknowledgeMinutes = sla.CriticalAcknowledgeMinutes;
         policy.IncidentCriticalResolveMinutes = sla.CriticalResolveMinutes;
         policy.IncidentHighAcknowledgeMinutes = sla.HighAcknowledgeMinutes;

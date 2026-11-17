@@ -2,6 +2,13 @@
 
 All endpoints are `Administrator` only. Times are UTC and echoed in the response (`timeZone: "UTC"`, `generatedAt`).
 
+All date ranges use an inclusive `from` and exclusive `to`: `[from, to)`.
+Date-only inputs (`yyyy-MM-dd`) mean midnight in Vietnam (UTC+07), independent of the backend host timezone.
+For example, `from=2026-11-16&to=2026-11-17` selects the Vietnamese calendar day November 16,
+equivalent to `[2026-11-15T17:00:00Z, 2026-11-16T17:00:00Z)`.
+Timestamps with explicit offsets are converted to UTC without changing the instant; encode `+` as `%2B` in query strings.
+Summary, detail and export share these boundary rules. To include an entire final calendar day, pass the following date as `to`.
+
 ## Endpoints
 
 | Endpoint | Behavior |

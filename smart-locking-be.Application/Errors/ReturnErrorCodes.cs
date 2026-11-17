@@ -5,5 +5,7 @@ public static class ReturnErrorCodes
     public const string NotFound = "return/not_found";
     public const string InvalidState = "return/invalid_state";
     public const string InvalidPickupCode = "return/invalid_pickup_code";
+    public const string PickupLocked = "return/pickup_locked";
+    public const string PickupVerificationUnavailable = "return/pickup_verification_unavailable";
     public const string SessionExpired = "return/session_expired";
 }

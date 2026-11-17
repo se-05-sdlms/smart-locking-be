@@ -2,6 +2,7 @@ using smart_locking_be.Domain.Enums;
 
 namespace smart_locking_be.Application.DTOs.SystemPolicies;
 
+/// <summary>IncidentSla omitted/null preserves SLA on update; create uses defaults.</summary>
 public sealed record SaveSystemPolicyRequest(
     DeliveryApprovalMode DefaultApprovalMode,
     int GuestSessionTimeoutMinutes,

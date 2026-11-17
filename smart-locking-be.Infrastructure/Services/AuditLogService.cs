@@ -35,11 +35,11 @@ public sealed class AuditLogService(ApplicationDbContext dbContext) : IAuditLogS
                 item.ActorUser == null ? "System/Guest" : item.ActorUser.Email ?? item.ActorUser.PhoneNumber ?? item.ActorUser.Id.ToString(),
                 item.Action, item.EntityType, item.EntityId, item.Result, item.IpAddress, item.Details, item.OccurredAt))
             .ToListAsync(cancellationToken);
-        return new PagedResult<AuditLogResponse>(items, totalCount, pageNumber, pageSize);
+        return new PagedResult<AuditLogResponse>(items.Select(Mask).ToArray(), totalCount, pageNumber, pageSize);
     }
 
     public async Task<AuditLogResponse> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-        await dbContext.AuditLogs.AsNoTracking().Include(item => item.ActorUser)
+        Mask(await dbContext.AuditLogs.AsNoTracking().Include(item => item.ActorUser)
             .Where(item => item.Id == id)
             .Select(item => new AuditLogResponse(
                 item.Id,
@@ -47,5 +47,11 @@ public sealed class AuditLogService(ApplicationDbContext dbContext) : IAuditLogS
                 item.ActorUser == null ? "System/Guest" : item.ActorUser.Email ?? item.ActorUser.PhoneNumber ?? item.ActorUser.Id.ToString(),
                 item.Action, item.EntityType, item.EntityId, item.Result, item.IpAddress, item.Details, item.OccurredAt))
             .SingleOrDefaultAsync(cancellationToken)
-            ?? throw new NotFoundException(AuditErrorCodes.NotFound, "Audit log not found.");
+            ?? throw new NotFoundException(AuditErrorCodes.NotFound, "Audit log not found."));
+
+    private static AuditLogResponse Mask(AuditLogResponse item) => item with
+    {
+        Actor = OperationalPhoneMask.Apply(item.Actor),
+        Details = OperationalPhoneMask.Apply(item.Details)
+    };
 }
