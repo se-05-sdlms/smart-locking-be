@@ -2405,6 +2405,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("ConsentedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2430,12 +2433,20 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("PhoneVerifiedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("PrivacyVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying");
+
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasColumnType("character varying");
 
                     b.Property<string>("Status")
                         .IsRequired()
+                        .HasColumnType("character varying");
+
+                    b.Property<string>("TermsVersion")
+                        .HasMaxLength(32)
                         .HasColumnType("character varying");
 
                     b.Property<DateTimeOffset>("UpdatedAt")

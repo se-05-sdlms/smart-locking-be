@@ -6,7 +6,10 @@ public sealed record RegisterRequest(
     string Password,
     string FullName,
     Guid RegisteredLockerId,
-    string? Email);
+    string? Email,
+    string? TermsVersion = null,
+    string? PrivacyVersion = null,
+    DateTimeOffset? ConsentedAt = null);
 
 public sealed record RequestRegistrationOtpRequest(string PhoneNumber);
 
