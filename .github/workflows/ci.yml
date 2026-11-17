@@ -102,69 +102,42 @@ jobs:
           labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
   deploy:
-    name: Deploy to EC2 via SSM
+    name: Deploy to EC2 via SSH
     needs: publish
     if: >-
       always() && !cancelled() && github.ref == 'refs/heads/main' &&
       ((github.event_name == 'push' && needs.publish.result == 'success') ||
        github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
-    timeout-minutes: 22
+    timeout-minutes: 15
     environment: production
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
-      DEPLOY_BUCKET: ${{ vars.DEPLOY_BUCKET }}
-      ENV_KEY: smart-locking-be/production/${{ github.run_id }}-${{ github.run_attempt }}.env
+    permissions: {}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: aws-actions/configure-aws-credentials@v4
-        id: aws
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-      - name: Upload encrypted env
-        env:
-          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
-        run: |
-          set -euo pipefail
-          test -n "$PRODUCTION_ENV" || { echo 'PRODUCTION_ENV is empty.'; exit 1; }
-          printf '%s' "$PRODUCTION_ENV" |
-            env -u PRODUCTION_ENV aws s3 cp - "s3://$DEPLOY_BUCKET/$ENV_KEY" --sse AES256 --only-show-errors
-      - name: Run deployment and wait for EC2
+      - name: Deploy or reload the running image
         env:
           IMAGE: ${{ needs.publish.outputs.image }}
+          EC2_HOST: ${{ vars.EC2_HOST }}
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          EC2_SSH_KNOWN_HOSTS: ${{ vars.EC2_SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
+          [[ $EC2_HOST =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ && -n $EC2_SSH_PRIVATE_KEY && -n $EC2_SSH_KNOWN_HOSTS ]] ||
+            { echo 'Configure EC2_HOST, EC2_SSH_PRIVATE_KEY, and EC2_SSH_KNOWN_HOSTS.'; exit 1; }
           if [[ $GITHUB_EVENT_NAME == push ]]; then
-            [[ $IMAGE =~ ^ghcr\.io/[a-z0-9_./-]+@sha256:[a-f0-9]{64}$ ]]
+            [[ $IMAGE =~ ^ghcr\.io/se-05-sdlms/smart-locking-be@sha256:[a-f0-9]{64}$ ]]
+            command=$IMAGE
+          else
+            command=reload
           fi
-          parameters=$(jq -n --rawfile script .github/scripts/deploy-ec2.sh \
-            --arg uri "s3://$DEPLOY_BUCKET/$ENV_KEY" --arg image "$IMAGE" '
-              {executionTimeout: ["900"], commands: [
-                ("bash -s -- " + ([$uri, $image] | @sh) + " <<\u0027DEPLOY_SCRIPT\u0027\n" + $script + "DEPLOY_SCRIPT")
-              ]}')
-          command_id=$(aws ssm send-command --instance-ids "$EC2_INSTANCE_ID" \
-            --document-name AWS-RunShellScript --timeout-seconds 120 \
-            --parameters "$parameters" --query 'Command.CommandId' --output text)
-          echo "SSM command: $command_id"
-          for ((attempt=0; attempt<216; attempt++)); do
-            status=$(aws ssm get-command-invocation --command-id "$command_id" \
-              --instance-id "$EC2_INSTANCE_ID" --query Status --output text 2>/dev/null) || status=Pending
-            case "$status" in
-              Success) exit 0 ;;
-              Pending|InProgress|Delayed|Cancelling) sleep 5 ;;
-              *) echo "SSM deployment ended with status $status. See command $command_id."; exit 1 ;;
-            esac
-          done
-          echo "Timed out waiting for SSM command $command_id."
-          exit 1
-      - name: Remove temporary env from S3
-        if: always() && steps.aws.outcome == 'success'
-        run: aws s3api delete-object --bucket "$DEPLOY_BUCKET" --key "$ENV_KEY" >/dev/null
+
+          umask 077
+          ssh_dir=$(mktemp -d)
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > "$ssh_dir/key"
+          unset EC2_SSH_PRIVATE_KEY
+          printf '%s\n' "$EC2_SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          ssh -T -F /dev/null -i "$ssh_dir/key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" -o GlobalKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            "deploy@$EC2_HOST" "$command"

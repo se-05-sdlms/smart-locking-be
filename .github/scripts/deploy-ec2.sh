@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
+
+if [[ $# != 1 || ( $1 != reload && ! $1 =~ ^ghcr\.io/se-05-sdlms/smart-locking-be@sha256:[a-f0-9]{64}$ ) ]]; then
+  echo 'Expected reload or a digest for the smart-locking-be GHCR image.' >&2
+  exit 1
+fi
+
 exec 3>&1 >/dev/null 2>&1
 
 cd /opt/smart-locking-be || { echo 'Deployment directory is unavailable.' >&3; exit 1; }
@@ -64,8 +70,8 @@ trap finish EXIT
 trap 'exit 1' HUP INT TERM
 
 phase='prepare candidate image'
-image=$2
-if [[ -n $image ]]; then
+if [[ $1 != reload ]]; then
+  image=$1
   docker pull "$image"
   cat > "$stage/compose.yaml" <<EOF
 services:
@@ -100,9 +106,9 @@ else
   cp -- compose.yaml "$stage/compose.yaml"
 fi
 
-phase='download and validate env'
-aws s3 cp "$1" "$stage/.env" --only-show-errors
-[[ -s $stage/.env ]]
+phase='validate the EC2 env file'
+[[ -f .env && -s .env ]]
+cp -- .env "$stage/.env"
 compose "$stage" config --quiet
 
 phase='install release files'

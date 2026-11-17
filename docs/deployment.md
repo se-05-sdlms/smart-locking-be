@@ -4,49 +4,64 @@ Pushes to `main` run CI, publish `ghcr.io/se-05-sdlms/smart-locking-be:<commit-s
 
 ## One-time GitHub setup
 
-1. In **Settings → Environments**, create `production` and restrict deployment branches to exactly `main`. The AWS OIDC subject identifies the environment, so this restriction enforces which branch can assume the role.
-2. Set the environment secret `PRODUCTION_ENV` to the full production dotenv file. Use UTF-8, LF, and one `KEY=value` per line. Compose reads values literally in raw mode, including quotes and dollar signs. Enter unquoted values unless the quote characters belong to the value. For .NET config use keys such as `ConnectionStrings__DefaultConnection` with the actual key names used by the application. For a local file, upload with `gh secret set PRODUCTION_ENV --env production < production.env` in Bash.
-3. In **Settings → Secrets and variables → Actions → Variables**, create these repository variables. The publish job needs access to `EC2_PLATFORM` before the production environment is used.
+1. In **Settings → Environments**, create `production` and restrict deployment branches to `main`. Add environment secret `EC2_SSH_PRIVATE_KEY` with the full dedicated SSH private key, including the header, footer, and line breaks. Keep the private key off EC2.
+2. Under **Secrets and variables → Actions → Variables**, set the repository variables below.
 
-   | Variable | Example or meaning |
+   | Variable | Value |
    | --- | --- |
-   | `AWS_REGION` | AWS region of the instance and bucket, e.g. `ap-southeast-1` |
-   | `AWS_DEPLOY_ROLE_ARN` | ARN of the GitHub OIDC role described below |
-   | `EC2_INSTANCE_ID` | Target `i-…` |
-   | `EC2_PLATFORM` | `linux/amd64` for x86-64 or `linux/arm64` for Graviton |
-   | `DEPLOY_BUCKET` | Private bucket name, without `s3://` |
+   | `EC2_PLATFORM` | `linux/amd64` for `uname -m` = `x86_64`, or `linux/arm64` for `aarch64` |
+   | `EC2_HOST` | EC2 DNS name or IPv4 address, accessible from the deploy runner on TCP 22 |
+   | `EC2_SSH_KNOWN_HOSTS` | One verified OpenSSH known_hosts line for that exact host |
 
-4. If the GHCR package already exists, grant this repository Actions write access in its package settings so `GITHUB_TOKEN` can push.
-5. The repository default branch is `dev` and already contains `.github/workflows/ci.yml` with `workflow_dispatch`. Keep that workflow path and trigger on the default branch. After merging the EC2 changes to `main`, choose `main` in the **Run workflow** branch selector for production. Sync the workflow change back into `dev` during the normal branch sync.
+3. If the GHCR package already exists, give this repository Actions write access in its package settings so `GITHUB_TOKEN` can push.
+4. The default branch `dev` already contains `.github/workflows/ci.yml` with `workflow_dispatch`. Keep that path and trigger on `dev`. After merging the changes to `main`, select `main` in **Run workflow** for an env reload.
 
-## One-time AWS setup
+The SSH version needs the three variables and private key above. Configuration from earlier OIDC/S3 deployment drafts is unused.
 
-- Create a private, dedicated S3 bucket in the deployment region. Enable Block Public Access, bucket-owner-enforced ownership, default SSE-S3 encryption, and a bucket policy that denies non-TLS access. Use a new bucket with versioning disabled so a successful delete removes the env object. Set a one-day expiration rule for `smart-locking-be/production/` for canceled runs, and abort incomplete multipart uploads.
-- In IAM, add the GitHub provider `https://token.actions.githubusercontent.com` with audience `sts.amazonaws.com`. Create a role with this trust policy, replacing `ACCOUNT_ID`.
+## One-time EC2 setup
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": {
-      "Federated": "arn:aws:iam::ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
-    },
-    "Action": "sts:AssumeRoleWithWebIdentity",
-    "Condition": {
-      "StringEquals": {
-        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-        "token.actions.githubusercontent.com:sub": "repo:se-05-sdlms/smart-locking-be:environment:production"
-      }
-    }
-  }]
-}
+- Install `curl` and Docker Compose v2.30 or newer for `env_file.format: raw`. Reserve port 8080 on loopback and subnet `172.30.250.0/24` for this Compose project. The named volume `smart-locking-be_uploads` preserves local uploads across restarts. Back up and migrate existing local uploads into the volume before going live if applicable.
+- The GitHub runner must reach TCP 22 on EC2. If the security group only allows your own IP, the default `ubuntu-latest` runner will fail to connect. For a restricted security group, use a deploy runner with a known source IP or private network route and update the deploy job's `runs-on` accordingly. [GitHub-hosted runner networking](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+- From your trusted admin SSH session, run `sudo cat /etc/ssh/ssh_host_ed25519_key.pub`. For `EC2_SSH_KNOWN_HOSTS`, use a line of the form `<EC2_HOST> ssh-ed25519 <public-key-base64>`. The value starts with the exact GitHub `EC2_HOST` and uses the first two fields of the server public key. The workflow verifies this key before authenticating.
+
+From your own computer, generate a dedicated deploy key with no passphrase for the unattended job. Use your existing admin access to copy the reviewed script from the repo root to EC2.
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/smart-locking-actions -C github-actions-smart-locking
+EC2_HOST=your-ec2-hostname
+scp .github/scripts/deploy-ec2.sh "ubuntu@$EC2_HOST:~/smart-locking-deploy"
 ```
 
-- Give that role `ssm:SendCommand` on both `arn:aws:ssm:REGION::document/AWS-RunShellScript` and `arn:aws:ec2:REGION:ACCOUNT_ID:instance/INSTANCE_ID`. Give it `ssm:GetCommandInvocation` on `*` and `s3:PutObject`, `s3:DeleteObject` on `arn:aws:s3:::BUCKET/smart-locking-be/production/*`. Run Command executes as root on the authorized instance, so protect changes to the production workflow and its script through main-branch review.
-- Attach an EC2 instance profile with `AmazonSSMManagedInstanceCore` and `s3:GetObject` on the same S3 prefix. Verify that SSM Agent is running and the instance appears **Online** in Systems Manager. The instance needs outbound HTTPS access to Systems Manager, S3, and GHCR. Install AWS CLI, `curl`, and Docker Compose v2.30 or newer for `env_file.format: raw`.
-- Ensure `/opt/smart-locking-be` is controlled by root and `.env` is mode `0600`. Run Command replaces `.env` and manages `compose.yaml`. Reserve host port 8080 and Docker subnet `172.30.250.0/24` for this Compose project. The named volume `smart-locking-be_uploads` preserves local uploads across restarts. Keep any existing uploads backed up and copy them into this volume before going live if using local storage.
-- For a private GHCR package, create a classic PAT with `read:packages` for an account allowed to read the package. Authorize SSO if the organization requires it. Over SSH, authenticate Docker as root, the same user that runs SSM. Use a credential helper if available, or protect root's Docker config. Skip login for a public package.
+Use the same SSH identity file and options as your working admin connection if SCP needs them.
+
+On EC2 as the admin user, run the following. Preserve the `.env` you already created. Edit it with `sudoedit /opt/smart-locking-be/.env` and paste your production env contents. Use UTF-8, LF and literal `KEY=value` lines. Quotes and dollar signs are literal in raw Compose format.
+
+```bash
+sudo install -d -o root -g root -m 0750 /opt/smart-locking-be
+sudo touch /opt/smart-locking-be/.env
+sudo chown root:root /opt/smart-locking-be/.env
+sudo chmod 0600 /opt/smart-locking-be/.env
+sudo install -o root -g root -m 0755 ~/smart-locking-deploy /usr/local/sbin/smart-locking-deploy
+sudo adduser --disabled-password --gecos '' deploy
+sudo install -d -o deploy -g deploy -m 0700 /home/deploy/.ssh
+sudo visudo -f /etc/sudoers.d/smart-locking-deploy
+```
+
+If the `deploy` user already exists, reuse it only if it is dedicated to this deployment and has no broader sudo or Docker group access. In the sudoers file, add this single line:
+
+```sudoers
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/smart-locking-deploy
+```
+
+In `/home/deploy/.ssh/authorized_keys`, add the following as one line, replacing the placeholder with the entire `smart-locking-actions.pub` line. Keep the backslashes before the inner quotes. Set the file owner to `deploy:deploy` and mode `0600`. Use the matching private key file for the GitHub secret.
+
+```text
+restrict,command="/usr/bin/sudo -n -H /usr/local/sbin/smart-locking-deploy \"$SSH_ORIGINAL_COMMAND\"" <SSH_PUBLIC_KEY_LINE>
+```
+
+The forced command restricts that key to the installed deploy script. The script accepts only `reload` or a digest from this repository's GHCR image. When the reviewed deploy script changes in Git, install the updated script on EC2 through the same admin procedure before using it.
+
+For a private GHCR package, create a classic PAT with `read:packages` for an account that can read the package. Authorize SSO if the organization requires it. Authenticate Docker as root, the user running Compose. Skip login for a public package.
 
 ```bash
 read -rp 'GitHub username: ' ghcr_user
@@ -55,6 +70,8 @@ printf '\n'
 printf '%s' "$ghcr_token" | sudo -H docker login ghcr.io -u "$ghcr_user" --password-stdin
 unset ghcr_token
 ```
+
+From an allowed network, preflight the restricted key with `ssh -i ~/.ssh/smart-locking-actions -o IdentitiesOnly=yes "deploy@$EC2_HOST" invalid`. The expected response is `Expected reload or a digest for the smart-locking-be GHCR image.` and a nonzero exit. This reaches the real deploy entry point without changing the container.
 
 ## Nginx and HTTPS
 
@@ -82,7 +99,6 @@ After `sudo nginx -t` and reload, check `https://<api-domain>/api/sample/welcome
 
 ## Update env and operate deployments
 
-- To change env only, replace `PRODUCTION_ENV` and select **Actions → CI → Run workflow → main**. Start a fresh dispatch so it uses the current secret. This requires a healthy release previously recorded by the deploy script and a running container. It verifies the running image ID matches the saved Compose image, then recreates the container with the same local image and new env.
-- Each deploy checks `GET /api/sample/welcome` from EC2 and requires HTTP 200. This endpoint queries PostgreSQL. A failed candidate restores the last healthy Compose file and env from the root-only `.last-good.tar`, recreates that image from the local cache, and checks it again. A first failed release removes its candidate container and restores the original files. The GitHub job reports failure after rollback. Use its SSM command ID to see the failed phase and rollback status. Inspect detailed application logs on the host and redact them before sharing.
-- The runner uploads the env as an SSE-S3 object with a key unique to the run attempt and deletes it after the command finishes. Keep the local image used by `.last-good.tar` available until the next healthy release. Avoid pruning images during a deploy.
-- Run database migrations, seed operations, and production-data changes separately. Apply any required compatible schema change before deploying a version that depends on it.
+- To change env only, edit `/opt/smart-locking-be/.env` over your admin SSH session using `sudoedit`. Then choose **Actions → CI → Run workflow → main**. The deploy job verifies the running image ID and recreates that image locally. This requires an earlier healthy deployment and a running container. Finish edits before starting a deploy.
+- Each deploy requires HTTP 200 from `GET /api/sample/welcome` on EC2, which checks PostgreSQL. A failed candidate restores the last healthy Compose file and env from the root-only `.last-good.tar` and rechecks the previous release. On a failed first release, the script removes the candidate and restores the starting files. The workflow reports failure even when rollback succeeds. Keep the last healthy image in Docker's local cache.
+- Run database migrations, seed operations, and production-data changes separately. Apply compatible schema changes before deploying a version that depends on them.
