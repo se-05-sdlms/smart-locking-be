@@ -62,6 +62,15 @@ public sealed class User
     /// </summary>
     public DateTimeOffset UpdatedAt { get; set; }
 
+    /// <summary>Version of the Terms accepted at registration.</summary>
+    public string? TermsVersion { get; set; }
+
+    /// <summary>Version of the Privacy Policy accepted at registration.</summary>
+    public string? PrivacyVersion { get; set; }
+
+    /// <summary>Client-provided consent time, normalized to the server clock at registration.</summary>
+    public DateTimeOffset? ConsentedAt { get; set; }
+
     /// <summary>
     /// Hồ sơ Resident gắn 1-1 với User khi tài khoản mang nghiệp vụ Resident.
     /// </summary>
