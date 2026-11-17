@@ -18,16 +18,16 @@ public sealed class LockerAvailabilityUnitTests
         Guid? id = null,
         LockerOperationalStatus status = LockerOperationalStatus.Operational,
         string code = "LOCKER-01") => new()
-    {
-        Id = id ?? Guid.NewGuid(),
-        Code = code,
-        DeviceIdentifier = $"DEV-{code}",
-        Address = "123 Test St",
-        RecoveryAddress = "Recovery St",
-        OperationalStatus = status,
-        ConnectionStatus = LockerConnectionStatus.Online,
-        CreatedAt = DateTimeOffset.UtcNow
-    };
+        {
+            Id = id ?? Guid.NewGuid(),
+            Code = code,
+            DeviceIdentifier = $"DEV-{code}",
+            Address = "123 Test St",
+            RecoveryAddress = "Recovery St",
+            OperationalStatus = status,
+            ConnectionStatus = LockerConnectionStatus.Online,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
 
     private static LockerCompartment CreateCompartment(
         Locker locker,
@@ -35,18 +35,18 @@ public sealed class LockerAvailabilityUnitTests
         LockerCompartmentOperationalStatus status = LockerCompartmentOperationalStatus.Operational,
         string code = "C01",
         int channel = 1) => new()
-    {
-        Id = id ?? Guid.NewGuid(),
-        LockerId = locker.Id,
-        Locker = locker,
-        Code = code,
-        HardwareCode = $"HW-{code}",
-        HardwareChannel = channel,
-        OperationalStatus = status,
-        DoorStatus = DoorStatus.Closed,
-        CreatedAt = DateTimeOffset.UtcNow,
-        UpdatedAt = DateTimeOffset.UtcNow
-    };
+        {
+            Id = id ?? Guid.NewGuid(),
+            LockerId = locker.Id,
+            Locker = locker,
+            Code = code,
+            HardwareCode = $"HW-{code}",
+            HardwareChannel = channel,
+            OperationalStatus = status,
+            DoorStatus = DoorStatus.Closed,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
 
     [Fact]
     public async Task OperationalLockers_WhenLockerIsOperationalAndNoMaintenanceOrIncident_ReturnsLocker()

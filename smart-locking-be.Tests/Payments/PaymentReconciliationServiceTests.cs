@@ -23,14 +23,22 @@ public sealed class PaymentReconciliationServiceTests
         var payment = new PaymentTransaction { Id = Guid.NewGuid(), Status = PaymentTransactionStatus.Pending };
         var item = new PaymentReconciliation
         {
-            Id = Guid.NewGuid(), Reference = "REC-TEST", ResidentUserId = Guid.NewGuid(),
-            PaymentTransactionId = payment.Id, Reason = "Bank debit reported",
-            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+            Id = Guid.NewGuid(),
+            Reference = "REC-TEST",
+            ResidentUserId = Guid.NewGuid(),
+            PaymentTransactionId = payment.Id,
+            Reason = "Bank debit reported",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
         };
         item.Events.Add(new PaymentReconciliationEvent
         {
-            Id = Guid.NewGuid(), ActorUserId = admin.Id, Action = "Submitted", Status = "Submitted",
-            Message = "Submitted", CreatedAt = item.CreatedAt
+            Id = Guid.NewGuid(),
+            ActorUserId = admin.Id,
+            Action = "Submitted",
+            Status = "Submitted",
+            Message = "Submitted",
+            CreatedAt = item.CreatedAt
         });
         db.AddRange(admin, payment, item);
         await db.SaveChangesAsync();

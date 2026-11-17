@@ -22,14 +22,22 @@ public sealed class ResidentAccountChangeServiceTests
         var resident = new User { Id = Guid.NewGuid(), Role = UserRole.Resident, Status = UserStatus.Active, PhoneNumber = "0901234567" };
         var item = new ResidentAccountChange
         {
-            Id = Guid.NewGuid(), ResidentUserId = resident.Id, Kind = "Phone", Reason = "Change phone",
-            OriginalPhoneNumber = resident.PhoneNumber, NewPhoneNumber = "0907654321",
+            Id = Guid.NewGuid(),
+            ResidentUserId = resident.Id,
+            Kind = "Phone",
+            Reason = "Change phone",
+            OriginalPhoneNumber = resident.PhoneNumber,
+            NewPhoneNumber = "0907654321",
             PhoneVerificationExpiresAt = DateTimeOffset.UtcNow.AddDays(-1),
-            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
         };
         item.Events.Add(new ResidentAccountChangeEvent
         {
-            Id = Guid.NewGuid(), ActorUserId = resident.Id, Action = "Submitted", Message = "Submitted",
+            Id = Guid.NewGuid(),
+            ActorUserId = resident.Id,
+            Action = "Submitted",
+            Message = "Submitted",
             CreatedAt = item.CreatedAt
         });
         db.AddRange(admin, resident, new ResidentProfile { Id = Guid.NewGuid(), UserId = resident.Id }, item);
