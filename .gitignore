@@ -60,6 +60,9 @@ appsettings.*.Local.json
 *.pem
 *.key
 
+# Runtime uploaded files
+smart-locking-be.API/wwwroot/uploads/
+
 # Others
 ~$*
 *~
