@@ -1,3 +1,5 @@
+using System.Net;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.WebUtilities;
@@ -43,6 +45,17 @@ public static class DependencyInjection
             services.AddScoped<IImageStorageService, LocalImageStorageService>();
         services.AddProblemDetails();
         services.AddExceptionHandler<GlobalExceptionHandler>();
+        if (configuration["ReverseProxy:Address"] is { } proxyAddress)
+        {
+            IPAddress proxy = IPAddress.Parse(proxyAddress);
+            services.Configure<ForwardedHeadersOptions>(options =>
+            {
+                options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+                options.KnownNetworks.Clear();
+                options.KnownProxies.Clear();
+                options.KnownProxies.Add(proxy);
+            });
+        }
 
         // 2. CORS Policy Configuration
         services.AddCorsPolicy(configuration, environment);
@@ -87,6 +100,9 @@ public static class DependencyInjection
     /// </summary>
     public static WebApplication UseApiPipeline(this WebApplication app)
     {
+        if (app.Configuration["ReverseProxy:Address"] is not null)
+            app.UseForwardedHeaders();
+
         // 1. Swagger UI chỉ bật ở môi trường Development
         if (app.Environment.IsDevelopment())
         {

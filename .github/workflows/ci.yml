@@ -17,8 +17,23 @@ concurrency:
 jobs:
   build-test:
     name: Restore, format, build, and test
+    if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SMART_LOCKING_TEST_POSTGRES: Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=test-only-password
 
     steps:
       - name: Checkout
@@ -44,17 +59,112 @@ jobs:
       - name: Build demo seeder
         run: dotnet build tools/SmartLocking.DemoSeeder/SmartLocking.DemoSeeder.csproj --configuration Release
 
-  deploy:
-    name: Deploy main to Render
+  publish:
+    name: Publish tested image to GHCR
     needs: build-test
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
     steps:
-      - name: Trigger Render deployment of the tested commit
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set image name and validate target platform
+        id: image
         env:
-          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          EC2_PLATFORM: ${{ vars.EC2_PLATFORM }}
         run: |
-          test -n "$RENDER_DEPLOY_HOOK_URL" || { echo "RENDER_DEPLOY_HOOK_URL is not configured"; exit 1; }
-          curl --fail --silent --show-error --max-time 60 \
-            --request POST "${RENDER_DEPLOY_HOOK_URL}&ref=${GITHUB_SHA}"
+          case "$EC2_PLATFORM" in
+            linux/amd64|linux/arm64) ;;
+            *) echo 'EC2_PLATFORM must be linux/amd64 or linux/arm64.'; exit 1 ;;
+          esac
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          platforms: ${{ vars.EC2_PLATFORM }}
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  deploy:
+    name: Deploy to EC2 via SSM
+    needs: publish
+    if: >-
+      always() && !cancelled() && github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'push' && needs.publish.result == 'success') ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      DEPLOY_BUCKET: ${{ vars.DEPLOY_BUCKET }}
+      ENV_KEY: smart-locking-be/production/${{ github.run_id }}-${{ github.run_attempt }}.env
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@v4
+        id: aws
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Upload encrypted env
+        env:
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
+        run: |
+          set -euo pipefail
+          test -n "$PRODUCTION_ENV" || { echo 'PRODUCTION_ENV is empty.'; exit 1; }
+          printf '%s' "$PRODUCTION_ENV" |
+            env -u PRODUCTION_ENV aws s3 cp - "s3://$DEPLOY_BUCKET/$ENV_KEY" --sse AES256 --only-show-errors
+      - name: Run deployment and wait for EC2
+        env:
+          IMAGE: ${{ needs.publish.outputs.image }}
+        run: |
+          set -euo pipefail
+          if [[ $GITHUB_EVENT_NAME == push ]]; then
+            [[ $IMAGE =~ ^ghcr\.io/[a-z0-9_./-]+@sha256:[a-f0-9]{64}$ ]]
+          fi
+          parameters=$(jq -n --rawfile script .github/scripts/deploy-ec2.sh \
+            --arg uri "s3://$DEPLOY_BUCKET/$ENV_KEY" --arg image "$IMAGE" '
+              {executionTimeout: ["900"], commands: [
+                ("bash -s -- " + ([$uri, $image] | @sh) + " <<\u0027DEPLOY_SCRIPT\u0027\n" + $script + "DEPLOY_SCRIPT")
+              ]}')
+          command_id=$(aws ssm send-command --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript --timeout-seconds 120 \
+            --parameters "$parameters" --query 'Command.CommandId' --output text)
+          echo "SSM command: $command_id"
+          for ((attempt=0; attempt<216; attempt++)); do
+            status=$(aws ssm get-command-invocation --command-id "$command_id" \
+              --instance-id "$EC2_INSTANCE_ID" --query Status --output text 2>/dev/null) || status=Pending
+            case "$status" in
+              Success) exit 0 ;;
+              Pending|InProgress|Delayed|Cancelling) sleep 5 ;;
+              *) echo "SSM deployment ended with status $status. See command $command_id."; exit 1 ;;
+            esac
+          done
+          echo "Timed out waiting for SSM command $command_id."
+          exit 1
+      - name: Remove temporary env from S3
+        if: always() && steps.aws.outcome == 'success'
+        run: aws s3api delete-object --bucket "$DEPLOY_BUCKET" --key "$ENV_KEY" >/dev/null
