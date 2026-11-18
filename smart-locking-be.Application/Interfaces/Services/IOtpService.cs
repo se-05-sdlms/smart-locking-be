@@ -10,7 +10,7 @@ public interface IOtpService
         Guid? userId,
         CancellationToken cancellationToken);
 
-    Task IssueEmailAsync(string email, OtpPurpose purpose, Guid userId, CancellationToken cancellationToken);
+    Task IssueEmailAsync(string email, OtpPurpose purpose, Guid? userId, CancellationToken cancellationToken);
 
     Task VerifyAndConsumeAsync(
         string phoneNumber,
@@ -19,6 +19,6 @@ public interface IOtpService
         Guid? userId,
         CancellationToken cancellationToken);
 
-    Task VerifyAndConsumeEmailAsync(string email, string code, OtpPurpose purpose, Guid userId,
+    Task VerifyAndConsumeEmailAsync(string email, string code, OtpPurpose purpose, Guid? userId,
         CancellationToken cancellationToken);
 }

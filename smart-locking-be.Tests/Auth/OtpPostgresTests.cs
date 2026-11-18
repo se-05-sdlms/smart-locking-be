@@ -6,6 +6,7 @@ using Npgsql;
 using smart_locking_be.Application.DTOs.Auth;
 using smart_locking_be.Application.Errors;
 using smart_locking_be.Application.Exceptions;
+using smart_locking_be.Application.Interfaces.Services;
 using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Auth;
@@ -17,6 +18,7 @@ namespace smart_locking_be.Tests.Auth;
 public sealed class OtpPostgresTests : IAsyncLifetime
 {
     private const string Phone = "0912345678";
+    private const string Email = "otp-test@example.com";
     private const string Code = "123456";
     private readonly string databaseName = $"smart_locking_otp_test_{Guid.NewGuid():N}";
     private string connectionString = string.Empty;
@@ -53,7 +55,7 @@ public sealed class OtpPostgresTests : IAsyncLifetime
         }, new OtpChallenge
         {
             Id = challengeId,
-            DestinationPhone = Phone,
+            DestinationEmail = Email,
             Purpose = OtpPurpose.Registration,
             CodeHash = new Sha256TokenHashService().HashToken(Code),
             CreatedAt = now,
@@ -104,7 +106,7 @@ public sealed class OtpPostgresTests : IAsyncLifetime
         await Task.WhenAll(Enumerable.Range(0, 10).Select(async _ =>
         {
             await using var db = Context();
-            await Assert.ThrowsAsync<BadRequestException>(() => Otp(db).VerifyAndConsumeAsync(Phone, "000000", OtpPurpose.Registration, null, default));
+            await Assert.ThrowsAsync<BadRequestException>(() => Otp(db).VerifyAndConsumeEmailAsync(Email, "000000", OtpPurpose.Registration, null, default));
         }));
         await using var verify = Context();
         var challenge = await verify.OtpChallenges.SingleAsync();
@@ -122,7 +124,7 @@ public sealed class OtpPostgresTests : IAsyncLifetime
             await using var db = Context();
             try
             {
-                await Otp(db).VerifyAndConsumeAsync(Phone, Code, OtpPurpose.Registration, null, default);
+                await Otp(db).VerifyAndConsumeEmailAsync(Email, Code, OtpPurpose.Registration, null, default);
                 return true;
             }
             catch (BadRequestException error) when (error.ErrorCode == AuthErrorCodes.InvalidOtp) { return false; }
@@ -162,7 +164,7 @@ public sealed class OtpPostgresTests : IAsyncLifetime
         "P@ssw0rd123",
         "OTP Test",
         lockerId,
-        null,
+        Email,
         "1.0",
         "1.0",
         DateTimeOffset.UtcNow);
@@ -182,10 +184,16 @@ public sealed class OtpPostgresTests : IAsyncLifetime
     }).Build();
 
     private static OtpService Otp(ApplicationDbContext db) => new(db, new Sha256TokenHashService(),
-        TimeProvider.System, Configuration(), NullLogger<OtpService>.Instance);
+        TimeProvider.System, Configuration(), NullLogger<OtpService>.Instance, new FakeEmailSender());
 
     private static AuthService Auth(ApplicationDbContext db) => new(db, new Pbkdf2PasswordHashService(),
         new Sha256TokenHashService(), new JwtTokenService(Configuration()), Otp(db), Configuration());
+
+    private sealed class FakeEmailSender : IEmailSender
+    {
+        public Task SendAsync(string to, string subject, string body, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+    }
 
     private sealed class FailAccountSaveInterceptor : SaveChangesInterceptor
     {
