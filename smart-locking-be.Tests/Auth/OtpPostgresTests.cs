@@ -156,7 +156,16 @@ public sealed class OtpPostgresTests : IAsyncLifetime
         Assert.Empty(await verify.RefreshTokens.ToListAsync());
     }
 
-    private RegisterRequest Request(string code) => new(Phone, code, "P@ssw0rd123", "OTP Test", lockerId, null);
+    private RegisterRequest Request(string code) => new(
+        Phone,
+        code,
+        "P@ssw0rd123",
+        "OTP Test",
+        lockerId,
+        null,
+        "1.0",
+        "1.0",
+        DateTimeOffset.UtcNow);
 
     private ApplicationDbContext Context(IInterceptor? interceptor = null)
     {

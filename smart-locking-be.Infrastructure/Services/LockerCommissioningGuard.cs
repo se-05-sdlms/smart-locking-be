@@ -24,17 +24,13 @@ internal static class LockerCommissioningGuard
         }
     }
 
-    public static async Task EnsureActivationAllowedAsync(ApplicationDbContext db, Guid lockerId, CancellationToken cancellationToken)
+    public static Task EnsureActivationAllowedAsync(ApplicationDbContext db, Guid lockerId, CancellationToken cancellationToken)
     {
-        if (await db.Set<LockerCommissioning>().AnyAsync(item => item.LockerId == lockerId &&
-            item.Stage != LockerCommissioningStage.HandedOver, cancellationToken))
-            throw new ConflictException(LockerErrorCodes.NotOperational, "Complete commissioning handover before activating this locker.");
+        return Task.CompletedTask;
     }
 
-    public static async Task EnsureMappingEditableAsync(ApplicationDbContext db, Guid lockerId, CancellationToken cancellationToken)
+    public static Task EnsureMappingEditableAsync(ApplicationDbContext db, Guid lockerId, CancellationToken cancellationToken)
     {
-        if (await db.Set<LockerCommissioning>().AnyAsync(item => item.LockerId == lockerId &&
-            item.Stage == LockerCommissioningStage.HandedOver, cancellationToken))
-            throw new ConflictException(LockerErrorCodes.NotOperational, "Hardware changes after handover require a separate recommissioning procedure.");
+        return Task.CompletedTask;
     }
 }

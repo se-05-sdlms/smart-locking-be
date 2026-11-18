@@ -202,10 +202,10 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
             ParcelId = payment.OverdueCharge.ParcelId,
             Type = settlementConflict ? "OverduePaymentConflict" : succeeded ? "OverduePaymentSucceeded" : "OverduePaymentFailed",
             Channel = NotificationChannel.InApp,
-            Title = settlementConflict ? "Overdue payment needs review" : succeeded ? "Overdue fee paid" : "Overdue fee payment failed",
-            Message = settlementConflict ? "Your payment was received but conflicts with another order or the current charge. Do not pay again; contact support for reconciliation."
-                : succeeded ? "Your overdue storage fee has been paid. You can collect your parcel."
-                : "Your overdue storage fee payment failed. Please try again.",
+            Title = settlementConflict ? "Giao dịch thanh toán cần kiểm tra lại" : succeeded ? "Thanh toán phí lưu kho quá hạn thành công" : "Thanh toán phí lưu kho thất bại",
+            Message = settlementConflict ? "Đã nhận được thanh toán nhưng có sự trùng lặp đơn hoặc xung đột phí hiện tại. Vui lòng không thanh toán lại; liên hệ hỗ trợ để được đối soát."
+                : succeeded ? "Phí lưu kho quá hạn đã được thanh toán. Bạn có thể mở ngăn nhận bưu kiện."
+                : "Thanh toán phí lưu kho không thành công. Vui lòng thử lại.",
             DeliveryStatus = NotificationDeliveryStatus.Sent,
             SentAt = now,
             CreatedAt = now

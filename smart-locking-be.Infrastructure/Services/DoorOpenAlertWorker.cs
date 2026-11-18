@@ -78,7 +78,7 @@ public sealed class DoorOpenAlertWorker(
                 .Where(item => item.LockerId == compartment.LockerId && item.RevokedAt == null)
                 .Select(item => (Guid?)item.OperatorUserId)
                 .FirstOrDefaultAsync(cancellationToken);
-            string title = $"Door {compartment.Code} left open";
+            string title = $"Cửa ngăn {compartment.Code} chưa đóng";
             Incident incident = new()
             {
                 Id = Guid.NewGuid(),
@@ -92,7 +92,7 @@ public sealed class DoorOpenAlertWorker(
                 Source = IncidentSource.System,
                 Status = IncidentStatus.Open,
                 Title = title,
-                Description = $"Door has been open since {openedAt:O}.",
+                Description = $"Cửa ngăn đã mở liên tục từ {openedAt:dd/MM/yyyy HH:mm:ss}.",
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -122,7 +122,7 @@ public sealed class DoorOpenAlertWorker(
                     Type = "DoorOpenTooLong",
                     Channel = NotificationChannel.InApp,
                     Title = title,
-                    Message = $"Locker {compartment.Locker.Code}: {title}.",
+                    Message = $"Tủ {compartment.Locker.Code}: Cửa ngăn {compartment.Code} chưa đóng.",
                     DeliveryStatus = NotificationDeliveryStatus.Sent,
                     SentAt = now,
                     CreatedAt = now

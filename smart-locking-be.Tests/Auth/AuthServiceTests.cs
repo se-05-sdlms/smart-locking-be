@@ -28,7 +28,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         AuthTokenResponse response = await service.RegisterAsync(
-            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null, "1.0", "1.0", DateTimeOffset.UtcNow),
             "127.0.0.1",
             default);
 
@@ -39,6 +39,9 @@ public sealed class AuthServiceTests
         User persistedUser = Assert.Single(dbContext.Users.Where(u => u.PhoneNumber == "0912345678"));
         Assert.Equal(UserRole.Resident, persistedUser.Role);
         Assert.Equal(UserStatus.Active, persistedUser.Status);
+        Assert.Equal("1.0", persistedUser.TermsVersion);
+        Assert.Equal("1.0", persistedUser.PrivacyVersion);
+        Assert.InRange(persistedUser.ConsentedAt!.Value, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1));
 
         ResidentProfile profile = Assert.Single(dbContext.ResidentProfiles.Where(p => p.UserId == persistedUser.Id));
         Assert.Equal(locker.Id, profile.RegisteredLockerId);
@@ -47,6 +50,46 @@ public sealed class AuthServiceTests
         Assert.NotNull(challenge.UsedAt);
 
         Assert.Contains(dbContext.AuditLogs, a => a.Action == "RegisterResident" && a.ActorUserId == persistedUser.Id && a.Result == AuditLogResult.Succeeded);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-01")]
+    public async Task RegisterAsync_RejectsMissingConsentBeforeOtpConsumption()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Locker locker = CreateLocker(LockerOperationalStatus.Operational);
+        OtpChallenge challenge = CreateRegistrationChallenge("0912345678");
+        dbContext.AddRange(locker, challenge);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        var ex = await Assert.ThrowsAsync<BadRequestException>(() => service.RegisterAsync(
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            null,
+            default));
+
+        Assert.Contains("Terms version", ex.Message);
+        Assert.Null(challenge.UsedAt);
+        Assert.Empty(dbContext.Users);
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-01")]
+    public async Task RegisterAsync_RejectsUnsupportedConsentVersion()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        Locker locker = CreateLocker(LockerOperationalStatus.Operational);
+        dbContext.Add(locker);
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        var ex = await Assert.ThrowsAsync<BadRequestException>(() => service.RegisterAsync(
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null, "0.9", "1.0", DateTimeOffset.UtcNow),
+            null,
+            default));
+
+        Assert.Contains("Terms version", ex.Message);
+        Assert.Empty(dbContext.Users);
     }
 
     [Fact]
@@ -60,7 +103,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<BadRequestException>(() => service.RegisterAsync(
-            new RegisterRequest("", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            new RegisterRequest("", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null, "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Contains("Phone number is required", ex.Message);
@@ -78,7 +121,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<BadRequestException>(() => service.RegisterAsync(
-            new RegisterRequest("091234567", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            new RegisterRequest("091234567", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null, "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Contains("Phone number must contain 10 digits and start with 0", ex.Message);
@@ -96,7 +139,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<BadRequestException>(() => service.RegisterAsync(
-            new RegisterRequest("09123456789", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            new RegisterRequest("09123456789", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null, "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Contains("Phone number must contain 10 digits and start with 0", ex.Message);
@@ -114,7 +157,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<BadRequestException>(() => service.RegisterAsync(
-            new RegisterRequest("091234567a", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            new RegisterRequest("091234567a", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null, "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Contains("Phone number must contain 10 digits and start with 0", ex.Message);
@@ -132,7 +175,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<BadRequestException>(() => service.RegisterAsync(
-            new RegisterRequest("0912345678", OtpCode, "Pass123", "Nguyen Van A", locker.Id, null),
+            new RegisterRequest("0912345678", OtpCode, "Pass123", "Nguyen Van A", locker.Id, null, "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Contains("Password must contain at least 8 characters", ex.Message);
@@ -150,7 +193,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<BadRequestException>(() => service.RegisterAsync(
-            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "", locker.Id, null),
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "", locker.Id, null, "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Contains("Full name must contain between 1 and 150 characters", ex.Message);
@@ -168,7 +211,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<BadRequestException>(() => service.RegisterAsync(
-            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", new string('A', 151), locker.Id, null),
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", new string('A', 151), locker.Id, null, "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Contains("Full name must contain between 1 and 150 characters", ex.Message);
@@ -194,7 +237,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<ConflictException>(() => service.RegisterAsync(
-            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null, "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Equal("User already exists.", ex.Message);
@@ -212,7 +255,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<ConflictException>(() => service.RegisterAsync(
-            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, null, "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Equal("Registered locker is not operational.", ex.Message);
@@ -230,7 +273,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<BadRequestException>(() => service.RegisterAsync(
-            new RegisterRequest("0912345678", "654321", "P@ssw0rd123", "Nguyen Van A", locker.Id, null),
+            new RegisterRequest("0912345678", "654321", "P@ssw0rd123", "Nguyen Van A", locker.Id, null, "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Equal("Invalid OTP.", ex.Message);
@@ -247,7 +290,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<NotFoundException>(() => service.RegisterAsync(
-            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", Guid.NewGuid(), null),
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", Guid.NewGuid(), null, "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Equal("Registered locker not found.", ex.Message);
@@ -277,7 +320,7 @@ public sealed class AuthServiceTests
 
         AuthService service = CreateService(dbContext);
         var ex = await Assert.ThrowsAsync<ConflictException>(() => service.RegisterAsync(
-            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, "resident@example.com"),
+            new RegisterRequest("0912345678", OtpCode, "P@ssw0rd123", "Nguyen Van A", locker.Id, "resident@example.com", "1.0", "1.0", DateTimeOffset.UtcNow),
             null,
             default));
         Assert.Equal("User already exists.", ex.Message);
