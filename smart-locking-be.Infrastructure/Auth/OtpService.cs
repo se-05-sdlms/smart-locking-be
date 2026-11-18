@@ -89,7 +89,7 @@ public sealed class OtpService(
         await VerifyChallengeAsync(challenge, code, cancellationToken);
     }
 
-    public async Task IssueEmailAsync(string email, OtpPurpose purpose, Guid userId, CancellationToken cancellationToken)
+    public async Task IssueEmailAsync(string email, OtpPurpose purpose, Guid? userId, CancellationToken cancellationToken)
     {
         if (emailSender is null)
             throw new ServiceUnavailableException(UserErrorCodes.EmailUnavailable, "Email delivery is unavailable.");
@@ -114,11 +114,14 @@ public sealed class OtpService(
             CreatedAt = now
         });
         await dbContext.SaveChangesAsync(cancellationToken);
-        await emailSender.SendAsync(destination, "Smart Locking password reset code",
-            $"Your password reset code is {code}. It expires in 10 minutes.", cancellationToken);
+        string subject = purpose == OtpPurpose.Registration
+            ? "Smart Locking registration code"
+            : "Smart Locking password reset code";
+        await emailSender.SendAsync(destination, subject,
+            $"Your verification code is {code}. It expires in 10 minutes.", cancellationToken);
     }
 
-    public async Task VerifyAndConsumeEmailAsync(string email, string code, OtpPurpose purpose, Guid userId,
+    public async Task VerifyAndConsumeEmailAsync(string email, string code, OtpPurpose purpose, Guid? userId,
         CancellationToken cancellationToken)
     {
         string destination = email.Trim().ToLowerInvariant();

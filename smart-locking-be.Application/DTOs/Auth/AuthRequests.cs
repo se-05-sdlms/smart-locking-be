@@ -11,7 +11,7 @@ public sealed record RegisterRequest(
     string? PrivacyVersion = null,
     DateTimeOffset? ConsentedAt = null);
 
-public sealed record RequestRegistrationOtpRequest(string PhoneNumber);
+public sealed record RequestRegistrationOtpRequest(string PhoneNumber, string Email = "");
 
 public sealed record LoginRequest(
     string LoginIdentifier,
