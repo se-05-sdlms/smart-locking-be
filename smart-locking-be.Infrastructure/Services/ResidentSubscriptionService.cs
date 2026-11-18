@@ -60,7 +60,7 @@ public sealed class ResidentSubscriptionService(ApplicationDbContext db, IPaymen
         if (creationTransaction is not null) await creationTransaction.CommitAsync(cancellationToken);
         var link = await gateway.CreatePaymentLinkAsync(new(orderCode, checked((int)plan.Price), "Subscription",
             options.Value.ReturnUrl, options.Value.CancelUrl), cancellationToken);
-        return new(subscription.Id, link.CheckoutUrl, orderCode, plan.Price);
+        return new(subscription.Id, link.CheckoutUrl, orderCode, plan.Price, QrCode: link.QrCode);
     }
 
     // A free plan needs no PayOS checkout: it takes effect immediately and queues after any current period.
