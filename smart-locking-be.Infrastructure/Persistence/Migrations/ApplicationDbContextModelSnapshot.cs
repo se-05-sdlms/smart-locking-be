@@ -1629,6 +1629,9 @@ namespace smart_locking_be.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("OverdueChargeId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("QrCode")
+                        .HasColumnType("text");
+
                     b.Property<DateTimeOffset>("RequestedAt")
                         .HasColumnType("timestamp with time zone");
 
