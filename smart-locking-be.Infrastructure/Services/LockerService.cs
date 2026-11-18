@@ -227,7 +227,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             Address = address,
             RecoveryAddress = recoveryAddress,
             DeviceIdentifier = deviceIdentifier,
-            OperationalStatus = LockerOperationalStatus.OutOfService,
+            OperationalStatus = LockerOperationalStatus.Operational,
             ConnectionStatus = LockerConnectionStatus.Unknown,
             CreatedAt = now,
             UpdatedAt = now
@@ -238,7 +238,11 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         {
             LockerId = locker.Id,
             Locker = locker,
-            Stage = LockerCommissioningStage.Declared,
+            Stage = LockerCommissioningStage.HandedOver,
+            BoundDeviceIdentifier = deviceIdentifier,
+            BoundAt = now,
+            HandedOverAt = now,
+            HandedOverByUserId = actorUserId,
             CreatedAt = now,
             UpdatedAt = now
         });

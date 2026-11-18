@@ -88,13 +88,13 @@ public sealed class IncidentSlaService(
 
             if (awaitingAcknowledge && sinceCreated >= acknowledgeLimit * warningFraction &&
                 await WarnAsync(incident, AcknowledgeWarningType,
-                    $"Incident '{incident.Title}' sắp quá hạn tiếp nhận ({priority}).", now, cancellationToken))
+                    $"Sự cố '{incident.Title}' sắp quá hạn tiếp nhận ({priority}).", now, cancellationToken))
             {
                 warned++;
             }
             else if (sinceCreated >= resolveLimit * warningFraction &&
                      await WarnAsync(incident, ResolveWarningType,
-                         $"Incident '{incident.Title}' sắp quá hạn giải quyết ({priority}).", now, cancellationToken))
+                         $"Sự cố '{incident.Title}' sắp quá hạn giải quyết ({priority}).", now, cancellationToken))
             {
                 warned++;
             }
@@ -117,7 +117,7 @@ public sealed class IncidentSlaService(
             ActionType = "StatusChanged",
             FromStatus = previous,
             ToStatus = IncidentStatus.Escalated,
-            Notes = $"Tự động escalate: {reason}",
+            Notes = $"Tự động chuyển cấp xử lý: {reason}",
             CreatedAt = now
         });
         dbContext.AuditLogs.Add(new AuditLog
@@ -139,7 +139,7 @@ public sealed class IncidentSlaService(
         foreach (Guid administratorId in administratorIds)
         {
             dbContext.Notifications.Add(CreateNotification(administratorId, incident, "IncidentEscalated",
-                "Incident quá hạn xử lý", $"{incident.Title}. {reason}.", now));
+                "Sự cố quá hạn xử lý", $"{incident.Title}. {reason}.", now));
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -181,7 +181,7 @@ public sealed class IncidentSlaService(
 
         foreach (Guid recipient in recipients)
         {
-            dbContext.Notifications.Add(CreateNotification(recipient, incident, type, "Incident sắp quá hạn", message, now));
+            dbContext.Notifications.Add(CreateNotification(recipient, incident, type, "Sự cố sắp quá hạn", message, now));
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);

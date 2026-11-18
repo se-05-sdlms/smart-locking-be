@@ -377,8 +377,8 @@ public sealed class DeliveryRequestService(
         foreach (Notification notification in approvalNotifications)
         {
             notification.Type = "DeliveryRequestCancelled";
-            notification.Title = "Delivery request cancelled";
-            notification.Message = "The shipper cancelled this delivery before approval. No action is required.";
+            notification.Title = "Yêu cầu giao hàng đã bị hủy";
+            notification.Message = "Người giao hàng đã hủy lượt giao trước khi được duyệt. Bạn không cần thực hiện thêm thao tác nào.";
             // Any retry now carries the cancelled state rather than an approval prompt.
         }
         Guid residentUserId = await dbContext.ResidentProfiles
@@ -393,8 +393,8 @@ public sealed class DeliveryRequestService(
                 DeliveryRequestId = id,
                 Type = "DeliveryRequestCancelled",
                 Channel = channel,
-                Title = "Delivery request cancelled",
-                Message = $"The shipper cancelled the delivery at locker {request.Locker.Code} before approval.",
+                Title = "Yêu cầu giao hàng đã bị hủy",
+                Message = $"Người giao hàng đã hủy lượt giao tại tủ {request.Locker.Code} trước khi được duyệt.",
                 DeliveryStatus = channel == NotificationChannel.Push ? NotificationDeliveryStatus.Pending : NotificationDeliveryStatus.Sent,
                 SentAt = channel == NotificationChannel.InApp ? now : null,
                 CreatedAt = now
