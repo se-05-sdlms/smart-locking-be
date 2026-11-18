@@ -46,7 +46,8 @@ public sealed class RegistrationConsentUnitTests
             tokenHashService,
             TimeProvider.System,
             configuration,
-            NullLogger<OtpService>.Instance);
+            NullLogger<OtpService>.Instance,
+            new FakeEmailSender());
 
         return new AuthService(
             dbContext,
@@ -81,7 +82,7 @@ public sealed class RegistrationConsentUnitTests
         var challenge = new OtpChallenge
         {
             Id = Guid.NewGuid(),
-            DestinationPhone = phone,
+            DestinationEmail = "resident@example.com",
             CodeHash = tokenHash.HashToken(OtpCode),
             Purpose = OtpPurpose.Registration,
             ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10),
@@ -104,7 +105,7 @@ public sealed class RegistrationConsentUnitTests
             Password: RawPassword,
             FullName: "Test Resident",
             RegisteredLockerId: lockerId,
-            Email: null,
+            Email: "resident@example.com",
             TermsVersion: termsVersion,
             PrivacyVersion: privacyVersion,
             ConsentedAt: consentedAt ?? DateTimeOffset.UtcNow);
@@ -184,7 +185,7 @@ public sealed class RegistrationConsentUnitTests
             Password: RawPassword,
             FullName: "Test Resident",
             RegisteredLockerId: locker.Id,
-            Email: null,
+            Email: "resident@example.com",
             TermsVersion: "1.0",
             PrivacyVersion: "1.0",
             ConsentedAt: null);

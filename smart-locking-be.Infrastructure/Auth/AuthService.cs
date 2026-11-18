@@ -168,6 +168,10 @@ public sealed class AuthService(
     {
         string phoneNumber = NormalizePhone(request.PhoneNumber)
             ?? throw BadRequestException.For("phoneNumber", "Phone number is required.");
+        if (!PhonePattern.IsMatch(phoneNumber))
+        {
+            throw BadRequestException.For("phoneNumber", "Phone number must contain 10 digits and start with 0.");
+        }
         string? email = NormalizeEmail(request.Email);
         if (!IsValidEmail(email))
         {
