@@ -7,6 +7,7 @@ using smart_locking_be.Domain.Entities;
 using smart_locking_be.Domain.Enums;
 using smart_locking_be.Infrastructure.Persistence;
 using smart_locking_be.Infrastructure.Services;
+using System.Net.Mail;
 using System.Text.RegularExpressions;
 
 namespace smart_locking_be.Infrastructure.Auth;
@@ -38,6 +39,10 @@ public sealed class AuthService(
         CancellationToken cancellationToken)
     {
         string? email = NormalizeEmail(request.Email);
+        if (!IsValidEmail(email))
+        {
+            throw BadRequestException.For("email", "Email is required and must be valid.");
+        }
         string phoneNumber = NormalizePhone(request.PhoneNumber)
             ?? throw BadRequestException.For("phoneNumber", "Phone number is required.");
 
@@ -91,8 +96,8 @@ public sealed class AuthService(
 
         try
         {
-            await otpService.VerifyAndConsumeAsync(
-                phoneNumber,
+            await otpService.VerifyAndConsumeEmailAsync(
+                email!,
                 request.OtpCode,
                 OtpPurpose.Registration,
                 null,
@@ -163,13 +168,24 @@ public sealed class AuthService(
     {
         string phoneNumber = NormalizePhone(request.PhoneNumber)
             ?? throw BadRequestException.For("phoneNumber", "Phone number is required.");
+        string? email = NormalizeEmail(request.Email);
+        if (!IsValidEmail(email))
+        {
+            throw BadRequestException.For("email", "Email is required and must be valid.");
+        }
         bool exists = await dbContext.Users.AnyAsync(user => user.PhoneNumber == phoneNumber, cancellationToken);
         if (exists)
         {
             return;
         }
 
-        await otpService.IssueAsync(phoneNumber, OtpPurpose.Registration, null, cancellationToken);
+        bool emailExists = await dbContext.Users.AnyAsync(user => user.Email == email, cancellationToken);
+        if (emailExists)
+        {
+            return;
+        }
+
+        await otpService.IssueEmailAsync(email!, OtpPurpose.Registration, null, cancellationToken);
     }
 
     public async Task<AuthTokenResponse> LoginAsync(
@@ -402,6 +418,10 @@ public sealed class AuthService(
 
     private static string? NormalizeEmail(string? email) =>
         string.IsNullOrWhiteSpace(email) ? null : email.Trim().ToLowerInvariant();
+
+    private static bool IsValidEmail(string? email) =>
+        email is not null && email.Length <= 254 && MailAddress.TryCreate(email, out MailAddress? address) &&
+        string.Equals(address.Address, email, StringComparison.Ordinal) && address.Host.Contains('.');
 
     private static string? NormalizePhone(string? phoneNumber) =>
         string.IsNullOrWhiteSpace(phoneNumber) ? null : phoneNumber.Trim();

@@ -4,10 +4,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using smart_locking_be.Application.Interfaces.Services;
+using System.Text;
+using System.Text.Json;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-/// <summary>Provider boundary; HttpRelay is our relay protocol, not a guessed vendor API.</summary>
+/// <summary>Configurable SMS provider boundary.</summary>
 public sealed class ConfiguredSmsSender(HttpClient httpClient, IConfiguration configuration, IHostEnvironment environment,
     ILogger<ConfiguredSmsSender> logger) : ISmsSender
 {
@@ -21,6 +23,12 @@ public sealed class ConfiguredSmsSender(HttpClient httpClient, IConfiguration co
             // Never enabled by Otp:LogCode alone, and never available in Production.
             if (configuration.GetValue<bool>("Otp:LogCode"))
                 logger.LogInformation("Sandbox {Purpose} OTP for {PhoneNumber}: {OtpCode}", purpose, destinationPhone, code);
+            return;
+        }
+
+        if (mode.Equals("SpeedSms", StringComparison.OrdinalIgnoreCase))
+        {
+            await SendWithSpeedSmsAsync(destinationPhone, code, messageId, cancellationToken);
             return;
         }
 
@@ -47,6 +55,62 @@ public sealed class ConfiguredSmsSender(HttpClient httpClient, IConfiguration co
         catch (Exception exception) when (exception is HttpRequestException or System.Text.Json.JsonException or OperationCanceledException or NotSupportedException)
         {
             // Avoid logging provider bodies, credentials, phone numbers or OTP values.
+            throw Unavailable();
+        }
+    }
+
+    private async Task SendWithSpeedSmsAsync(string destinationPhone, string code, Guid messageId,
+        CancellationToken cancellationToken)
+    {
+        string? accessToken = configuration["Sms:SpeedSmsAccessToken"]?.Trim();
+        string endpoint = configuration["Sms:SpeedSmsEndpoint"]?.Trim()
+            ?? "https://api.speedsms.vn/index.php/sms/send";
+        int smsType = configuration.GetValue("Sms:SpeedSmsType", 2);
+
+        if (string.IsNullOrWhiteSpace(accessToken) || accessToken.Any(char.IsControl) ||
+            !Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) || uri.Scheme != Uri.UriSchemeHttps ||
+            !new[] { 2, 3, 4, 5, 6 }.Contains(smsType))
+            throw Unavailable();
+
+        string speedSmsPhone = destinationPhone.StartsWith('0')
+            ? $"84{destinationPhone[1..]}"
+            : destinationPhone;
+        string content = $"Ma OTP Smart Locking: {code}. Hieu luc 10 phut.";
+        using HttpRequestMessage request = new(HttpMethod.Post, uri);
+        string basicToken = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{accessToken}:"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", basicToken);
+        request.Headers.Add("Idempotency-Key", messageId.ToString("N"));
+        Dictionary<string, object> payload = new()
+        {
+            ["to"] = new[] { speedSmsPhone },
+            ["content"] = content,
+            ["sms_type"] = smsType
+        };
+        string? sender = configuration["Sms:SpeedSmsSender"]?.Trim();
+        if (smsType is 3 or 5)
+        {
+            if (string.IsNullOrWhiteSpace(sender)) throw Unavailable();
+            payload["sender"] = sender;
+        }
+        request.Content = JsonContent.Create(payload);
+
+        try
+        {
+            using HttpResponseMessage response = await httpClient.SendAsync(request,
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!response.IsSuccessStatusCode) throw Unavailable();
+            using JsonDocument document = await JsonDocument.ParseAsync(
+                await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            JsonElement root = document.RootElement;
+            bool accepted = root.TryGetProperty("status", out JsonElement status) &&
+                string.Equals(status.GetString(), "success", StringComparison.OrdinalIgnoreCase) &&
+                root.TryGetProperty("code", out JsonElement resultCode) &&
+                string.Equals(resultCode.GetString(), "00", StringComparison.OrdinalIgnoreCase);
+            if (!accepted) throw Unavailable();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
             throw Unavailable();
         }
     }
