@@ -108,8 +108,8 @@ public sealed class LockerConnectionMonitor(
                     UserId = userId,
                     Type = "LockerOffline",
                     Channel = NotificationChannel.InApp,
-                    Title = "Locker disconnected",
-                    Message = $"Locker {locker.Code} is offline.",
+                    Title = "Tủ bị mất kết nối",
+                    Message = $"Tủ {locker.Code} hiện đang mất kết nối (ngoại tuyến).",
                     DeliveryStatus = NotificationDeliveryStatus.Sent,
                     SentAt = now,
                     CreatedAt = now

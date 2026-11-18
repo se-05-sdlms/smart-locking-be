@@ -170,7 +170,7 @@ public sealed class IncidentService(
             ActionByUserId = residentUserId,
             ActionType = "Created",
             ToStatus = IncidentStatus.Open,
-            Notes = "Resident submitted the incident.",
+            Notes = "Cư dân đã gửi báo cáo sự cố.",
             CreatedAt = now
         });
         dbContext.Incidents.Add(incident);
@@ -187,7 +187,7 @@ public sealed class IncidentService(
                 recipient,
                 incident,
                 assignedOperatorUserId.HasValue ? "IncidentAssigned" : "IncidentUnassigned",
-                "New incident needs attention",
+                "Sự cố mới cần xử lý",
                 incident.Title,
                 now));
         }
@@ -324,8 +324,8 @@ public sealed class IncidentService(
                 incident.ReporterUserId.Value,
                 incident,
                 "IncidentStatusChanged",
-                "Incident updated",
-                $"Incident '{incident.Title}' changed to {request.Status}.",
+                "Cập nhật trạng thái sự cố",
+                $"Sự cố '{incident.Title}' đã chuyển sang trạng thái {request.Status}.",
                 now));
         }
         if (request.Status == IncidentStatus.Escalated)
@@ -340,7 +340,7 @@ public sealed class IncidentService(
                     administratorId,
                     incident,
                     "IncidentEscalated",
-                    "Incident escalated",
+                    "Sự cố đã được chuyển cấp",
                     incident.Title,
                     now));
             }
@@ -620,7 +620,7 @@ public sealed class IncidentService(
             : await dbContext.Users.Where(user => user.Role == UserRole.Administrator && user.Status == UserStatus.Active)
                 .Select(user => user.Id).ToListAsync(cancellationToken);
         foreach (Guid recipient in recipients)
-            dbContext.Notifications.Add(CreateNotification(recipient, incident, "GuestIncidentCreated", "Guest incident needs attention", incident.Title, now));
+            dbContext.Notifications.Add(CreateNotification(recipient, incident, "GuestIncidentCreated", "Sự cố từ khách cần chú ý", incident.Title, now));
         dbContext.AuditLogs.Add(new AuditLog
         {
             Id = Guid.NewGuid(),
