@@ -115,6 +115,7 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
             "Overdue storage fee", options.Value.OverdueReturnUrl, options.Value.OverdueCancelUrl,
             clock.GetUtcNow().AddMinutes(15)), cancellationToken);
         payment.CheckoutUrl = link.CheckoutUrl;
+        payment.QrCode = link.QrCode;
         await db.SaveChangesAsync(cancellationToken);
         return Map(payment);
     }
@@ -262,5 +263,6 @@ public sealed class OverduePaymentService(ApplicationDbContext db, IPaymentGatew
         && uri.Scheme is "http" or "https";
     private static OverduePaymentResponse Map(PaymentTransaction payment) => new(payment.Id,
         payment.OverdueChargeId, payment.Amount, payment.Currency, payment.Status,
-        payment.CheckoutUrl, payment.RequestedAt, payment.CompletedAt);
+        payment.CheckoutUrl, payment.RequestedAt, payment.CompletedAt,
+        payment.Status == PaymentTransactionStatus.Pending ? payment.QrCode : null);
 }

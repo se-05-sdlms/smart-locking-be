@@ -10,4 +10,5 @@ public sealed record OverduePaymentResponse(
     PaymentTransactionStatus Status,
     string? CheckoutUrl,
     DateTimeOffset RequestedAt,
-    DateTimeOffset? CompletedAt);
+    DateTimeOffset? CompletedAt,
+    string? QrCode = null);

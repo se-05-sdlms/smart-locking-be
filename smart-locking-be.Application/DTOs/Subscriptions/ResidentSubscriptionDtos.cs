@@ -6,4 +6,4 @@ public sealed record SubscribePlanRequest(Guid PlanId);
 /// <summary>
 /// Activated = true for a free plan that took effect immediately; CheckoutUrl is empty and OrderCode/Amount are 0 then.
 /// </summary>
-public sealed record SubscriptionCheckoutResponse(Guid SubscriptionId, string CheckoutUrl, long OrderCode, decimal Amount, bool Activated = false);
+public sealed record SubscriptionCheckoutResponse(Guid SubscriptionId, string CheckoutUrl, long OrderCode, decimal Amount, bool Activated = false, string? QrCode = null);

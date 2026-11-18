@@ -24,6 +24,8 @@ public sealed class PaymentTransaction
 
     public string? CheckoutUrl { get; set; }
 
+    public string? QrCode { get; set; }
+
     /// <summary>
     /// Mã giao dịch bên ngoài do PayOS cung cấp; null trước khi cổng thanh toán phản hồi thành công.
     /// </summary>
