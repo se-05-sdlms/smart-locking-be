@@ -12,6 +12,7 @@ namespace smart_locking_be.Tests.Lockers;
 public sealed class LockerServiceUnitTests
 {
     [Fact]
+    [Trait("Category", "LOCKER")]
     public async Task CreateLocker_TrimsValuesAndCreatesCommissioningRecord()
     {
         await using var db = CreateDbContext();
@@ -31,6 +32,7 @@ public sealed class LockerServiceUnitTests
     }
 
     [Fact]
+    [Trait("Category", "LOCKER")]
     public async Task CreateLocker_RejectsDuplicateCodeAndDevice()
     {
         await using var db = CreateDbContext();
@@ -48,6 +50,7 @@ public sealed class LockerServiceUnitTests
     }
 
     [Fact]
+    [Trait("Category", "LOCKER")]
     public async Task GetPublicLocker_ReturnsOperationalLockerAndRejectsUnavailableLocker()
     {
         await using var db = CreateDbContext();
@@ -66,6 +69,7 @@ public sealed class LockerServiceUnitTests
     }
 
     [Fact]
+    [Trait("Category", "LOCKER")]
     public async Task GetLockers_AdministratorCanSearchAndOperatorOnlySeesAssignments()
     {
         await using var db = CreateDbContext();
@@ -102,6 +106,7 @@ public sealed class LockerServiceUnitTests
     }
 
     [Fact]
+    [Trait("Category", "LOCKER")]
     public async Task UpdateLocker_ChangesProfileAndWritesAudit()
     {
         await using var db = CreateDbContext();
@@ -120,6 +125,7 @@ public sealed class LockerServiceUnitTests
     }
 
     [Fact]
+    [Trait("Category", "LOCKER")]
     public async Task SoftDeleteLocker_MarksLockerInactive()
     {
         await using var db = CreateDbContext();
@@ -134,6 +140,7 @@ public sealed class LockerServiceUnitTests
     }
 
     [Fact]
+    [Trait("Category", "LOCKER")]
     public async Task CompartmentCrud_TrimsValuesOrdersAndChangesStatus()
     {
         await using var db = CreateDbContext();
@@ -163,6 +170,7 @@ public sealed class LockerServiceUnitTests
     }
 
     [Fact]
+    [Trait("Category", "LOCKER")]
     public async Task CreateCompartment_RejectsDuplicateHardwareMapping()
     {
         await using var db = CreateDbContext();

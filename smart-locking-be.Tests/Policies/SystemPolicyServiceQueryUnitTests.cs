@@ -7,7 +7,7 @@ using smart_locking_be.Infrastructure.Services;
 
 namespace smart_locking_be.Tests.Policies;
 
-public sealed class SystemPolicyQueryUnitTests
+public sealed class SystemPolicyServiceQueryUnitTests
 {
     [Fact]
     [Trait("Category", "POLICY-QUERY")]
