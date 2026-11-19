@@ -398,9 +398,14 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         HashSet<Guid> availableCompartments = (await dbContext.OperationalCompartments()
             .Where(item => item.LockerId == lockerId).Select(item => item.Id).ToListAsync(cancellationToken)).ToHashSet();
         HashSet<Guid> occupiedCompartments = await GetOccupiedCompartmentIdsAsync(lockerId, cancellationToken);
+        Dictionary<Guid, CompartmentPackageInfo> packages = await GetCompartmentPackagesAsync(lockerId, cancellationToken);
         return locker.Compartments
             .OrderBy(c => c.Code)
-            .Select(item => MapCompartmentToResponse(item, availableCompartments.Contains(item.Id), occupiedCompartments.Contains(item.Id)))
+            .Select(item =>
+            {
+                packages.TryGetValue(item.Id, out var pkg);
+                return MapCompartmentToResponse(item, availableCompartments.Contains(item.Id), occupiedCompartments.Contains(item.Id), pkg);
+            })
             .ToList();
     }
 
@@ -687,6 +692,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         HashSet<Guid> availableCompartments = (await dbContext.OperationalCompartments()
             .Where(item => item.LockerId == locker.Id).Select(item => item.Id).ToListAsync(cancellationToken)).ToHashSet();
         HashSet<Guid> occupiedCompartments = await GetOccupiedCompartmentIdsAsync(locker.Id, cancellationToken);
+        Dictionary<Guid, CompartmentPackageInfo> packages = await GetCompartmentPackagesAsync(locker.Id, cancellationToken);
         return new LockerDetailResponse(
             locker.Id,
             locker.Code,
@@ -699,16 +705,24 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             locker.LastSeenAt,
             locker.CreatedAt,
             locker.UpdatedAt,
-            locker.Compartments.Select(item => MapCompartmentToResponse(item, availableCompartments.Contains(item.Id), occupiedCompartments.Contains(item.Id))).ToList()
+            locker.Compartments.Select(item =>
+            {
+                packages.TryGetValue(item.Id, out var pkg);
+                return MapCompartmentToResponse(item, availableCompartments.Contains(item.Id), occupiedCompartments.Contains(item.Id), pkg);
+            }).ToList()
         );
     }
 
-    private async Task<LockerCompartmentResponse> MapCompartmentToResponseAsync(LockerCompartment compartment, CancellationToken cancellationToken) =>
-        MapCompartmentToResponse(compartment,
-            await dbContext.OperationalCompartments().AnyAsync(item => item.Id == compartment.Id, cancellationToken),
-            await IsCompartmentOccupiedAsync(compartment.LockerId, compartment.Id, cancellationToken));
+    private async Task<LockerCompartmentResponse> MapCompartmentToResponseAsync(LockerCompartment compartment, CancellationToken cancellationToken)
+    {
+        Dictionary<Guid, CompartmentPackageInfo> packages = await GetCompartmentPackagesAsync(compartment.LockerId, cancellationToken);
+        packages.TryGetValue(compartment.Id, out var pkg);
+        bool isOccupied = pkg != null || await IsCompartmentOccupiedAsync(compartment.LockerId, compartment.Id, cancellationToken);
+        bool available = await dbContext.OperationalCompartments().AnyAsync(item => item.Id == compartment.Id, cancellationToken);
+        return MapCompartmentToResponse(compartment, available, isOccupied, pkg);
+    }
 
-    private static LockerCompartmentResponse MapCompartmentToResponse(LockerCompartment c, bool available, bool isOccupied = false)
+    private static LockerCompartmentResponse MapCompartmentToResponse(LockerCompartment c, bool available, bool isOccupied = false, CompartmentPackageInfo? packageInfo = null)
     {
         return new LockerCompartmentResponse(
             c.Id,
@@ -721,8 +735,98 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             c.DoorStatus,
             c.CreatedAt,
             c.UpdatedAt,
-            isOccupied
+            isOccupied,
+            packageInfo
         );
+    }
+
+    private async Task<Dictionary<Guid, CompartmentPackageInfo>> GetCompartmentPackagesAsync(Guid lockerId, CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<Guid, CompartmentPackageInfo>();
+
+        var parcelRecords = await dbContext.Parcels
+            .AsNoTracking()
+            .Where(p => p.DeliveryRequest.LockerId == lockerId &&
+                p.DeliveryRequest.AllocatedCompartmentId != null &&
+                (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue))
+            .Select(p => new
+            {
+                CompartmentId = p.DeliveryRequest.AllocatedCompartmentId!.Value,
+                p.ParcelCode,
+                p.DeliveryRequest.ResidentProfileId,
+                p.DeliveryRequest.RecipientPhoneSnapshot,
+                p.StoredAt,
+                Status = p.Status.ToString()
+            })
+            .ToListAsync(cancellationToken);
+
+        var returnRecords = await dbContext.ReturnRequests
+            .AsNoTracking()
+            .Where(r => r.LockerId == lockerId &&
+                r.AllocatedCompartmentId != null &&
+                (r.Status == ReturnRequestStatus.Allocated || r.Status == ReturnRequestStatus.Deposited))
+            .Select(r => new
+            {
+                CompartmentId = r.AllocatedCompartmentId!.Value,
+                r.ReturnCode,
+                r.ResidentProfileId,
+                r.CreatedAt,
+                Status = r.Status.ToString()
+            })
+            .ToListAsync(cancellationToken);
+
+        var profileIds = parcelRecords
+            .Where(p => p.ResidentProfileId.HasValue)
+            .Select(p => p.ResidentProfileId!.Value)
+            .Concat(returnRecords.Select(r => r.ResidentProfileId))
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        var profiles = profileIds.Count > 0
+            ? await dbContext.ResidentProfiles
+                .AsNoTracking()
+                .Include(rp => rp.User)
+                .Where(rp => profileIds.Contains(rp.Id))
+                .ToDictionaryAsync(rp => rp.Id, cancellationToken)
+            : new Dictionary<Guid, ResidentProfile>();
+
+        foreach (var p in parcelRecords)
+        {
+            ResidentProfile? profile = p.ResidentProfileId.HasValue && profiles.TryGetValue(p.ResidentProfileId.Value, out var foundProfile)
+                ? foundProfile
+                : null;
+
+            result[p.CompartmentId] = new CompartmentPackageInfo(
+                p.ParcelCode,
+                "Delivery",
+                profile?.FullName,
+                p.RecipientPhoneSnapshot ?? profile?.User?.PhoneNumber,
+                p.StoredAt,
+                p.Status
+            );
+        }
+
+        foreach (var r in returnRecords)
+        {
+            if (!result.ContainsKey(r.CompartmentId))
+            {
+                ResidentProfile? profile = profiles.TryGetValue(r.ResidentProfileId, out var foundProfile)
+                    ? foundProfile
+                    : null;
+
+                result[r.CompartmentId] = new CompartmentPackageInfo(
+                    r.ReturnCode,
+                    "Return",
+                    profile?.FullName,
+                    profile?.User?.PhoneNumber,
+                    r.CreatedAt,
+                    r.Status
+                );
+            }
+        }
+
+        return result;
     }
 
     private async Task<HashSet<Guid>> GetOccupiedCompartmentIdsAsync(Guid lockerId, CancellationToken cancellationToken)
