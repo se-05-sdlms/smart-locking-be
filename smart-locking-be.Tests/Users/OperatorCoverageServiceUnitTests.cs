@@ -175,6 +175,40 @@ public sealed class OperatorCoverageServiceUnitTests
         Assert.Equal("OPERATOR_REPLACEMENT_INELIGIBLE", ex.ErrorCode);
     }
 
+    [Fact]
+    public async Task EffectiveOperatorAssignments_WhenAbsenceIsPendingApproval_RetainsOriginalOperatorUntilApproved()
+    {
+        await using var db = CreateDbContext();
+        var (absence, proposal) = await SeedDataAsync(db);
+        absence.StartsAt = Now.AddMinutes(-30);
+        proposal.Status = TemporaryAssignmentStatus.PendingApproval;
+        proposal.ApprovedAt = null;
+        proposal.ApprovedByUserId = null;
+        proposal.ActivatedAt = null;
+        await db.SaveChangesAsync();
+
+        // 1. Unapproved absence: original operator MUST retain their assigned locker
+        var effectiveBefore = await db.EffectiveOperatorAssignments(Now).ToListAsync();
+        var currentBefore = Assert.Single(effectiveBefore, x => x.LockerId == _lockerId);
+        Assert.Equal(_originalOperatorId, currentBefore.OperatorUserId);
+
+        // 2. Admin approves the replacement
+        var service = CreateService(db, Now);
+        var request = new ReviewOperatorReplacementRequest(_candidateOperatorId, "Approved by admin");
+        await service.ApproveAsync(_adminId, proposal.Id, request, default);
+
+        // 3. Approved and activated: candidate operator now effectively manages the locker
+        var effectiveAfter = await db.EffectiveOperatorAssignments(Now).ToListAsync();
+        var currentAfter = Assert.Single(effectiveAfter, x => x.LockerId == _lockerId);
+        Assert.Equal(_candidateOperatorId, currentAfter.OperatorUserId);
+
+        // 4. Admin cancels absence: reverts back to original operator
+        await service.CancelAsync(_adminId, nameof(UserRole.Administrator), absence.Id, "Admin cancelled", default);
+        var effectiveCancelled = await db.EffectiveOperatorAssignments(Now).ToListAsync();
+        var currentCancelled = Assert.Single(effectiveCancelled, x => x.LockerId == _lockerId);
+        Assert.Equal(_originalOperatorId, currentCancelled.OperatorUserId);
+    }
+
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;

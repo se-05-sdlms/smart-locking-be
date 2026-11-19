@@ -46,6 +46,8 @@ public static class EffectiveOperatorAssignmentQueries
         return rows.Where(x => db.Users.Any(u => u.Id == x.OperatorUserId &&
             u.Status == UserStatus.Active && u.Role == UserRole.LockerOperator) &&
             !db.OperatorAbsences.Any(a => a.OperatorUserId == x.OperatorUserId && a.CancelledAt == null &&
-                a.StartsAt <= now && now < a.EndsAt));
+                a.StartsAt <= now && now < a.EndsAt &&
+                db.TemporaryOperatorAssignments.Any(t => t.AbsenceId == a.Id &&
+                    (t.Status == TemporaryAssignmentStatus.Approved || t.Status == TemporaryAssignmentStatus.Active || t.ApprovedAt != null))));
     }
 }
