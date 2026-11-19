@@ -346,8 +346,45 @@ public sealed class IncidentService(
             }
         }
 
+        List<Incident> resolvedSiblings = [];
+        if (request.Status == IncidentStatus.Resolved && incident.Type == "DoorOpenTooLong" && incident.LockerCompartmentId.HasValue)
+        {
+            resolvedSiblings = await dbContext.Incidents
+                .Where(item => item.Id != incident.Id &&
+                               item.LockerCompartmentId == incident.LockerCompartmentId &&
+                               item.Type == "DoorOpenTooLong" &&
+                               item.Status != IncidentStatus.Resolved)
+                .ToListAsync(cancellationToken);
+
+            string siblingResolution = resolution ?? $"Đã xử lý đồng thời theo sự cố '{incident.Title}'.";
+            foreach (Incident sibling in resolvedSiblings)
+            {
+                IncidentStatus siblingPrev = sibling.Status;
+                sibling.Status = IncidentStatus.Resolved;
+                sibling.UpdatedAt = now;
+                sibling.ResolvedAt = now;
+                sibling.ResolutionSummary = siblingResolution;
+
+                dbContext.IncidentActions.Add(new IncidentAction
+                {
+                    Id = Guid.NewGuid(),
+                    IncidentId = sibling.Id,
+                    ActionByUserId = userId,
+                    ActionType = "StatusChanged",
+                    FromStatus = siblingPrev,
+                    ToStatus = IncidentStatus.Resolved,
+                    Notes = siblingResolution,
+                    CreatedAt = now
+                });
+            }
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
         await PublishAsync(incident, cancellationToken);
+        foreach (Incident sibling in resolvedSiblings)
+        {
+            await PublishAsync(sibling, cancellationToken);
+        }
         return await LoadDetailAsync(incidentId, cancellationToken);
     }
 
@@ -389,7 +426,7 @@ public sealed class IncidentService(
                 .ThenInclude(user => user!.ResidentProfile)
             .Include(item => item.Actions)
                 .ThenInclude(action => action.ActionByUser)
-                    .ThenInclude(user => user.ResidentProfile)
+                    .ThenInclude(user => user!.ResidentProfile)
             .SingleAsync(item => item.Id == incidentId, cancellationToken);
 
         return new IncidentDetailResponse(

@@ -65,7 +65,7 @@ public sealed class DoorOpenAlertWorker(
 
             bool alerted = await dbContext.Incidents.AnyAsync(item =>
                 item.LockerCompartmentId == compartment.Id && item.Type == "DoorOpenTooLong" &&
-                item.CreatedAt >= alertSince, cancellationToken);
+                (item.Status != IncidentStatus.Resolved || item.CreatedAt >= alertSince), cancellationToken);
             if (alerted) continue;
 
             LockerAccessEvent? access = await dbContext.LockerAccessEvents.AsNoTracking()
