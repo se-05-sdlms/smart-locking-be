@@ -11,5 +11,6 @@ public sealed record LockerCompartmentResponse(
     LockerCompartmentOperationalStatus OperationalStatus,
     DoorStatus DoorStatus,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt
+    DateTimeOffset UpdatedAt,
+    bool IsOccupied = false
 );
