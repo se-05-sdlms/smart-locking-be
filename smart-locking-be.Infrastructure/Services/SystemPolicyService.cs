@@ -75,7 +75,7 @@ public sealed class SystemPolicyService(ApplicationDbContext dbContext, TimeProv
         // The transaction keeps both saves atomic for other requests.
         await dbContext.SaveChangesAsync(cancellationToken);
         var obsoleteCoverage = await dbContext.TemporaryOperatorAssignments.Include(x => x.Absence)
-            .Where(x => x.PolicyId != id && (x.Status == TemporaryAssignmentStatus.Approved || x.Status == TemporaryAssignmentStatus.Active))
+            .Where(x => x.PolicyId != null && x.PolicyId != id && (x.Status == TemporaryAssignmentStatus.Approved || x.Status == TemporaryAssignmentStatus.Active))
             .ToListAsync(cancellationToken);
         var adminIds = await dbContext.Users.Where(x => x.Role == UserRole.Administrator && x.Status == UserStatus.Active)
             .Select(x => x.Id).ToListAsync(cancellationToken);

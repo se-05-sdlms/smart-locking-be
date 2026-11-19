@@ -35,6 +35,7 @@ public sealed class OperatorCoverageService(ApplicationDbContext db, TimeProvide
         locker.UpdatedAt = clock.GetUtcNow();
         var affected = await db.TemporaryOperatorAssignments.Include(x => x.Absence)
             .Where(x => (x.Status == TemporaryAssignmentStatus.Approved || x.Status == TemporaryAssignmentStatus.Active) &&
+                x.AnchorLockerId != null &&
                 (x.LockerId == lockerId || x.AnchorLockerId == lockerId)).ToListAsync(ct);
         foreach (var proposal in affected)
             RequireReapproval(proposal, adminId, "Confirmed locker location changed.");
@@ -104,7 +105,7 @@ public sealed class OperatorCoverageService(ApplicationDbContext db, TimeProvide
         ReviewOperatorReplacementRequest request, CancellationToken ct) => SerializedAsync(async () =>
     {
         string reason = Reason(request.Reason);
-        var proposal = await db.TemporaryOperatorAssignments.Include(x => x.Absence).Include(x => x.BaseAssignment)
+        var proposal = await db.TemporaryOperatorAssignments.Include(x => x.Absence).Include(x => x.BaseAssignment).ThenInclude(x => x.Locker)
             .SingleOrDefaultAsync(x => x.Id == proposalId, ct)
             ?? throw new NotFoundException("OPERATOR_REPLACEMENT_NOT_FOUND", "Proposal not found.");
         EnsureOpen(proposal.Absence);
@@ -114,33 +115,86 @@ public sealed class OperatorCoverageService(ApplicationDbContext db, TimeProvide
         bool wasActive = proposal.Status == TemporaryAssignmentStatus.Active;
         Guid candidateId = request.OperatorUserId ?? proposal.OperatorUserId
             ?? throw BadRequestException.For("operatorUserId", "Select an eligible operator.");
-        var selection = await SelectAsync(proposal, candidateId, [], ct)
-            ?? throw new ConflictException("OPERATOR_REPLACEMENT_INELIGIBLE", "Candidate, coordinates, policy or whole-interval capacity is no longer valid. Recompute proposals.");
-        // Never silently accept a changed automatic suggestion: expose it for another explicit approval.
-        if (request.OperatorUserId is null && proposal.SelectionFingerprint != selection.Fingerprint)
+
+        bool isManualSelection = request.OperatorUserId != null;
+        var selection = await SelectAsync(proposal, candidateId, [], ct);
+
+        if (selection != null)
         {
-            ApplySelection(proposal, selection);
-            proposal.Status = TemporaryAssignmentStatus.NeedsApproval;
-            proposal.ApprovedAt = null;
-            proposal.ApprovedByUserId = null;
-            proposal.ActivatedAt = null;
-            proposal.StatusReason = "Selection conditions changed. Review the refreshed proposal and approve again.";
-            Audit(adminId, "OperatorReplacement.ReapprovalRequired", proposal.Id, proposal.StatusReason);
-            NotifyAdmins("Replacement needs reapproval", Detail(proposal));
+            // Never silently accept a changed automatic suggestion: expose it for another explicit approval.
+            if (!isManualSelection && proposal.SelectionFingerprint != selection.Fingerprint)
+            {
+                ApplySelection(proposal, selection);
+                proposal.Status = TemporaryAssignmentStatus.NeedsApproval;
+                proposal.ApprovedAt = null;
+                proposal.ApprovedByUserId = null;
+                proposal.ActivatedAt = null;
+                proposal.StatusReason = "Selection conditions changed. Review the refreshed proposal and approve again.";
+                Audit(adminId, "OperatorReplacement.ReapprovalRequired", proposal.Id, proposal.StatusReason);
+                NotifyAdmins("Replacement needs reapproval", Detail(proposal));
+            }
+            else
+            {
+                ApplySelection(proposal, selection);
+                proposal.Status = TemporaryAssignmentStatus.Approved;
+                proposal.ApprovedByUserId = adminId;
+                proposal.ApprovedAt = clock.GetUtcNow();
+                proposal.ActivatedAt = null;
+                proposal.StatusReason = reason;
+                Audit(adminId, "OperatorReplacement.Approved", proposal.Id, $"Operator={candidateId}; {reason}");
+                Notify(proposal.Absence.OperatorUserId, "Replacement approved", Detail(proposal));
+                Notify(candidateId, "Temporary assignment approved", Detail(proposal));
+                if (proposal.Absence.StartsAt <= clock.GetUtcNow()) await ActivateAsync(proposal, ct);
+            }
         }
         else
         {
-            ApplySelection(proposal, selection);
+            if (!isManualSelection)
+            {
+                throw new ConflictException("OPERATOR_REPLACEMENT_INELIGIBLE", "Candidate, coordinates, policy or whole-interval capacity is no longer valid. Recompute proposals.");
+            }
+
+            var candidate = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == candidateId &&
+                x.Status == UserStatus.Active && x.Role == UserRole.LockerOperator, ct)
+                ?? throw BadRequestException.For("operatorUserId", "Candidate must be an active locker operator.");
+
+            if (candidateId == proposal.Absence.OperatorUserId)
+                throw BadRequestException.For("operatorUserId", "An operator cannot replace themselves.");
+
+            bool hasOverlapAbsence = await db.OperatorAbsences.AsNoTracking().AnyAsync(x => x.CancelledAt == null &&
+                x.OperatorUserId == candidateId && x.StartsAt < proposal.Absence.EndsAt && proposal.Absence.StartsAt < x.EndsAt, ct);
+            if (hasOverlapAbsence)
+                throw new ConflictException("OPERATOR_ABSENCE_OVERLAP", "Candidate already has an overlapping absence during this interval.");
+
+            bool lockerReserved = await db.TemporaryOperatorAssignments.AsNoTracking().Include(x => x.Absence)
+                .AnyAsync(x => x.Id != proposal.Id && x.LockerId == proposal.LockerId &&
+                    (x.Status == TemporaryAssignmentStatus.Approved || x.Status == TemporaryAssignmentStatus.Active) &&
+                    x.Absence.CancelledAt == null && x.Absence.StartsAt < proposal.Absence.EndsAt && proposal.Absence.StartsAt < x.Absence.EndsAt, ct);
+            if (lockerReserved)
+                throw new ConflictException("OPERATOR_REPLACEMENT_INELIGIBLE", "Locker already has another replacement assigned during this interval.");
+
+            proposal.OperatorUserId = candidateId;
+            proposal.AnchorLockerId = null;
+            proposal.TargetLocationRevision = null;
+            proposal.AnchorLocationRevision = null;
+            proposal.DistanceKm = null;
+            proposal.LoadBefore = null;
+            proposal.LoadAfter = null;
+            proposal.ServiceArea = proposal.BaseAssignment?.Locker?.ServiceArea;
+            proposal.PolicyId = null;
+            proposal.SelectionFingerprint = $"MANUAL:{candidateId:N}";
             proposal.Status = TemporaryAssignmentStatus.Approved;
             proposal.ApprovedByUserId = adminId;
             proposal.ApprovedAt = clock.GetUtcNow();
             proposal.ActivatedAt = null;
             proposal.StatusReason = reason;
-            Audit(adminId, "OperatorReplacement.Approved", proposal.Id, $"Operator={candidateId}; {reason}");
+
+            Audit(adminId, "OperatorReplacement.Approved", proposal.Id, $"Operator={candidateId}; (Manual Override); {reason}");
             Notify(proposal.Absence.OperatorUserId, "Replacement approved", Detail(proposal));
             Notify(candidateId, "Temporary assignment approved", Detail(proposal));
             if (proposal.Absence.StartsAt <= clock.GetUtcNow()) await ActivateAsync(proposal, ct);
         }
+
         if (wasActive && previousOperatorId is { } oldOperator &&
             (oldOperator != proposal.OperatorUserId || proposal.Status != TemporaryAssignmentStatus.Active))
             Notify(oldOperator, "Temporary assignment revoked", Detail(proposal));
@@ -200,10 +254,25 @@ public sealed class OperatorCoverageService(ApplicationDbContext db, TimeProvide
                 await ActivateAsync(proposal, ct);
             else if (proposal.Status == TemporaryAssignmentStatus.Active)
             {
-                var selection = proposal.OperatorUserId is { } current ? await SelectAsync(proposal, current, [], ct) : null;
-                if (selection == null || selection.Fingerprint != proposal.SelectionFingerprint)
+                bool isManual = proposal.AnchorLockerId == null || proposal.SelectionFingerprint?.StartsWith("MANUAL") == true;
+                if (isManual)
                 {
-                    RequireReapproval(proposal, null, "Active replacement is no longer eligible. Admin review is required.");
+                    var op = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == proposal.OperatorUserId &&
+                        x.Status == UserStatus.Active && x.Role == UserRole.LockerOperator, ct);
+                    var hasOverlap = op == null || await db.OperatorAbsences.AsNoTracking().AnyAsync(x => x.CancelledAt == null &&
+                        x.OperatorUserId == proposal.OperatorUserId && x.StartsAt < proposal.Absence.EndsAt && proposal.Absence.StartsAt < x.EndsAt, ct);
+                    if (op == null || hasOverlap)
+                    {
+                        RequireReapproval(proposal, null, "Active replacement is no longer eligible. Admin review is required.");
+                    }
+                }
+                else
+                {
+                    var selection = proposal.OperatorUserId is { } current ? await SelectAsync(proposal, current, [], ct) : null;
+                    if (selection == null || selection.Fingerprint != proposal.SelectionFingerprint)
+                    {
+                        RequireReapproval(proposal, null, "Active replacement is no longer eligible. Admin review is required.");
+                    }
                 }
             }
         }
@@ -216,6 +285,27 @@ public sealed class OperatorCoverageService(ApplicationDbContext db, TimeProvide
 
     private async Task ActivateAsync(TemporaryOperatorAssignment proposal, CancellationToken ct)
     {
+        bool isManual = proposal.AnchorLockerId == null || proposal.SelectionFingerprint?.StartsWith("MANUAL") == true;
+        if (isManual)
+        {
+            var op = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == proposal.OperatorUserId &&
+                x.Status == UserStatus.Active && x.Role == UserRole.LockerOperator, ct);
+            var hasOverlap = op == null || await db.OperatorAbsences.AsNoTracking().AnyAsync(x => x.CancelledAt == null &&
+                x.OperatorUserId == proposal.OperatorUserId && x.StartsAt < proposal.Absence.EndsAt && proposal.Absence.StartsAt < x.EndsAt, ct);
+            if (op == null || hasOverlap)
+            {
+                RequireReapproval(proposal, null, "Candidate is no longer eligible or has an overlapping absence. Admin must review again.");
+                return;
+            }
+            proposal.Status = TemporaryAssignmentStatus.Active;
+            proposal.ActivatedAt = clock.GetUtcNow();
+            Audit(proposal.ApprovedByUserId, "OperatorReplacement.Activated", proposal.Id, Detail(proposal));
+            Notify(proposal.Absence.OperatorUserId, "Temporary coverage started", Detail(proposal));
+            if (proposal.OperatorUserId is { } subId)
+                Notify(subId, "Temporary coverage started", Detail(proposal));
+            return;
+        }
+
         var selection = proposal.OperatorUserId is { } candidate ? await SelectAsync(proposal, candidate, [], ct) : null;
         if (selection == null || selection.Fingerprint != proposal.SelectionFingerprint)
         {
