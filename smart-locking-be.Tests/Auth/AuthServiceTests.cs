@@ -1315,6 +1315,40 @@ public sealed class AuthServiceTests
     }
     #endregion
 
+    #region AUTH-11: GetRegistrationLockersAsync
+    [Fact]
+    [Trait("Category", "AUTH-11")]
+    public async Task GetRegistrationLockersAsync_ReturnsOnlyOperationalLockersOrderedByCode()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        dbContext.Lockers.AddRange(
+            CreateLockerWithCode("B-02", LockerOperationalStatus.Operational),
+            CreateLockerWithCode("A-01", LockerOperationalStatus.Operational),
+            CreateLockerWithCode("C-03", LockerOperationalStatus.OutOfService));
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+        var result = await service.GetRegistrationLockersAsync(default);
+
+        Assert.Collection(result,
+            item => Assert.Equal("A-01", item.Code),
+            item => Assert.Equal("B-02", item.Code));
+    }
+
+    [Fact]
+    [Trait("Category", "AUTH-11")]
+    public async Task GetRegistrationLockersAsync_ReturnsEmptyWhenNoOperationalLockerExists()
+    {
+        await using ApplicationDbContext dbContext = CreateDbContext();
+        dbContext.Lockers.Add(CreateLockerWithCode("A-01", LockerOperationalStatus.Inactive));
+        await dbContext.SaveChangesAsync();
+
+        AuthService service = CreateService(dbContext);
+
+        Assert.Empty(await service.GetRegistrationLockersAsync(default));
+    }
+    #endregion
+
     #region Helpers
     private static ApplicationDbContext CreateDbContext()
     {
@@ -1362,6 +1396,20 @@ public sealed class AuthServiceTests
             Address = "123 Nguyen Van Linh",
             RecoveryAddress = "456 Nguyen Van Linh",
             DeviceIdentifier = $"DEVICE-{Guid.NewGuid():N}",
+            OperationalStatus = status,
+            ConnectionStatus = LockerConnectionStatus.Online,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+    private static Locker CreateLockerWithCode(string code, LockerOperationalStatus status) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Code = code,
+            Address = $"{code} address",
+            RecoveryAddress = $"{code} recovery",
+            DeviceIdentifier = $"DEVICE-{code}",
             OperationalStatus = status,
             ConnectionStatus = LockerConnectionStatus.Online,
             CreatedAt = DateTimeOffset.UtcNow,

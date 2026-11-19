@@ -42,6 +42,10 @@ public sealed class Pbkdf2PasswordHashService : IPasswordHashService
         {
             byte[] salt = Convert.FromBase64String(parts[2]);
             byte[] expectedHash = Convert.FromBase64String(parts[3]);
+            if (salt.Length == 0 || expectedHash.Length == 0)
+            {
+                return false;
+            }
             byte[] actualHash = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, expectedHash.Length);
 
             return CryptographicOperations.FixedTimeEquals(actualHash, expectedHash);

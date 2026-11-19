@@ -389,7 +389,7 @@ public sealed class IncidentService(
                 .ThenInclude(user => user!.ResidentProfile)
             .Include(item => item.Actions)
                 .ThenInclude(action => action.ActionByUser)
-                    .ThenInclude(user => user.ResidentProfile)
+                    .ThenInclude(user => user!.ResidentProfile)
             .SingleAsync(item => item.Id == incidentId, cancellationToken);
 
         return new IncidentDetailResponse(
