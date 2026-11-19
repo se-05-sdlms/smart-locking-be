@@ -9,7 +9,9 @@ namespace smart_locking_be.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize(Policy = ApiPolicies.Administrator)]
-public class AdminController(IAdminService adminService) : ControllerBase
+public class AdminController(
+    IAdminService adminService,
+    IAdminForecastService adminForecastService) : ControllerBase
 {
     [HttpGet("dashboard")]
     public async Task<IActionResult> GetDashboard(
@@ -25,5 +27,13 @@ public class AdminController(IAdminService adminService) : ControllerBase
         CancellationToken cancellationToken)
     {
         return Ok(await adminService.GetSystemStatisticsAsync(request, cancellationToken));
+    }
+
+    [HttpGet("forecast")]
+    public async Task<IActionResult> GetForecast(
+        [FromQuery] int? horizonDays,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await adminForecastService.GetForecastAsync(horizonDays ?? 7, cancellationToken));
     }
 }
