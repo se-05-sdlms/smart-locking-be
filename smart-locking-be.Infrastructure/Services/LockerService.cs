@@ -8,7 +8,10 @@ using smart_locking_be.Infrastructure.Persistence;
 
 namespace smart_locking_be.Infrastructure.Services;
 
-public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRealtimeNotifier? realtimeNotifier = null) : ILockerService
+public sealed class LockerService(
+    ApplicationDbContext dbContext,
+    ICompartmentAllocationService? compartmentAllocationService = null,
+    IOperationsRealtimeNotifier? realtimeNotifier = null) : ILockerService
 {
     public async Task<LockerDetailResponse> UpdateLockerStatusAsync(Guid userId, string userRole, Guid lockerId,
         UpdateLockerStatusRequest request, CancellationToken cancellationToken = default)
@@ -398,9 +401,14 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         HashSet<Guid> availableCompartments = (await dbContext.OperationalCompartments()
             .Where(item => item.LockerId == lockerId).Select(item => item.Id).ToListAsync(cancellationToken)).ToHashSet();
         HashSet<Guid> occupiedCompartments = await GetOccupiedCompartmentIdsAsync(lockerId, cancellationToken);
+        Dictionary<Guid, CompartmentPackageInfo> packages = await GetCompartmentPackagesAsync(lockerId, cancellationToken);
         return locker.Compartments
             .OrderBy(c => c.Code)
-            .Select(item => MapCompartmentToResponse(item, availableCompartments.Contains(item.Id), occupiedCompartments.Contains(item.Id)))
+            .Select(item =>
+            {
+                packages.TryGetValue(item.Id, out var pkg);
+                return MapCompartmentToResponse(item, availableCompartments.Contains(item.Id), occupiedCompartments.Contains(item.Id), pkg);
+            })
             .ToList();
     }
 
@@ -687,6 +695,7 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
         HashSet<Guid> availableCompartments = (await dbContext.OperationalCompartments()
             .Where(item => item.LockerId == locker.Id).Select(item => item.Id).ToListAsync(cancellationToken)).ToHashSet();
         HashSet<Guid> occupiedCompartments = await GetOccupiedCompartmentIdsAsync(locker.Id, cancellationToken);
+        Dictionary<Guid, CompartmentPackageInfo> packages = await GetCompartmentPackagesAsync(locker.Id, cancellationToken);
         return new LockerDetailResponse(
             locker.Id,
             locker.Code,
@@ -699,16 +708,24 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             locker.LastSeenAt,
             locker.CreatedAt,
             locker.UpdatedAt,
-            locker.Compartments.Select(item => MapCompartmentToResponse(item, availableCompartments.Contains(item.Id), occupiedCompartments.Contains(item.Id))).ToList()
+            locker.Compartments.Select(item =>
+            {
+                packages.TryGetValue(item.Id, out var pkg);
+                return MapCompartmentToResponse(item, availableCompartments.Contains(item.Id), occupiedCompartments.Contains(item.Id), pkg);
+            }).ToList()
         );
     }
 
-    private async Task<LockerCompartmentResponse> MapCompartmentToResponseAsync(LockerCompartment compartment, CancellationToken cancellationToken) =>
-        MapCompartmentToResponse(compartment,
-            await dbContext.OperationalCompartments().AnyAsync(item => item.Id == compartment.Id, cancellationToken),
-            await IsCompartmentOccupiedAsync(compartment.LockerId, compartment.Id, cancellationToken));
+    private async Task<LockerCompartmentResponse> MapCompartmentToResponseAsync(LockerCompartment compartment, CancellationToken cancellationToken)
+    {
+        Dictionary<Guid, CompartmentPackageInfo> packages = await GetCompartmentPackagesAsync(compartment.LockerId, cancellationToken);
+        packages.TryGetValue(compartment.Id, out var pkg);
+        bool isOccupied = pkg != null || await IsCompartmentOccupiedAsync(compartment.LockerId, compartment.Id, cancellationToken);
+        bool available = await dbContext.OperationalCompartments().AnyAsync(item => item.Id == compartment.Id, cancellationToken);
+        return MapCompartmentToResponse(compartment, available, isOccupied, pkg);
+    }
 
-    private static LockerCompartmentResponse MapCompartmentToResponse(LockerCompartment c, bool available, bool isOccupied = false)
+    private static LockerCompartmentResponse MapCompartmentToResponse(LockerCompartment c, bool available, bool isOccupied = false, CompartmentPackageInfo? packageInfo = null)
     {
         return new LockerCompartmentResponse(
             c.Id,
@@ -721,8 +738,98 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
             c.DoorStatus,
             c.CreatedAt,
             c.UpdatedAt,
-            isOccupied
+            isOccupied,
+            packageInfo
         );
+    }
+
+    private async Task<Dictionary<Guid, CompartmentPackageInfo>> GetCompartmentPackagesAsync(Guid lockerId, CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<Guid, CompartmentPackageInfo>();
+
+        var parcelRecords = await dbContext.Parcels
+            .AsNoTracking()
+            .Where(p => p.DeliveryRequest.LockerId == lockerId &&
+                p.DeliveryRequest.AllocatedCompartmentId != null &&
+                (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue))
+            .Select(p => new
+            {
+                CompartmentId = p.DeliveryRequest.AllocatedCompartmentId!.Value,
+                p.ParcelCode,
+                p.DeliveryRequest.ResidentProfileId,
+                p.DeliveryRequest.RecipientPhoneSnapshot,
+                p.StoredAt,
+                Status = p.Status.ToString()
+            })
+            .ToListAsync(cancellationToken);
+
+        var returnRecords = await dbContext.ReturnRequests
+            .AsNoTracking()
+            .Where(r => r.LockerId == lockerId &&
+                r.AllocatedCompartmentId != null &&
+                (r.Status == ReturnRequestStatus.Allocated || r.Status == ReturnRequestStatus.Deposited))
+            .Select(r => new
+            {
+                CompartmentId = r.AllocatedCompartmentId!.Value,
+                r.ReturnCode,
+                r.ResidentProfileId,
+                r.CreatedAt,
+                Status = r.Status.ToString()
+            })
+            .ToListAsync(cancellationToken);
+
+        var profileIds = parcelRecords
+            .Where(p => p.ResidentProfileId.HasValue)
+            .Select(p => p.ResidentProfileId!.Value)
+            .Concat(returnRecords.Select(r => r.ResidentProfileId))
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        var profiles = profileIds.Count > 0
+            ? await dbContext.ResidentProfiles
+                .AsNoTracking()
+                .Include(rp => rp.User)
+                .Where(rp => profileIds.Contains(rp.Id))
+                .ToDictionaryAsync(rp => rp.Id, cancellationToken)
+            : new Dictionary<Guid, ResidentProfile>();
+
+        foreach (var p in parcelRecords)
+        {
+            ResidentProfile? profile = p.ResidentProfileId.HasValue && profiles.TryGetValue(p.ResidentProfileId.Value, out var foundProfile)
+                ? foundProfile
+                : null;
+
+            result[p.CompartmentId] = new CompartmentPackageInfo(
+                p.ParcelCode,
+                "Delivery",
+                profile?.FullName,
+                p.RecipientPhoneSnapshot ?? profile?.User?.PhoneNumber,
+                p.StoredAt,
+                p.Status
+            );
+        }
+
+        foreach (var r in returnRecords)
+        {
+            if (!result.ContainsKey(r.CompartmentId))
+            {
+                ResidentProfile? profile = profiles.TryGetValue(r.ResidentProfileId, out var foundProfile)
+                    ? foundProfile
+                    : null;
+
+                result[r.CompartmentId] = new CompartmentPackageInfo(
+                    r.ReturnCode,
+                    "Return",
+                    profile?.FullName,
+                    profile?.User?.PhoneNumber,
+                    r.CreatedAt,
+                    r.Status
+                );
+            }
+        }
+
+        return result;
     }
 
     private async Task<HashSet<Guid>> GetOccupiedCompartmentIdsAsync(Guid lockerId, CancellationToken cancellationToken)
@@ -762,5 +869,264 @@ public sealed class LockerService(ApplicationDbContext dbContext, IOperationsRea
                 (item.Status == ReturnRequestStatus.Allocated || item.Status == ReturnRequestStatus.Deposited), cancellationToken)
             || await dbContext.CompartmentReservations.AnyAsync(item => item.LockerCompartmentId == compartmentId &&
                 item.ReleasedAt == null && item.ExpiresAt > now, cancellationToken);
+    }
+
+    public async Task<ConfirmCompartmentPackageActionResponse> ConfirmCompartmentPackageActionAsync(
+        Guid userId,
+        string userRole,
+        Guid lockerId,
+        Guid compartmentId,
+        ConfirmCompartmentPackageActionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Action) ||
+            (!string.Equals(request.Action.Trim(), "Handover", StringComparison.OrdinalIgnoreCase) &&
+             !string.Equals(request.Action.Trim(), "Remove", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw BadRequestException.For(nameof(request.Action), "Action must be 'Handover' or 'Remove'.");
+        }
+
+        string reason = request.Reason?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw BadRequestException.For(nameof(request.Reason), "Reason is required.");
+        }
+
+        var locker = await dbContext.Lockers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(l => l.Id == lockerId, cancellationToken)
+            ?? throw new NotFoundException(LockerErrorCodes.NotFound, $"Locker '{lockerId}' not found.");
+
+        if (userRole != nameof(UserRole.Administrator))
+        {
+            if (userRole == nameof(UserRole.LockerOperator))
+            {
+                var isAssigned = await dbContext.EffectiveOperatorAssignments(DateTimeOffset.UtcNow)
+                    .AsNoTracking()
+                    .AnyAsync(a => a.OperatorUserId == userId && a.LockerId == lockerId && a.RevokedAt == null, cancellationToken);
+
+                if (!isAssigned)
+                {
+                    throw new ForbiddenException(LockerErrorCodes.AccessDenied, "You cannot access this locker.");
+                }
+            }
+            else
+            {
+                throw new ForbiddenException(LockerErrorCodes.AccessDenied, $"Role '{userRole}' cannot perform package actions.");
+            }
+        }
+
+        await using var commissioningTransaction = await LockerCommissioningGuard.LockAsync(dbContext, lockerId, cancellationToken);
+
+        var compartment = await dbContext.LockerCompartments
+            .FirstOrDefaultAsync(c => c.Id == compartmentId && c.LockerId == lockerId, cancellationToken)
+            ?? throw new NotFoundException(LockerErrorCodes.InvalidCompartment, $"Compartment '{compartmentId}' not found in this locker.");
+
+        var parcel = await dbContext.Parcels
+            .Include(p => p.DeliveryRequest)
+            .SingleOrDefaultAsync(p => p.DeliveryRequest.AllocatedCompartmentId == compartmentId &&
+                (p.Status == ParcelStatus.Stored || p.Status == ParcelStatus.Overdue), cancellationToken);
+
+        var returnRequest = parcel == null
+            ? await dbContext.ReturnRequests
+                .SingleOrDefaultAsync(r => r.AllocatedCompartmentId == compartmentId &&
+                    (r.Status == ReturnRequestStatus.Allocated || r.Status == ReturnRequestStatus.Deposited), cancellationToken)
+            : null;
+
+        if (parcel == null && returnRequest == null)
+        {
+            throw new ConflictException(CommonErrorCodes.InvalidRequest, "No active parcel or return request found in this compartment.");
+        }
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string action = request.Action.Trim();
+        string? packageCode = null;
+
+        if (parcel is not null)
+        {
+            packageCode = parcel.ParcelCode;
+            var previousStatus = parcel.Status;
+
+            if (string.Equals(action, "Handover", StringComparison.OrdinalIgnoreCase))
+            {
+                parcel.Status = ParcelStatus.Retrieved;
+                parcel.RetrievedAt = now;
+                parcel.UpdatedAt = now;
+                parcel.DeliveryRequest.CompartmentReleasedAt = now;
+                parcel.DeliveryRequest.UpdatedAt = now;
+
+                if (compartmentAllocationService != null)
+                {
+                    await compartmentAllocationService.ReleaseAsync(parcel.DeliveryRequestId, null, now, cancellationToken);
+                }
+                else
+                {
+                    var reservations = await dbContext.CompartmentReservations
+                        .Where(r => r.DeliveryRequestId == parcel.DeliveryRequestId && r.ReleasedAt == null)
+                        .ToListAsync(cancellationToken);
+                    foreach (var r in reservations) r.ReleasedAt = now;
+                }
+
+                dbContext.ParcelStatusHistories.Add(new ParcelStatusHistory
+                {
+                    Id = Guid.NewGuid(),
+                    ParcelId = parcel.Id,
+                    FromStatus = previousStatus,
+                    ToStatus = ParcelStatus.Retrieved,
+                    Reason = $"Bàn giao trực tiếp cho cư dân: {reason}",
+                    ChangedByUserId = userId,
+                    ChangedAt = now
+                });
+
+                dbContext.AuditLogs.Add(new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorUserId = userId,
+                    Action = "Parcel.HandoverDirect",
+                    EntityType = nameof(Parcel),
+                    EntityId = parcel.Id,
+                    Result = AuditLogResult.Succeeded,
+                    Details = $"Reason={reason}",
+                    OccurredAt = now
+                });
+            }
+            else
+            {
+                parcel.Status = ParcelStatus.Removed;
+                parcel.RemovedAt = now;
+                parcel.RemovedByUserId = userId;
+                parcel.RemovalReason = reason;
+                parcel.UpdatedAt = now;
+                parcel.DeliveryRequest.CompartmentReleasedAt = now;
+                parcel.DeliveryRequest.UpdatedAt = now;
+
+                if (compartmentAllocationService != null)
+                {
+                    await compartmentAllocationService.ReleaseAsync(parcel.DeliveryRequestId, null, now, cancellationToken);
+                }
+                else
+                {
+                    var reservations = await dbContext.CompartmentReservations
+                        .Where(r => r.DeliveryRequestId == parcel.DeliveryRequestId && r.ReleasedAt == null)
+                        .ToListAsync(cancellationToken);
+                    foreach (var r in reservations) r.ReleasedAt = now;
+                }
+
+                dbContext.ParcelStatusHistories.Add(new ParcelStatusHistory
+                {
+                    Id = Guid.NewGuid(),
+                    ParcelId = parcel.Id,
+                    FromStatus = previousStatus,
+                    ToStatus = ParcelStatus.Removed,
+                    Reason = reason,
+                    ChangedByUserId = userId,
+                    ChangedAt = now
+                });
+
+                dbContext.AuditLogs.Add(new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorUserId = userId,
+                    Action = "Parcel.EmergencyRemoved",
+                    EntityType = nameof(Parcel),
+                    EntityId = parcel.Id,
+                    Result = AuditLogResult.Succeeded,
+                    Details = $"Reason={reason}",
+                    OccurredAt = now
+                });
+            }
+        }
+        else if (returnRequest is not null)
+        {
+            packageCode = returnRequest.ReturnCode;
+
+            if (string.Equals(action, "Handover", StringComparison.OrdinalIgnoreCase))
+            {
+                returnRequest.Status = ReturnRequestStatus.Completed;
+                returnRequest.CompartmentReleasedAt = now;
+                returnRequest.UpdatedAt = now;
+
+                if (compartmentAllocationService != null)
+                {
+                    await compartmentAllocationService.ReleaseAsync(null, returnRequest.Id, now, cancellationToken);
+                }
+                else
+                {
+                    var reservations = await dbContext.CompartmentReservations
+                        .Where(r => r.ReturnRequestId == returnRequest.Id && r.ReleasedAt == null)
+                        .ToListAsync(cancellationToken);
+                    foreach (var r in reservations) r.ReleasedAt = now;
+                }
+
+                dbContext.AuditLogs.Add(new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorUserId = userId,
+                    Action = "ReturnRequest.CompletedDirect",
+                    EntityType = nameof(ReturnRequest),
+                    EntityId = returnRequest.Id,
+                    Result = AuditLogResult.Succeeded,
+                    Details = $"Reason={reason}",
+                    OccurredAt = now
+                });
+            }
+            else
+            {
+                returnRequest.Status = ReturnRequestStatus.Cancelled;
+                returnRequest.CompartmentReleasedAt = now;
+                returnRequest.UpdatedAt = now;
+
+                if (compartmentAllocationService != null)
+                {
+                    await compartmentAllocationService.ReleaseAsync(null, returnRequest.Id, now, cancellationToken);
+                }
+                else
+                {
+                    var reservations = await dbContext.CompartmentReservations
+                        .Where(r => r.ReturnRequestId == returnRequest.Id && r.ReleasedAt == null)
+                        .ToListAsync(cancellationToken);
+                    foreach (var r in reservations) r.ReleasedAt = now;
+                }
+
+                dbContext.AuditLogs.Add(new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorUserId = userId,
+                    Action = "ReturnRequest.CancelledDirect",
+                    EntityType = nameof(ReturnRequest),
+                    EntityId = returnRequest.Id,
+                    Result = AuditLogResult.Succeeded,
+                    Details = $"Reason={reason}",
+                    OccurredAt = now
+                });
+            }
+        }
+
+        if (request.SetOutOfService)
+        {
+            compartment.OperationalStatus = LockerCompartmentOperationalStatus.OutOfService;
+            compartment.UpdatedAt = now;
+            dbContext.AuditLogs.Add(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                ActorUserId = userId,
+                Action = "Compartment.StatusUpdated",
+                EntityType = nameof(LockerCompartment),
+                EntityId = compartment.Id,
+                Result = AuditLogResult.Succeeded,
+                Details = "OperationalStatus=OutOfService; Reason=PackageAction",
+                OccurredAt = now
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        if (commissioningTransaction is not null) await commissioningTransaction.CommitAsync(cancellationToken);
+
+        return new ConfirmCompartmentPackageActionResponse(
+            compartment.Id,
+            compartment.Code,
+            action,
+            packageCode,
+            "Xử lý bưu phẩm và cập nhật ngăn tủ thành công.");
     }
 }
