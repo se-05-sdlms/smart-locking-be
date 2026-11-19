@@ -23,12 +23,17 @@ public static class EffectiveOperatorAssignmentQueries
             x.Absence.CancelledAt == null && x.Absence.StartsAt <= now && now < x.Absence.EndsAt &&
             x.BaseAssignment.RevokedAt == null && x.BaseAssignment.LockerId == x.LockerId &&
             x.BaseAssignment.OperatorUserId == x.Absence.OperatorUserId &&
-            db.SystemPolicies.Any(p => p.Id == x.PolicyId && p.IsActive && p.EffectiveFrom <= now &&
-                (p.EffectiveTo == null || now < p.EffectiveTo)) &&
-            db.Lockers.Any(l => l.Id == x.LockerId && l.LocationRevision == x.TargetLocationRevision) &&
-            db.Lockers.Any(l => l.Id == x.AnchorLockerId && l.LocationRevision == x.AnchorLocationRevision) &&
-            db.OperatorAssignments.Any(a => a.LockerId == x.AnchorLockerId && a.OperatorUserId == x.OperatorUserId &&
-                a.RevokedAt == null && a.AssignedAt <= now));
+            (
+                (x.AnchorLockerId == null || (x.SelectionFingerprint != null && x.SelectionFingerprint.StartsWith("MANUAL"))) ||
+                (
+                    db.SystemPolicies.Any(p => p.Id == x.PolicyId && p.IsActive && p.EffectiveFrom <= now &&
+                        (p.EffectiveTo == null || now < p.EffectiveTo)) &&
+                    db.Lockers.Any(l => l.Id == x.LockerId && l.LocationRevision == x.TargetLocationRevision) &&
+                    db.Lockers.Any(l => l.Id == x.AnchorLockerId && l.LocationRevision == x.AnchorLocationRevision) &&
+                    db.OperatorAssignments.Any(a => a.LockerId == x.AnchorLockerId && a.OperatorUserId == x.OperatorUserId &&
+                        a.RevokedAt == null && a.AssignedAt <= now)
+                )
+            ));
         // One projected row per original assignment avoids set-operation/client-projection ambiguity.
         var rows = db.OperatorAssignments.Where(x => x.RevokedAt == null && x.AssignedAt <= now)
             .Select(x => new EffectiveOperatorAssignment
@@ -41,6 +46,8 @@ public static class EffectiveOperatorAssignmentQueries
         return rows.Where(x => db.Users.Any(u => u.Id == x.OperatorUserId &&
             u.Status == UserStatus.Active && u.Role == UserRole.LockerOperator) &&
             !db.OperatorAbsences.Any(a => a.OperatorUserId == x.OperatorUserId && a.CancelledAt == null &&
-                a.StartsAt <= now && now < a.EndsAt));
+                a.StartsAt <= now && now < a.EndsAt &&
+                db.TemporaryOperatorAssignments.Any(t => t.AbsenceId == a.Id &&
+                    (t.Status == TemporaryAssignmentStatus.Approved || t.Status == TemporaryAssignmentStatus.Active || t.ApprovedAt != null))));
     }
 }
