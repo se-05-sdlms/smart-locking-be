@@ -69,6 +69,9 @@ public sealed class AdminForecastService(ApplicationDbContext dbContext) : IAdmi
         var projectedOccupiedByLocker = lockers.ToDictionary(
             locker => locker.Id,
             locker => activeByLocker.GetValueOrDefault(locker.Id));
+        var peakOccupiedByLocker = projectedOccupiedByLocker.ToDictionary(
+            item => item.Key,
+            item => item.Value);
 
         for (int offset = 1; offset <= horizonDays; offset++)
         {
@@ -89,6 +92,9 @@ public sealed class AdminForecastService(ApplicationDbContext dbContext) : IAdmi
                     projectedOccupiedByLocker[locker.Id] + incoming - pickedUp,
                     0,
                     capacity);
+                peakOccupiedByLocker[locker.Id] = UpdatePeak(
+                    peakOccupiedByLocker[locker.Id],
+                    projectedOccupiedByLocker[locker.Id]);
             }
 
             int totalCapacity = capacities.Values.Sum();
@@ -107,12 +113,12 @@ public sealed class AdminForecastService(ApplicationDbContext dbContext) : IAdmi
             {
                 int capacity = capacities.GetValueOrDefault(locker.Id);
                 int current = activeByLocker.GetValueOrDefault(locker.Id);
-                int forecast = projectedOccupiedByLocker.GetValueOrDefault(locker.Id);
+                int forecast = peakOccupiedByLocker.GetValueOrDefault(locker.Id);
                 int percent = Percentage(forecast, capacity);
-                string risk = percent >= CriticalRiskPercent ? "critical" : percent >= HighRiskPercent ? "high" : "normal";
+                string risk = GetRiskLevel(percent);
                 string reason = ForecastCalendar.IsDemandEventWindow(today.AddDays(1))
                     ? "Nhu cầu dự kiến tăng sau ngày sự kiện mua sắm."
-                    : "Dựa trên lượng kiện và thời gian lưu trung bình gần đây.";
+                    : "Dựa trên đỉnh sử dụng dự kiến trong kỳ và lịch sử giao nhận.";
 
                 return new LockerForecastResponse(
                     locker.Id,
@@ -165,4 +171,10 @@ public sealed class AdminForecastService(ApplicationDbContext dbContext) : IAdmi
 
     private static int Percentage(int value, int total) =>
         total > 0 ? (int)Math.Round(value * 100d / total, MidpointRounding.AwayFromZero) : 0;
+
+    internal static int UpdatePeak(int currentPeak, int projectedOccupied) =>
+        Math.Max(currentPeak, projectedOccupied);
+
+    internal static string GetRiskLevel(int occupancyPercent) =>
+        occupancyPercent >= CriticalRiskPercent ? "critical" : occupancyPercent >= HighRiskPercent ? "high" : "normal";
 }

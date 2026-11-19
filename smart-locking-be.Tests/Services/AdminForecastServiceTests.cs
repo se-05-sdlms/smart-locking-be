@@ -67,5 +67,17 @@ public sealed class AdminForecastServiceTests
         Assert.False(ForecastCalendar.IsDemandEventWindow(date));
         Assert.Equal(1.0, ForecastCalendar.GetDemandMultiplier(date));
     }
+
+    [Fact]
+    public void PeakOccupancy_RemainsRiskyAfterLaterPickup()
+    {
+        var peak = 8;
+
+        peak = AdminForecastService.UpdatePeak(peak, 10);
+        peak = AdminForecastService.UpdatePeak(peak, 7);
+
+        Assert.Equal(10, peak);
+        Assert.Equal("critical", AdminForecastService.GetRiskLevel(peak * 10));
+    }
 }
 
