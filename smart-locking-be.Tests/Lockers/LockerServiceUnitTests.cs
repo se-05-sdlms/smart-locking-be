@@ -243,8 +243,17 @@ public sealed class LockerServiceUnitTests
         var resC3 = Assert.Single(compartments, c => c.Code == "C03");
 
         Assert.True(resC1.IsOccupied);
+        Assert.NotNull(resC1.PackageInfo);
+        Assert.Equal("P-01", resC1.PackageInfo.Code);
+        Assert.Equal("Delivery", resC1.PackageInfo.Type);
+
         Assert.True(resC2.IsOccupied);
+        Assert.NotNull(resC2.PackageInfo);
+        Assert.Equal("R-01", resC2.PackageInfo.Code);
+        Assert.Equal("Return", resC2.PackageInfo.Type);
+
         Assert.False(resC3.IsOccupied);
+        Assert.Null(resC3.PackageInfo);
 
         var detail = await service.GetLockerByIdAsync(Guid.NewGuid(), nameof(UserRole.Administrator), locker.Id);
         var detailC1 = Assert.Single(detail.Compartments, c => c.Code == "C01");
@@ -252,8 +261,15 @@ public sealed class LockerServiceUnitTests
         var detailC3 = Assert.Single(detail.Compartments, c => c.Code == "C03");
 
         Assert.True(detailC1.IsOccupied);
+        Assert.NotNull(detailC1.PackageInfo);
+        Assert.Equal("P-01", detailC1.PackageInfo.Code);
+
         Assert.True(detailC2.IsOccupied);
+        Assert.NotNull(detailC2.PackageInfo);
+        Assert.Equal("R-01", detailC2.PackageInfo.Code);
+
         Assert.False(detailC3.IsOccupied);
+        Assert.Null(detailC3.PackageInfo);
     }
 
     private static LockerService Service(ApplicationDbContext db) => new(db);

@@ -142,4 +142,22 @@ public class LockersController(ILockerService lockerService) : ControllerBase
 
         return Ok(await lockerService.UpdateCompartmentStatusAsync(userId, userRole, id, compartmentId, request, cancellationToken));
     }
+
+    /// <summary>
+    /// Xác nhận đã lấy bưu phẩm ra khỏi ngăn tủ để bàn giao cho người nhận hoặc thu hồi/bảo trì.
+    /// </summary>
+    [HttpPost("{id:guid}/compartments/{compartmentId:guid}/package-action")]
+    [Authorize(Roles = "Administrator,LockerOperator")]
+    public async Task<IActionResult> ConfirmCompartmentPackageAction(
+        Guid id,
+        Guid compartmentId,
+        [FromBody] ConfirmCompartmentPackageActionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var (userId, userRole) = User.GetRequiredIdentity();
+
+        var result = await lockerService.ConfirmCompartmentPackageActionAsync(
+            userId, userRole, id, compartmentId, request, cancellationToken);
+        return Ok(result);
+    }
 }

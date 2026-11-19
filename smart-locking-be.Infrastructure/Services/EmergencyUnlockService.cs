@@ -53,6 +53,7 @@ public sealed class EmergencyUnlockService(
             ? EmergencyUnlockResult.Succeeded
             : EmergencyUnlockResult.Failed;
         entity.CompletedAt = timeProvider.GetUtcNow();
+
         dbContext.AuditLogs.Add(new AuditLog
         {
             Id = Guid.NewGuid(),
