@@ -27,4 +27,12 @@ public interface ILockerService
         UpdateCompartmentRequest request, CancellationToken cancellationToken = default);
 
     Task<LockerCompartmentResponse> UpdateCompartmentStatusAsync(Guid userId, string userRole, Guid lockerId, Guid compartmentId, UpdateCompartmentStatusRequest request, CancellationToken cancellationToken = default);
+
+    Task<ConfirmCompartmentPackageActionResponse> ConfirmCompartmentPackageActionAsync(
+        Guid userId,
+        string userRole,
+        Guid lockerId,
+        Guid compartmentId,
+        ConfirmCompartmentPackageActionRequest request,
+        CancellationToken cancellationToken = default);
 }

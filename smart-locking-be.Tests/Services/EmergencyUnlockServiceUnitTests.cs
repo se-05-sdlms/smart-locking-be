@@ -31,7 +31,7 @@ public sealed class EmergencyUnlockServiceUnitTests
     }
 
     [Fact]
-    public async Task CreateAsync_WhenPackageActionIsHandover_SetsParcelToRetrievedAndReleasesCompartment()
+    public async Task CreateAsync_SendsUnlockCommand_AndLeavesParcelUntouched()
     {
         await using var db = CreateDbContext();
         var (adminUser, locker, compartment, parcel) = await SeedLockerWithParcelAsync(db);
@@ -41,123 +41,51 @@ public sealed class EmergencyUnlockServiceUnitTests
             locker.Id,
             compartment.Id,
             null,
-            "Cư dân có mặt lấy hàng khẩn cấp",
-            "Handover"
+            "Mở kiểm tra cửa bị kẹt phần cứng"
         );
 
         var response = await service.CreateAsync(adminUser.Id, nameof(UserRole.Administrator), request);
 
         Assert.Equal(EmergencyUnlockResult.Succeeded, response.Result);
+        Assert.Equal("A01", response.CompartmentCode);
 
-        var updatedParcel = await db.Parcels.Include(p => p.DeliveryRequest).SingleAsync(p => p.Id == parcel.Id);
-        Assert.Equal(ParcelStatus.Retrieved, updatedParcel.Status);
-        Assert.NotNull(updatedParcel.RetrievedAt);
-        Assert.NotNull(updatedParcel.DeliveryRequest.CompartmentReleasedAt);
-
-        var history = await db.ParcelStatusHistories.SingleOrDefaultAsync(h => h.ParcelId == parcel.Id);
-        Assert.NotNull(history);
-        Assert.Equal(ParcelStatus.Retrieved, history.ToStatus);
-    }
-
-    [Fact]
-    public async Task CreateAsync_WhenPackageActionIsRemove_SetsParcelToRemovedAndRecordsReason()
-    {
-        await using var db = CreateDbContext();
-        var (adminUser, locker, compartment, parcel) = await SeedLockerWithParcelAsync(db);
-
-        var service = new EmergencyUnlockService(db, new FakeLockerAccessService(), TimeProvider.System);
-        var request = new EmergencyUnlockRequest(
-            locker.Id,
-            compartment.Id,
-            null,
-            "Hàng hỏng bốc mùi thu hồi về kho BQL",
-            "Remove"
-        );
-
-        var response = await service.CreateAsync(adminUser.Id, nameof(UserRole.Administrator), request);
-
-        Assert.Equal(EmergencyUnlockResult.Succeeded, response.Result);
-
-        var updatedParcel = await db.Parcels.Include(p => p.DeliveryRequest).SingleAsync(p => p.Id == parcel.Id);
-        Assert.Equal(ParcelStatus.Removed, updatedParcel.Status);
-        Assert.NotNull(updatedParcel.RemovedAt);
-        Assert.Equal(adminUser.Id, updatedParcel.RemovedByUserId);
-        Assert.Equal("Hàng hỏng bốc mùi thu hồi về kho BQL", updatedParcel.RemovalReason);
-        Assert.NotNull(updatedParcel.DeliveryRequest.CompartmentReleasedAt);
-
-        var history = await db.ParcelStatusHistories.SingleOrDefaultAsync(h => h.ParcelId == parcel.Id);
-        Assert.NotNull(history);
-        Assert.Equal(ParcelStatus.Removed, history.ToStatus);
-    }
-
-    [Fact]
-    public async Task CreateAsync_WhenPackageActionIsKeep_LeavesParcelAsStored()
-    {
-        await using var db = CreateDbContext();
-        var (adminUser, locker, compartment, parcel) = await SeedLockerWithParcelAsync(db);
-
-        var service = new EmergencyUnlockService(db, new FakeLockerAccessService(), TimeProvider.System);
-        var request = new EmergencyUnlockRequest(
-            locker.Id,
-            compartment.Id,
-            null,
-            "Chỉ kiểm tra bảo trì chốt khóa ngăn",
-            "Keep"
-        );
-
-        var response = await service.CreateAsync(adminUser.Id, nameof(UserRole.Administrator), request);
-
-        Assert.Equal(EmergencyUnlockResult.Succeeded, response.Result);
-
+        // Parcel remains Stored, no status change, no premature compartment release
         var updatedParcel = await db.Parcels.Include(p => p.DeliveryRequest).SingleAsync(p => p.Id == parcel.Id);
         Assert.Equal(ParcelStatus.Stored, updatedParcel.Status);
         Assert.Null(updatedParcel.RetrievedAt);
-        Assert.Null(updatedParcel.RemovedAt);
         Assert.Null(updatedParcel.DeliveryRequest.CompartmentReleasedAt);
+
+        // Audit log exists
+        var audit = await db.AuditLogs.SingleOrDefaultAsync(a => a.Action == "Locker.EmergencyUnlock");
+        Assert.NotNull(audit);
+        Assert.Equal(AuditLogResult.Succeeded, audit.Result);
     }
 
-    [Fact]
-    public async Task CreateAsync_WhenSetOutOfServiceIsTrue_SetsCompartmentToOutOfService()
+    private static ApplicationDbContext CreateDbContext()
     {
-        await using var db = CreateDbContext();
-        var (adminUser, locker, compartment, _) = await SeedLockerWithParcelAsync(db);
-
-        var service = new EmergencyUnlockService(db, new FakeLockerAccessService(), TimeProvider.System);
-        var request = new EmergencyUnlockRequest(
-            locker.Id,
-            compartment.Id,
-            null,
-            "Chốt cửa ngăn hỏng cần bảo trì cách ly",
-            "Keep",
-            SetOutOfService: true
-        );
-
-        var response = await service.CreateAsync(adminUser.Id, nameof(UserRole.Administrator), request);
-
-        Assert.Equal(EmergencyUnlockResult.Succeeded, response.Result);
-
-        var updatedCompartment = await db.LockerCompartments.SingleAsync(c => c.Id == compartment.Id);
-        Assert.Equal(LockerCompartmentOperationalStatus.OutOfService, updatedCompartment.OperationalStatus);
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        return new ApplicationDbContext(options);
     }
 
-    private static async Task<(User Admin, Locker Locker, LockerCompartment Compartment, Parcel Parcel)> SeedLockerWithParcelAsync(ApplicationDbContext db)
+    private static async Task<(User User, Locker Locker, LockerCompartment Compartment, Parcel Parcel)> SeedLockerWithParcelAsync(ApplicationDbContext db)
     {
-        var adminUser = new User
+        var user = new User
         {
             Id = Guid.NewGuid(),
-            PhoneNumber = "0900000001",
-            PasswordHash = "hash",
+            Email = "admin@example.com",
             Role = UserRole.Administrator,
             Status = UserStatus.Active,
             CreatedAt = Now,
             UpdatedAt = Now
         };
-        db.Users.Add(adminUser);
+        db.Users.Add(user);
 
         var locker = new Locker
         {
             Id = Guid.NewGuid(),
-            Code = "L-01",
+            Code = "LCK-01",
             Address = "123 Main St",
             DeviceIdentifier = "DEV-01",
             OperationalStatus = LockerOperationalStatus.Operational,
@@ -171,48 +99,52 @@ public sealed class EmergencyUnlockServiceUnitTests
         {
             Id = Guid.NewGuid(),
             LockerId = locker.Id,
+            Code = "A01",
+            HardwareCode = "HW-01",
             HardwareChannel = 1,
-            HardwareCode = "C-01",
-            Code = "C-01",
-            DoorStatus = DoorStatus.Closed,
             OperationalStatus = LockerCompartmentOperationalStatus.Operational,
+            DoorStatus = DoorStatus.Closed,
             CreatedAt = Now,
             UpdatedAt = Now
         };
         db.LockerCompartments.Add(compartment);
 
-        var delivery = new DeliveryRequest
+        var deliveryRequest = new DeliveryRequest
         {
             Id = Guid.NewGuid(),
             LockerId = locker.Id,
             AllocatedCompartmentId = compartment.Id,
             Status = DeliveryRequestStatus.Deposited,
-            GuestSessionTokenHash = "hash",
-            RecipientPhoneSnapshot = "0912345678",
+            AllocatedAt = Now,
             CreatedAt = Now,
             UpdatedAt = Now
         };
-        db.DeliveryRequests.Add(delivery);
+        db.DeliveryRequests.Add(deliveryRequest);
 
         var parcel = new Parcel
         {
             Id = Guid.NewGuid(),
-            DeliveryRequestId = delivery.Id,
-            ParcelCode = "P-TEST-01",
+            DeliveryRequestId = deliveryRequest.Id,
+            ParcelCode = "PKG123456",
             Status = ParcelStatus.Stored,
             StoredAt = Now,
-            PickupDueAt = Now.AddDays(2),
-            MaxStorageUntil = Now.AddDays(7),
             CreatedAt = Now,
             UpdatedAt = Now
         };
         db.Parcels.Add(parcel);
 
-        await db.SaveChangesAsync();
-        return (adminUser, locker, compartment, parcel);
-    }
+        var reservation = new CompartmentReservation
+        {
+            Id = Guid.NewGuid(),
+            LockerCompartmentId = compartment.Id,
+            DeliveryRequestId = deliveryRequest.Id,
+            ReservedAt = Now,
+            ExpiresAt = Now.AddDays(3),
+            ReleasedAt = null
+        };
+        db.CompartmentReservations.Add(reservation);
 
-    private static ApplicationDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
-        .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
-        .Options);
+        await db.SaveChangesAsync();
+        return (user, locker, compartment, parcel);
+    }
 }
