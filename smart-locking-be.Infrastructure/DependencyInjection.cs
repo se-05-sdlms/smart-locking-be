@@ -117,6 +117,7 @@ public static class DependencyInjection
         services.AddScoped<IPushNotificationService, ExpoPushNotificationService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IAdminService, AdminService>();
+        services.AddScoped<IAdminForecastService, AdminForecastService>();
 
         services.AddScoped<IReturnRequestService, ReturnRequestService>();
 
