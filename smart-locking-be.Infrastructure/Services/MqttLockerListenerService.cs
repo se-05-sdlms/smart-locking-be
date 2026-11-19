@@ -214,6 +214,7 @@ public sealed class MqttLockerListenerService(
         if (previousDoorStatus == DoorStatus.Open && doorStatus == DoorStatus.Closed)
         {
             await FinalizeActiveAccessAsync(scope.ServiceProvider, dbContext, compartment.Id, now, cancellationToken);
+            await ResolveDoorOpenAlertsAsync(scope.ServiceProvider, dbContext, locker.Id, compartment.Id, compartment.Code, now, cancellationToken);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -290,6 +291,56 @@ public sealed class MqttLockerListenerService(
                 await services.GetRequiredService<IReturnPickupSessionService>()
                     .FinalizePickupAsync(access.ReturnRequestId.Value, completedAt, cancellationToken);
                 break;
+        }
+    }
+
+    private static async Task ResolveDoorOpenAlertsAsync(
+        IServiceProvider services,
+        ApplicationDbContext dbContext,
+        Guid lockerId,
+        Guid compartmentId,
+        string compartmentCode,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        List<Incident> openAlerts = await dbContext.Incidents
+            .Where(item => item.LockerCompartmentId == compartmentId &&
+                           item.Type == "DoorOpenTooLong" &&
+                           item.Status != IncidentStatus.Resolved)
+            .ToListAsync(cancellationToken);
+
+        if (openAlerts.Count == 0) return;
+
+        var notifier = services.GetRequiredService<IOperationsRealtimeNotifier>();
+        string summary = $"Cửa ngăn {compartmentCode} đã được đóng lại an toàn.";
+
+        foreach (Incident alert in openAlerts)
+        {
+            IncidentStatus prevStatus = alert.Status;
+            alert.Status = IncidentStatus.Resolved;
+            alert.ResolvedAt = now;
+            alert.ResolutionSummary = summary;
+            alert.UpdatedAt = now;
+
+            dbContext.IncidentActions.Add(new IncidentAction
+            {
+                Id = Guid.NewGuid(),
+                IncidentId = alert.Id,
+                ActionByUserId = null,
+                ActionType = "AutoResolved",
+                FromStatus = prevStatus,
+                ToStatus = IncidentStatus.Resolved,
+                Notes = summary,
+                CreatedAt = now
+            });
+
+            RealtimeEvent statusEvent = new("IncidentUpdated", alert.Id, lockerId,
+                IncidentStatus.Resolved.ToString(), alert.Title, now);
+            await notifier.PublishToLockerAsync(lockerId, statusEvent, cancellationToken);
+            if (alert.AssignedOperatorUserId.HasValue)
+            {
+                await notifier.PublishToUserAsync(alert.AssignedOperatorUserId.Value, statusEvent, cancellationToken);
+            }
         }
     }
 
