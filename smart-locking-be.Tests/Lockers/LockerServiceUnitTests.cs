@@ -186,6 +186,76 @@ public sealed class LockerServiceUnitTests
         Assert.Equal(LockerErrorCodes.CompartmentAlreadyExists, error.ErrorCode);
     }
 
+    [Fact]
+    [Trait("Category", "LOCKER")]
+    public async Task GetCompartments_ReportsIsOccupied_WhenParcelOrReturnExists()
+    {
+        await using var db = CreateDbContext();
+        var locker = Locker("L-01", "device-01");
+        db.Lockers.Add(locker);
+        await db.SaveChangesAsync();
+        var service = Service(db);
+
+        var c1 = await service.CreateCompartmentAsync(Guid.NewGuid(), locker.Id, new CreateCompartmentRequest("C01", "HW-01", 1));
+        var c2 = await service.CreateCompartmentAsync(Guid.NewGuid(), locker.Id, new CreateCompartmentRequest("C02", "HW-02", 2));
+        var c3 = await service.CreateCompartmentAsync(Guid.NewGuid(), locker.Id, new CreateCompartmentRequest("C03", "HW-03", 3));
+
+        // Add a stored parcel in C01
+        var delivery = new DeliveryRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            AllocatedCompartmentId = c1.Id,
+            Status = DeliveryRequestStatus.Deposited,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        db.DeliveryRequests.Add(delivery);
+        db.Parcels.Add(new Parcel
+        {
+            Id = Guid.NewGuid(),
+            DeliveryRequestId = delivery.Id,
+            ParcelCode = "P-01",
+            Status = ParcelStatus.Stored,
+            StoredAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        // Add a deposited return in C02
+        db.ReturnRequests.Add(new ReturnRequest
+        {
+            Id = Guid.NewGuid(),
+            LockerId = locker.Id,
+            AllocatedCompartmentId = c2.Id,
+            ReturnCode = "R-01",
+            Status = ReturnRequestStatus.Deposited,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
+        var compartments = await service.GetCompartmentsAsync(Guid.NewGuid(), nameof(UserRole.Administrator), locker.Id);
+
+        var resC1 = Assert.Single(compartments, c => c.Code == "C01");
+        var resC2 = Assert.Single(compartments, c => c.Code == "C02");
+        var resC3 = Assert.Single(compartments, c => c.Code == "C03");
+
+        Assert.True(resC1.IsOccupied);
+        Assert.True(resC2.IsOccupied);
+        Assert.False(resC3.IsOccupied);
+
+        var detail = await service.GetLockerByIdAsync(Guid.NewGuid(), nameof(UserRole.Administrator), locker.Id);
+        var detailC1 = Assert.Single(detail.Compartments, c => c.Code == "C01");
+        var detailC2 = Assert.Single(detail.Compartments, c => c.Code == "C02");
+        var detailC3 = Assert.Single(detail.Compartments, c => c.Code == "C03");
+
+        Assert.True(detailC1.IsOccupied);
+        Assert.True(detailC2.IsOccupied);
+        Assert.False(detailC3.IsOccupied);
+    }
+
     private static LockerService Service(ApplicationDbContext db) => new(db);
 
     private static ApplicationDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
